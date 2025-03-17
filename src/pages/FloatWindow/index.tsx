@@ -16,6 +16,7 @@ import { marked } from 'marked';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import './float-window.css';
+import { useModel } from '@umijs/max';
 
 const ChatGLM_API_Key = "df2bc2f478574aa6b6b251345afafd22.PQlSVfFXZ6hv5rF1";
 
@@ -68,8 +69,74 @@ const FloatWindow: React.FC = () => {
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
 
+  // Text translations for multi-language support
+  const translations = {
+    zh: {
+      title: 'AI 对话助手(只支持单个图像)',
+      minimize: '最小化窗口',
+      clearContext: '清空上下文',
+      clearDialogRecords: '清空对话记录',
+      user: '您',
+      assistant: '助手',
+      viewLargeImage: '查看大图',
+      fileType: '类型',
+      fileSize: '大小',
+      aiThinking: 'AI正在思考...',
+      enterMessage: '输入消息或上传文件...',
+      unsupportedFormat: '不支持的文件格式',
+      fileSizeLimit: '文件大小超过5MB限制',
+      pleaseEnterContent: '请输入内容或上传文件',
+      contentCopied: '回答内容已复制到剪贴板',
+      contextCleared: '对话上下文已清空',
+      requestFailed: '请求失败',
+      processingError: '请求处理失败'
+    },
+    en: {
+      title: 'AI Assistant (Single Image Only)',
+      minimize: 'Minimize Window',
+      clearContext: 'Clear Context',
+      clearDialogRecords: 'Clear Dialog Records',
+      user: 'You',
+      assistant: 'Assistant',
+      viewLargeImage: 'View Large Image',
+      fileType: 'Type',
+      fileSize: 'Size',
+      aiThinking: 'AI is thinking...',
+      enterMessage: 'Enter message or upload a file...',
+      unsupportedFormat: 'Unsupported file format',
+      fileSizeLimit: 'File size exceeds 5MB limit',
+      pleaseEnterContent: 'Please enter content or upload a file',
+      contentCopied: 'Answer copied to clipboard',
+      contextCleared: 'Dialog context cleared',
+      requestFailed: 'Request failed',
+      processingError: 'Processing error'
+    }
+  };
+
+  // Get language from global state
+  const { initialState } = useModel('@@initialState');
+  const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
+  const t = translations[currentLang as keyof typeof translations];
+
+  // Update language when global language changes
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const handleLanguageChange = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      setCurrentLang(customEvent.detail.language);
+    };
+
+    window.addEventListener('languageChange', handleLanguageChange);
+    setCurrentLang(initialState?.language || 'zh');
+
+    message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
+
+    return () => {
+      window.removeEventListener('languageChange', handleLanguageChange);
+    };
+  }, [initialState?.language]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
@@ -162,7 +229,7 @@ const FloatWindow: React.FC = () => {
                 type: "image_url",
                 image_url: { url: file.data, detail: "high" }
               })) || []),
-            { type: "text", text: msg.content || "请分析内容" }
+            { type: "text", text: msg.content || t.pleaseEnterContent }
           ];
           return { role: 'user', content };
         } else {
@@ -185,7 +252,7 @@ const FloatWindow: React.FC = () => {
         signal: controller.signal
       });
 
-      if (!response.ok) throw new Error(`请求失败: ${response.status}`);
+      if (!response.ok) throw new Error(`${t.requestFailed}: ${response.status}`);
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -246,7 +313,7 @@ const FloatWindow: React.FC = () => {
       );
 
     } catch (error) {
-      message.error((error as Error).message || '请求处理失败');
+      message.error((error as Error).message || t.processingError);
       setMessages(prev => {
         const lastMessage = prev[prev.length - 1];
         return lastMessage?.role === 'assistant' && !lastMessage.content
@@ -264,12 +331,12 @@ const FloatWindow: React.FC = () => {
     const isValidSize = file.size < 5 * 1024 * 1024;
 
     if (!isValidType) {
-      message.error(`${file.name} 不支持的文件格式`);
+      message.error(`${file.name} ${t.unsupportedFormat}`);
       return Upload.LIST_IGNORE;
     }
 
     if (!isValidSize) {
-      message.error(`${file.name} 文件大小超过5MB限制`);
+      message.error(`${file.name} ${t.fileSizeLimit}`);
       return Upload.LIST_IGNORE;
     }
 
@@ -285,8 +352,8 @@ const FloatWindow: React.FC = () => {
           width={200}
           src={file.data}
           className="preview-image"
-          alt="上传内容预览"
-          preview={{ mask: '查看大图' }}
+          alt="Upload preview"
+          preview={{ mask: t.viewLargeImage }}
         />;
 
       case 'text':
@@ -299,22 +366,22 @@ const FloatWindow: React.FC = () => {
       case 'office':
         return <div className="office-preview">
           <h5>{file.name}</h5>
-          <p>类型: {file.type.split('/').pop()?.toUpperCase()} 文件</p>
-          <p>大小: {(file.size / 1024).toFixed(2)}KB</p>
+          <p>{t.fileType}: {file.type.split('/').pop()?.toUpperCase()} File</p>
+          <p>{t.fileSize}: {(file.size / 1024).toFixed(2)}KB</p>
         </div>;
 
       default:
         return <div className="file-info">
           <h5>{file.name}</h5>
-          <p>类型: {file.type}</p>
-          <p>大小: {(file.size / 1024).toFixed(2)}KB</p>
+          <p>{t.fileType}: {file.type}</p>
+          <p>{t.fileSize}: {(file.size / 1024).toFixed(2)}KB</p>
         </div>;
     }
   };
 
   const handleSubmit = async () => {
     if (!inputText && fileList.length === 0) {
-      message.warning('请输入内容或上传文件');
+      message.warning(t.pleaseEnterContent);
       return;
     }
 
@@ -356,7 +423,7 @@ const FloatWindow: React.FC = () => {
 
   const handleCopyMessage = (content: string) => {
     navigator.clipboard.writeText(content).then(() => {
-      message.success('回答内容已复制到剪贴板');
+      message.success(t.contentCopied);
     });
   };
 
@@ -374,7 +441,7 @@ const FloatWindow: React.FC = () => {
     setMessages([]);
     setFileList([]);
     setInputText('');
-    message.success('对话上下文已清空');
+    message.success(t.contextCleared);
   };
 
   const windowStyle: React.CSSProperties = {
@@ -396,7 +463,7 @@ const FloatWindow: React.FC = () => {
       {!isMinimized && (
         <>
           <div className="window-header" ref={headerRef}>
-            <span className="window-title">AI 对话助手(只支持单个图像)</span>
+            <span className="window-title">{t.title}</span>
             <div className="header-buttons">
               <Button
                 className="window-control-button"
@@ -407,7 +474,7 @@ const FloatWindow: React.FC = () => {
                 }}
                 type="text"
                 shape="circle"
-                title="清空上下文"
+                title={t.clearContext}
               />
               <Button
                 className="window-control-button"
@@ -418,7 +485,7 @@ const FloatWindow: React.FC = () => {
                 }}
                 type="text"
                 shape="circle"
-                title="最小化窗口"
+                title={t.minimize}
               />
             </div>
           </div>
@@ -430,7 +497,7 @@ const FloatWindow: React.FC = () => {
                 icon={<DeleteOutlined />}
                 onClick={handleClearContext}
               >
-                清空对话记录
+                {t.clearDialogRecords}
               </Button>
             </div>
           )}
@@ -443,15 +510,15 @@ const FloatWindow: React.FC = () => {
               return (
                 <div key={index} className={`message-bubble ${msg.role}`}>
                   <div className="message-header">
-                                        <span className="message-role">
-                                            {msg.role === 'user' ? '👤 您' : '🤖 助手'}
-                                        </span>
+                    <span className="message-role">
+                      {msg.role === 'user' ? `👤 ${t.user}` : `🤖 ${t.assistant}`}
+                    </span>
                     <span className="message-time">
-                                            {new Date().toLocaleTimeString([], {
-                                              hour: '2-digit',
-                                              minute: '2-digit'
-                                            })}
-                                        </span>
+                      {new Date().toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
                   </div>
 
                   {msg.files?.map((file, i) => (
@@ -486,7 +553,7 @@ const FloatWindow: React.FC = () => {
 
             {loading && (
               <Spin
-                tip="AI正在思考..."
+                tip={t.aiThinking}
                 className="loading-indicator"
                 indicator={<div className="custom-spin" />}
               />
@@ -522,7 +589,7 @@ const FloatWindow: React.FC = () => {
                 className="message-input"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="输入消息或上传文件..."
+                placeholder={t.enterMessage}
                 autoSize={{ minRows: 1, maxRows: 4 }}
                 disabled={loading}
                 onPressEnter={(e) => {
