@@ -21,6 +21,7 @@ import './Styles/Other.css';
 // 引入常量
 import { indexClassColorMap, colorList, jsonNameColorMap } from './Constants/constants';
 import { Content } from 'antd/es/layout/layout';
+import {useModel} from "@umijs/max";
 
 const { Option } = Select;
 
@@ -43,8 +44,85 @@ interface JsonInterface {
   };
 }
 
+const translations = {
+  zh: {
+    uploadFolder: '上传文件夹',
+    undo: '撤回',
+    save: '保存',
+    deleteBox: '删除框',
+    restoreDeleted: '恢复删除',
+    category: '类别',
+    previous: '上一个',
+    next: '下一个',
+    currentFile: '当前文件',
+    function: '功能',
+    allowColoring: '正在染色',
+    notAllowColoring: '不染色',
+    addProperty: '增加属性',
+    addNode: '添加节点',
+    nodeName: '节点名称',
+    key: '键',
+    value: '值',
+    delete: '删除',
+    saveCurrent: '保存当前文件',
+    saveAll: '批量保存所有文件',
+    chooseJsonName: '选择JsonName',
+    chooseJsonType: '选择Json类型',
+    noFile: '没有可保存的文件',
+    noDeletedBoxes: '没有可恢复的删除框'
+  },
+  en: {
+    uploadFolder: 'Upload Folder',
+    undo: 'Undo',
+    save: 'Save',
+    deleteBox: 'Delete Box',
+    restoreDeleted: 'Restore Deleted',
+    category: 'Category',
+    previous: 'Previous',
+    next: 'Next',
+    currentFile: 'Current File',
+    function: 'Function',
+    allowColoring: 'Coloring',
+    notAllowColoring: 'Not Coloring',
+    addProperty: 'Add Property',
+    addNode: 'Add Node',
+    nodeName: 'Node Name',
+    key: 'Key',
+    value: 'Value',
+    delete: 'Delete',
+    saveCurrent: 'Save Current',
+    saveAll: 'Save All',
+    chooseJsonName: 'Choose Json Name',
+    chooseJsonType: 'Choose Json Type',
+    noFile: 'No files to save',
+    noDeletedBoxes: 'No deleted boxes to restore for this picture'
+  }
+};
+
 
 const FileOperate: React.FC<FileOperateProps> = ({}) => {
+
+  const { initialState } = useModel('@@initialState');
+  const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
+  const t = translations[currentLang as keyof typeof translations];
+
+  // Update language when global language changes
+  useEffect(() => {
+    const handleLanguageChange = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      setCurrentLang(customEvent.detail.language);
+    };
+
+    window.addEventListener('languageChange', handleLanguageChange);
+    setCurrentLang(initialState?.language || 'zh');
+
+    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
+
+    return () => {
+      window.removeEventListener('languageChange', handleLanguageChange);
+    };
+  }, [initialState?.language]);
+
   // 定义classIndexMap对象
   const [indexClassColorMapState, setIndexClassColorMapState] = useState(indexClassColorMap);
 
@@ -590,7 +668,7 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
 
   const handleSaveYoloAndJsonListToLocal = async () => {
     if (yoloList.length === 0) {
-      message.warning('没有可保存的文件');
+      message.warning(t.noFile);
       return;
     }
 
@@ -1415,21 +1493,22 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
                       className="input-hidden-style"
                       style={{ opacity: 0, width: 0, height: 0 }} // 隐藏input元素
                   />
-                  <Button className="button-style" onClick={() => document.querySelector('input[type="file"]')?.click()}>上传文件夹</Button>                  <Button className="button-style" onClick={handleUndo}>撤回</Button>
+                  <Button className="button-style" onClick={() => document.querySelector('input[type="file"]')?.click()}>{t.uploadFolder}</Button>
+                  <Button className="button-style" onClick={handleUndo}>{t.undo}</Button>
                   <Popover
                       content={(
                           <div style={{ maxHeight: '200px', overflowY: 'scroll' }}>
-                            <Button onClick={handleSaveCurrentYoloAndJsonToLocal }>保存当前文件</Button>
-                            <Button onClick={handleSaveYoloAndJsonListToLocal}>批量保存所有文件</Button>
+                            <Button onClick={handleSaveCurrentYoloAndJsonToLocal }>{t.saveCurrent}</Button>
+                            <Button onClick={handleSaveYoloAndJsonListToLocal}>{t.saveAll}</Button>
                           </div>
                       )}
                       title="保存选项"
                       trigger="click"
                   >
-                    <Button className="button-style">保存</Button>
+                    <Button className="button-style">{t.save}</Button>
                   </Popover>
-                  <Button className="button-style" onClick={handleDeleteBox}>删除框</Button>
-                  <Button className="button-style" onClick={handleDeleteBoxUndo}>恢复删除</Button>
+                  <Button className="button-style" onClick={handleDeleteBox}>{t.deleteBox}</Button>
+                  <Button className="button-style" onClick={handleDeleteBoxUndo}>{t.restoreDeleted}</Button>
                   <Popover
                       content={(
                           <div style={{ maxHeight: '200px', overflowY: 'scroll' }}>
@@ -1464,10 +1543,10 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
                       title={`${currentClassIndex} : [ ${currentClassLabel} ${currentClassColor}]`}
                       trigger="click"
                   >
-                    <Button className="button-style">类别</Button>
+                    <Button className="button-style">{t.category}</Button>
                   </Popover>
                   <Select
-                      placeholder="选择JsonName"
+                      placeholder={t.chooseJsonName}
                       value={selectedJsonName}
                       onChange={handleJsonNameChange}
                       style={{ width: 120, marginRight: '10px' }}
@@ -1477,7 +1556,7 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
                     ))}
                   </Select>
                   <Select
-                      placeholder="选择Json类型"
+                      placeholder={t.chooseJsonType}
                       value={selectedJsonType}
                       onChange={handleJsonTypeChange}
                       style={{ width: 120 }}
@@ -1487,7 +1566,7 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
                     ))}
                   </Select>
                   <Button onClick={handleAllowClickToFillRect}>
-                    {isAllowClickToFillRect ? '正在染色' : '不染色'}
+                    {isAllowClickToFillRect ? t.allowColoring : t.notAllowColoring}
                   </Button>
                 </div>
               </Card>
@@ -1495,9 +1574,9 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
               {/* 左侧第二行：上一个/下一个按钮、文件名、inputnumber框 */}
               <Card className="card-style" style={{ width: 700 }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: 700 }}>
-                  <Button className="button-style" onClick={handlePrevIndex}>上一个</Button>
-                  <Button className="button-style" onClick={handleNextIndex}>下一个</Button>
-                  当前文件: {currentPng?.name}
+                  <Button className="button-style" onClick={handlePrevIndex}>{t.previous}</Button>
+                  <Button className="button-style" onClick={handleNextIndex}>{t.next}</Button>
+                  {t.currentFile}: {currentPng?.name}
                   <InputNumber
                       style={{
                         width: '100px',
@@ -1612,15 +1691,15 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
             <div style={{ width: '50%' }}>
               <Card className="card-style" style={{ width: 400 }}>
                 {/*global:*/}
-                功能:
+                {t.function}:
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                   <Input
-                      placeholder="节点名称"
+                      placeholder={t.nodeName}
                       value={nodeName}
                       onChange={(e) => setNodeName(e.target.value)}
                       style={{ marginBottom: '10px' }}
                   />
-                  <Button onClick={handleAddNodeProperty}>增加属性</Button>
+                  <Button onClick={handleAddNodeProperty}>{t.addProperty}</Button>
                   {nodePropertiesKeys.map((key, index) => (
                       <div key={index} style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>
                         <Input
@@ -1635,10 +1714,10 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
                             onChange={(e) => handleUpdateNodeProperty(index, 'value', e.target.value)}
                             style={{ marginRight: '10px' }}
                         />
-                        <Button onClick={() => removeNodeProperty(index)}>删除</Button>
+                        <Button onClick={() => removeNodeProperty(index)}></Button>
                       </div>
                   ))}
-                  <Button onClick={handleCreateNode} style={{ marginTop: '10px' }}>添加节点</Button>
+                  <Button onClick={handleCreateNode} style={{ marginTop: '10px' }}>{t.addNode}</Button>
                 </div>
               </Card>
             </div>

@@ -128,7 +128,7 @@ const FloatWindow: React.FC = () => {
     window.addEventListener('languageChange', handleLanguageChange);
     setCurrentLang(initialState?.language || 'zh');
 
-    message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
+    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
 
     return () => {
       window.removeEventListener('languageChange', handleLanguageChange);
