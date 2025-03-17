@@ -1,0 +1,136 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background-color: #f2f2f2;
+}
+
+.container {
+  display: flex;
+  padding: 20px;
+}
+
+.left-panel, .right-panel {
+  width: 30%;
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.center-panel {
+  flex: 1;
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.file-input, .category-select, .line-width-input {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.file-input::file-selector-button {
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  padding: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.file-input::file-selector-button:hover {
+  background-color: #0069d9;
+}
+
+.action-button {
+  width: 100%;
+  padding: 10px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.action-button.active {
+  background-color: #4caf50;
+  color: #fff;
+}
+
+.action-button.active:hover {
+  filter: brightness(90%);
+}
+
+.action-button:hover {
+  background-color: #0069d9;
+}
+
+.button-group {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.nav-button {
+  flex: 1;
+  padding: 10px;
+  background-color: #6c757d;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.nav-button:hover {
+  background-color: #5a6268;
+}
+
+.nav-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.drawing-canvas {
+  border: 2px solid #000;
+  margin-top: 20px;
+  cursor: crosshair;
+}
+
+.right-panel .box-list {
+  list-style: none;
+  padding: 0;
+}
+
+.right-panel .box-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.right-panel .color-block {
+  width: 10px;
+  height: 10px;
+  margin-right: 10px;
+}
+
+.category-select-with-color {
+  width: 100%;
+  padding: 5px;
+  font-size: 14px;
+}
+
+.category-select-with-color option {
+  height: 24px;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+}
