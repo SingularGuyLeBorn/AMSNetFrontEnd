@@ -1,8 +1,80 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./Styles/MaskOperate.css"; // 引入样式文件
 import { categoryColors } from "./Styles/constants.js"; // 引入类别颜色映射
+import { useModel } from 'umi';
+
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faUpload } from "@fortawesome/free-solid-svg-icons";
+
+// Add translations object for language support
+const translations = {
+  zh: {
+    // Left panel
+    uploadFolder: "上传文件夹",
+    folderName: "文件夹名：",
+    selectCategory: "选择类别",
+    setRectWidth: "设置矩形宽度",
+    undo: "撤回",
+    exportJSON: "导出JSON",
+    diagonalAnnotation: "斜线标注",
+    deleteMode: "删除模式",
+    noImagesUploaded: "请先上传文件夹",
+
+    // Center panel
+    previousImage: "上一张",
+    nextImage: "下一张",
+    currentImageName: "当前图片名：",
+
+    // Right panel
+    drawnBoxInfo: "已绘制框信息",
+    diagonalArea: "斜线区域"
+  },
+  en: {
+    // Left panel
+    uploadFolder: "Upload Folder",
+    folderName: "Folder Name:",
+    selectCategory: "Select Category",
+    setRectWidth: "Set Rectangle Width",
+    undo: "Undo",
+    exportJSON: "Export JSON",
+    diagonalAnnotation: "Diagonal Annotation",
+    deleteMode: "Delete Mode",
+    noImagesUploaded: "Please upload a folder first",
+
+    // Center panel
+    previousImage: "Previous",
+    nextImage: "Next",
+    currentImageName: "Current Image:",
+
+    // Right panel
+    drawnBoxInfo: "Drawn Box Information",
+    diagonalArea: "Diagonal Area"
+  }
+};
 
 const MaskOperate = () => {
+  // Add language support
+  const { initialState } = useModel('@@initialState');
+  const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
+  const t = translations[currentLang];
+
+  // Update language when global language changes
+  useEffect(() => {
+    const handleLanguageChange = (event) => {
+      const customEvent = event;
+      setCurrentLang(customEvent.detail.language);
+    };
+
+    window.addEventListener('languageChange', handleLanguageChange);
+    setCurrentLang(initialState?.language || 'zh');
+
+    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
+
+    return () => {
+      window.removeEventListener('languageChange', handleLanguageChange);
+    };
+  }, [initialState?.language]);
+
   // 状态管理
   const [folderName, setFolderName] = useState(""); // 当前文件夹名称
   const [images, setImages] = useState([]); // 图片列表
@@ -17,10 +89,16 @@ const MaskOperate = () => {
   const canvasRef = useRef(null); // Canvas引用
   const [isDeleting, setIsDeleting] = useState(false); // 是否处于删除模式
 
+  // 判断是否有图片被上传
+  const hasImages = images.length > 0;
+
   const categories = Object.keys(categoryColors);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
+      // 如果没有图片，不处理键盘事件
+      if (!hasImages) return;
+
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'w' || event.key === 's') {
         const currentIndex = categories.indexOf(currentCategory);
         if (currentIndex === -1) return; // 当前类别不在列表中，不处理
@@ -39,11 +117,11 @@ const MaskOperate = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [categories, currentCategory]);
+  }, [categories, currentCategory, hasImages]);
 
   // 当前图片和标注框数据
   const currentImage = images[currentImageIndex];
-  const currentBoxes = imageBoxes[currentImage?.name] || [];
+  const currentBoxes = currentImage ? (imageBoxes[currentImage.name] || []) : [];
 
   /**
    * 处理文件夹上传
@@ -51,6 +129,9 @@ const MaskOperate = () => {
    */
   const handleFolderUpload = (e) => {
     const files = Array.from(e.target.files);
+    // 检查是否有文件上传
+    if (files.length === 0) return;
+
     const folder = extractFolderName(files[0]?.webkitRelativePath || "");
     setFolderName(folder);
 
@@ -99,7 +180,7 @@ const MaskOperate = () => {
    */
   const sortImageFiles = (imageFiles) => {
     return imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
-      .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
+        .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
   };
 
   /**
@@ -142,6 +223,9 @@ const MaskOperate = () => {
    * @param {Event} e 点击事件
    */
   const handleCanvasClick = (e) => {
+    // 如果没有图片，不处理点击事件
+    if (!hasImages) return;
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -386,6 +470,8 @@ const MaskOperate = () => {
    */
   const drawCanvas = () => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -405,6 +491,14 @@ const MaskOperate = () => {
           }
         });
       };
+    } else {
+      // 没有图片时，绘制提示文本
+      ctx.fillStyle = "#f0f0f0";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.font = "20px Arial";
+      ctx.fillStyle = "#666";
+      ctx.textAlign = "center";
+      ctx.fillText(t.noImagesUploaded, canvas.width / 2, canvas.height / 2);
     }
   };
 
@@ -468,6 +562,8 @@ const MaskOperate = () => {
    * 撤回最后一个标注框
    */
   const handleUndo = () => {
+    if (!hasImages) return;
+
     setImageBoxes(prevBoxes => ({
       ...prevBoxes,
       [currentImage.name]: currentBoxes.slice(0, -1),
@@ -479,6 +575,8 @@ const MaskOperate = () => {
    * 导出标注框数据为JSON文件
    */
   const handleExport = () => {
+    if (!hasImages || !currentImage) return;
+
     const groupedBoxes = currentBoxes.reduce((acc, box) => {
       if (!acc[box.category]) acc[box.category] = [];
       if (box.points) {
@@ -501,8 +599,10 @@ const MaskOperate = () => {
    * 切换删除模式
    */
   const handleDeleteMode = () => {
+    if (!hasImages) return;
+
     setIsDeleting(prev => !prev);
-    if (isDeleting) {
+    if (isDrawing) {
       setIsDrawing(false);
       setIsDrawingDiagonal(false);
       setDiagonalPoints([]);
@@ -510,112 +610,155 @@ const MaskOperate = () => {
   };
 
   return (
-    <div className="container">
-      {/* 左侧控制区域 */}
-      <div className="left-panel">
-        <h3>上传文件夹</h3>
-        <input
-          type="file"
-          webkitdirectory="true"
-          multiple
-          onChange={handleFolderUpload}
-          className="file-input"
-        />
-        {folderName && <p>文件夹名：{folderName}</p>}
-        <h3>选择类别</h3>
-        <select
-          value={currentCategory}
-          onChange={e => setCurrentCategory(e.target.value)}
-          className="category-select-with-color"
-        >
-          {Object.keys(categoryColors).map(category => (
-            <option
-              key={category}
-              value={category}
-              style={{
-                background: categoryColors[category],
-                color: "white",
-                paddingLeft: "1.5em",
-              }}
+      <div className="container">
+        {/* 左侧控制区域 */}
+        <div className="left-panel">
+          <section className="upload-section">
+            <h3>{t.uploadFolder}</h3>
+            <div className="upload-button-container">
+              <button
+                  className="icon-button"
+                  onClick={() => document.querySelector('.file-input').click()}
+              >
+                <FontAwesomeIcon icon={faUpload} />
+              </button>
+              <input
+                  type="file"
+                  webkitdirectory="true"
+                  multiple
+                  onChange={handleFolderUpload}
+                  className="file-input"
+                  style={{ display: 'none' }}
+              />
+            </div>
+            {folderName && <p className="folder-name">{t.folderName} {folderName}</p>}
+          </section>
+
+          <section className="category-section">
+            <h3>{t.selectCategory}</h3>
+            <select
+                value={currentCategory}
+                onChange={e => setCurrentCategory(e.target.value)}
+                className="category-select-with-color"
+                disabled={!hasImages}
             >
-              {category}
-            </option>
-          ))}
-        </select>
-        <h3>设置矩形宽度</h3>
-        <input
-          type="number"
-          value={lineWidth}
-          onChange={e => setLineWidth(parseFloat(e.target.value))}
-          min={0.1}
-          step={0.1}
-          className="line-width-input"
-        />
-        <button onClick={handleUndo} className="action-button">撤回</button>
-        <button onClick={handleExport} className="action-button">导出JSON</button>
-        <button
-          onClick={() => setIsDrawingDiagonal(prev => !prev)}
-          className={`action-button ${isDrawingDiagonal ? 'active' : ''}`}
-        >
-          斜线标注
-        </button>
-        <button
-          onClick={handleDeleteMode}
-          className={`action-button ${isDeleting ? 'active' : ''}`}
-        >
-          删除模式
-        </button>
-      </div>
-      {/* 中间Canvas绘图区 */}
-      <div className="center-panel">
-        <div className="button-group">
-          <button
-            onClick={handlePreviousImage}
-            disabled={currentImageIndex === 0}
-            className="nav-button"
-          >
-            上一张
-          </button>
-          <button
-            onClick={handleNextImage}
-            disabled={currentImageIndex === images.length - 1}
-            className="nav-button"
-          >
-            下一张
-          </button>
+              {Object.keys(categoryColors).map(category => (
+                  <option
+                      key={category}
+                      value={category}
+                      style={{
+                        background: categoryColors[category],
+                        color: "white",
+                        paddingLeft: "1.5em",
+                      }}
+                  >
+                    {category}
+                  </option>
+              ))}
+            </select>
+          </section>
+
+          <section className="control-section">
+            <h3>{t.setRectWidth}</h3>
+            <input
+                type="number"
+                value={lineWidth}
+                onChange={e => setLineWidth(parseFloat(e.target.value))}
+                min={0.1}
+                step={0.1}
+                className="line-width-input"
+                disabled={!hasImages}
+            />
+          </section>
+
+          <section className="action-section">
+            <button
+                onClick={handleUndo}
+                className="action-button"
+                disabled={!hasImages || currentBoxes.length === 0}
+            >
+              {t.undo}
+            </button>
+            <button
+                onClick={handleExport}
+                className="action-button"
+                disabled={!hasImages || currentBoxes.length === 0}
+            >
+              {t.exportJSON}
+            </button>
+            <button
+                onClick={() => hasImages && setIsDrawingDiagonal(prev => !prev)}
+                className={`action-button ${isDrawingDiagonal ? 'active' : ''}`}
+                disabled={!hasImages}
+            >
+              {t.diagonalAnnotation}
+            </button>
+            <button
+                onClick={handleDeleteMode}
+                className={`action-button ${isDeleting ? 'active' : ''}`}
+                disabled={!hasImages}
+            >
+              {t.deleteMode}
+            </button>
+          </section>
         </div>
-        {currentImage && <p>当前图片名：{currentImage.name}</p>}
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={600}
-          className="drawing-canvas"
-          onClick={handleCanvasClick}
-        ></canvas>
-      </div>
-      {/* 右侧显示区域 */}
-      <div className="right-panel">
-        <h3>已绘制框信息</h3>
-        <ul className="box-list">
-          {currentBoxes.map((box, index) => (
-            <li key={index} className="box-item">
-              <div
-                className="color-block"
-                style={{ backgroundColor: box.color }}
-              ></div>
-              <span>
-                {box.category}:{" "}
-                {box.points ? (
-                  `斜线区域 (${box.points.map(point => `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`).join(', ')})`
-                ) : (
-                  `(${box.x.toFixed(2)}, ${box.y.toFixed(2)}) - ${box.width.toFixed(2)}x${box.height.toFixed(2)}`
-                )}
+
+        {/* 中间Canvas绘图区 */}
+        <div className="center-panel">
+          <div className="navigation-controls">
+            <button
+                onClick={handlePreviousImage}
+                disabled={!hasImages || currentImageIndex === 0}
+                className="nav-button"
+            >
+              {t.previousImage}
+            </button>
+            {currentImage && <span className="current-image">{t.currentImageName} {currentImage.name}</span>}
+            <button
+                onClick={handleNextImage}
+                disabled={!hasImages || currentImageIndex === images.length - 1}
+                className="nav-button"
+            >
+              {t.nextImage}
+            </button>
+          </div>
+
+          <canvas
+              ref={canvasRef}
+              width={800}
+              height={600}
+              className={`drawing-canvas ${!hasImages ? 'no-images' : ''}`}
+              onClick={handleCanvasClick}
+          ></canvas>
+        </div>
+
+        {/* 右侧显示区域 */}
+        <div className="right-panel">
+          <h3>{t.drawnBoxInfo}</h3>
+          {hasImages && currentBoxes.length > 0 ? (
+              <ul className="box-list">
+                {currentBoxes.map((box, index) => (
+                    <li key={index} className="box-item">
+                      <div
+                          className="color-block"
+                          style={{ backgroundColor: box.color }}
+                      ></div>
+                      <span className="box-details">
+                {box.category}: {
+                        box.points
+                            ? `${t.diagonalArea} (${box.points.map(point =>
+                                `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`).join(', ')})`
+                            : `(${box.x.toFixed(2)}, ${box.y.toFixed(2)}) - ${box.width.toFixed(2)}x${box.height.toFixed(2)}`
+                      }
               </span>
-            </li>
-          ))}
-        </ul>
+                    </li>
+                ))}
+              </ul>
+          ) : (
+              <p className="no-data">{t.noImagesUploaded}</p>
+          )}
+        </div>
       </div>
-    </div>
   );
 };
 

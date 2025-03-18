@@ -29,12 +29,12 @@ export default [
     name: 'Mask Line',
     // access: 'canUser',
   },
-  {
-    path: '/floatwindow',
-    icon: 'edit',
-    component: './FloatWindow',
-    name: 'floatwindow',
-  },
+  // {
+  //   path: '/floatwindow',
+  //   icon: 'edit',
+  //   component: './FloatWindow',
+  //   name: 'floatwindow',
+  // },
   // {
   //   path: '/admin',
   //   icon: 'crown',

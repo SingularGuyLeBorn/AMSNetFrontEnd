@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useModel } from 'umi';
 import {
   createNode, deleteNode, updateNode, findNode,
   getAllNodes,
@@ -8,10 +9,61 @@ import {
 import './Styles/customStyles.css';
 import './Styles/Button.css';
 
-import { Button, Card, Input, Layout, message, Space, Typography } from 'antd';
+import { Button, Card, Input, Layout, message, Space, Typography, Select } from 'antd';
 import Neo4jVisualization from './Components/Neo4jVisualization';
 const { Title } = Typography;
 const { Content } = Layout;
+const { Option } = Select;
+
+// 添加translations对象，定义中英文文本
+const translations = {
+  zh: {
+    createNode: '创建节点',
+    deleteNode: '删除节点',
+    updateNode: '更新节点',
+    findNode: '查询节点',
+    createRelationship: '创建关系',
+    deleteRelationship: '删除关系',
+    updateRelationship: '更新关系',
+    findRelationship: '查询关系',
+    getAllGraph: '获取整张图',
+    nodeName: '节点名称',
+    key: '键',
+    value: '值',
+    addNodeProperty: '添加节点属性',
+    removeNodeProperty: '删除',
+    addRelationshipProperty: '添加关系属性',
+    removeRelationshipProperty: '删除关系属性',
+    nodeCRUDOperations: '节点CRUD操作',
+    relationshipCRUDOperations: '关系CRUD操作',
+    nodeSuccessMessage: '节点查找成功',
+    nodeNotExistMessage: '节点不存在',
+    languageSelect: '选择语言'
+  },
+  en: {
+    createNode: 'Create Node',
+    deleteNode: 'Delete Node',
+    updateNode: 'Update Node',
+    findNode: 'Find Node',
+    createRelationship: 'Create Relationship',
+    deleteRelationship: 'Delete Relationship',
+    updateRelationship: 'Update Relationship',
+    findRelationship: 'Find Relationship',
+    getAllGraph: 'Get All Graph',
+    nodeName: 'Node Name',
+    key: 'Key',
+    value: 'Value',
+    addNodeProperty: 'Add Node Property',
+    removeNodeProperty: 'Remove',
+    addRelationshipProperty: 'Add Relationship Property',
+    removeRelationshipProperty: 'Remove Relationship Property',
+    nodeCRUDOperations: 'Node CRUD Operations',
+    relationshipCRUDOperations: 'Relationship CRUD Operations',
+    nodeSuccessMessage: 'Node found successfully',
+    nodeNotExistMessage: 'Node does not exist',
+    languageSelect: 'Select Language'
+  }
+};
 
 interface Node {
   id: string; // 确保包含节点的ID
@@ -25,6 +77,28 @@ interface Relationship {
 }
 
 const GraphOperate = () => {
+  // 使用全局语言状态
+  const { initialState } = useModel('@@initialState');
+  const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
+  const t = translations[currentLang as keyof typeof translations];
+
+  // Update language when global language changes
+  useEffect(() => {
+    const handleLanguageChange = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      setCurrentLang(customEvent.detail.language);
+    };
+
+    window.addEventListener('languageChange', handleLanguageChange);
+    setCurrentLang(initialState?.language || 'zh');
+
+    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
+
+    return () => {
+      window.removeEventListener('languageChange', handleLanguageChange);
+    };
+  }, [initialState?.language]);
+
   // 节点相关状态
   const [name, setName] = useState('');
   const [nodePropertiesKeys, setNodePropertiesKeys] = useState<string[]>([]);
@@ -172,10 +246,10 @@ const GraphOperate = () => {
     const result: Node | null = await findNode({ name });
     if (result) {
       setNodeResult(result);
-      message.success('节点查找成功');
+      message.success(t.nodeSuccessMessage);
     } else {
       setNodeResult(null);
-      message.warning('节点不存在');
+      message.warning(t.nodeNotExistMessage);
     }
   };
 
@@ -230,94 +304,121 @@ const GraphOperate = () => {
   };
 
   return (
-    <Layout>
-      <Content>
-        <Card style={{ width: 1700 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: 1700 }}>
-            {/* 左侧：节点CRUD操作 */}
-            <div style={{ width: '48%' }}>
-              <Title level={2}>节点CRUD操作A</Title>
-              <Space direction="vertical">
-                <Input
-                  placeholder="节点名称"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-                <div>
-                  {nodePropertiesKeys.map((key, index) => (
-                    <div key={index} style={{ display: 'flex', marginBottom: '5px' }}>
-                      <Input
-                        placeholder="Key"
-                        value={key}
-                        onChange={(e) => handleUpdateNodeProperty(index, e.target.value, nodePropertiesValues[index])}
-                      />
-                      <Input
-                        placeholder="Value"
-                        value={nodePropertiesValues[index]}
-                        onChange={(e) => handleUpdateNodeProperty(index, nodePropertiesKeys[index], e.target.value)}
-                      />
-                      <Button className="button-style" onClick={() => handleRemoveNodeProperty(index)}>删除</Button>
-                    </div>
-                  ))}
-                  <Button className="button-style" onClick={handleAddNodeProperty}>添加节点属性</Button>
-                </div>
-                <div>
-                  <Button className="button-style" onClick={handleCreateNode}>创建节点</Button>
-                  <Button className="button-style" onClick={handleDeleteNode}>删除节点</Button>
-                  <Button className="button-style" onClick={handleUpdateNode}>更新节点</Button>
-                  <Button className="button-style" onClick={handleFindNode}>查询节点</Button>
-                </div>
-              </Space>
+      <Layout>
+        <Content>
+          <Card style={{ width: 1700 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', width: 1700 }}>
+              {/* 左侧：节点CRUD操作 */}
+              <div style={{ width: '48%' }}>
+                <Title level={2}>{t.nodeCRUDOperations}</Title>
+                <Space direction="vertical">
+                  <Input
+                      placeholder={t.nodeName}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                  />
+                  <div>
+                    {nodePropertiesKeys.map((key, index) => (
+                        <div key={index} style={{ display: 'flex', marginBottom: '5px' }}>
+                          <Input
+                              placeholder={t.key}
+                              value={key}
+                              onChange={(e) => handleUpdateNodeProperty(index, e.target.value, nodePropertiesValues[index])}
+                          />
+                          <Input
+                              placeholder={t.value}
+                              value={nodePropertiesValues[index]}
+                              onChange={(e) => handleUpdateNodeProperty(index, nodePropertiesKeys[index], e.target.value)}
+                          />
+                          <Button className="button-style" onClick={() => handleRemoveNodeProperty(index)}>
+                            {t.removeNodeProperty}
+                          </Button>
+                        </div>
+                    ))}
+                    <Button className="button-style" onClick={handleAddNodeProperty}>
+                      {t.addNodeProperty}
+                    </Button>
+                  </div>
+                  <div>
+                    <Button className="button-style" onClick={handleCreateNode}>
+                      {t.createNode}
+                    </Button>
+                    <Button className="button-style" onClick={handleDeleteNode}>
+                      {t.deleteNode}
+                    </Button>
+                    <Button className="button-style" onClick={handleUpdateNode}>
+                      {t.updateNode}
+                    </Button>
+                    <Button className="button-style" onClick={handleFindNode}>
+                      {t.findNode}
+                    </Button>
+                  </div>
+                </Space>
+              </div>
+
+              {/* 右侧：关系CRUD操作 */}
+              <div style={{ width: '48%' }}>
+                <Title level={2}>{t.relationshipCRUDOperations}</Title>
+                <Space direction="vertical">
+                  <Input
+                      placeholder={t.nodeName}
+                      value={relationshipName}
+                      onChange={(e) => setRelationshipName(e.target.value)}
+                  />
+                  <div>
+                    {relationshipPropertiesKeys.map((key, index) => (
+                        <div key={index} style={{ display: 'flex', marginBottom: '5px' }}>
+                          <Input
+                              placeholder={t.key}
+                              value={key}
+                              onChange={(e) => handleUpdateRelationshipProperty(index, e.target.value, relationshipPropertiesValues[index])}
+                          />
+                          <Input
+                              placeholder={t.value}
+                              value={relationshipPropertiesValues[index]}
+                              onChange={(e) => handleUpdateRelationshipProperty(index, relationshipPropertiesKeys[index], e.target.value)}
+                          />
+                          <Button className="button-style" onClick={() => handleRemoveRelationshipProperty(index)}>
+                            {t.removeNodeProperty}
+                          </Button>
+                        </div>
+                    ))}
+                    <Button className="button-style" onClick={handleAddRelationshipProperty}>
+                      {t.addRelationshipProperty}
+                    </Button>
+                  </div>
+                  <div>
+                    <Button className="button-style" onClick={handleCreateRelationship}>
+                      {t.createRelationship}
+                    </Button>
+                    <Button className="button-style" onClick={handleDeleteRelationship}>
+                      {t.deleteRelationship}
+                    </Button>
+                    <Button className="button-style" onClick={handleUpdateRelationship}>
+                      {t.updateRelationship}
+                    </Button>
+                    <Button className="button-style" onClick={handleFindRelationship}>
+                      {t.findRelationship}
+                    </Button>
+                  </div>
+                </Space>
+              </div>
             </div>
 
-            {/* 右侧：关系CRUD操作 */}
-            <div style={{ width: '48%' }}>
-              <Title level={2}>关系CRUD操作</Title>
-              <Space direction="vertical">
-                <Input
-                  placeholder="关系名称"
-                  value={relationshipName}
-                  onChange={(e) => setRelationshipName(e.target.value)}
-                />
-                <div>
-                  {relationshipPropertiesKeys.map((key, index) => (
-                    <div key={index} style={{ display: 'flex', marginBottom: '5px' }}>
-                      <Input
-                        placeholder="Key"
-                        value={key}
-                        onChange={(e) => handleUpdateRelationshipProperty(index, e.target.value, relationshipPropertiesValues[index])}
-                      />
-                      <Input
-                        placeholder="Value"
-                        value={relationshipPropertiesValues[index]}
-                        onChange={(e) => handleUpdateRelationshipProperty(index, relationshipPropertiesKeys[index], e.target.value)}
-                      />
-                    </div>
-                  ))}
-                  <Button className="button-style" onClick={handleAddRelationshipProperty}>添加关系属性</Button>
-                </div>
-                <div>
-                  <Button className="button-style" onClick={handleCreateRelationship}>创建关系</Button>
-                  <Button className="button-style" onClick={handleDeleteRelationship}>删除关系</Button>
-                  <Button className="button-style" onClick={handleUpdateRelationship}>更新关系</Button>
-                  <Button className="button-style" onClick={handleFindRelationship}>查询关系</Button>
-                </div>
-              </Space>
+            {/* 下半部分：获取整张图的按钮 */}
+            <div style={{ marginTop: '20px', textAlign: 'center' }}>
+              <Button className="button-style" onClick={handleGetAllGraph}>
+                {t.getAllGraph}
+              </Button>
             </div>
-          </div>
+          </Card>
 
-          {/* 下半部分：获取整张图的按钮 */}
-          <div style={{ marginTop: '20px', textAlign: 'center' }}>
-            <Button className="button-style" onClick={handleGetAllGraph}>获取整张图</Button>
+          {/* 第二行：可视化组件 */}
+          <div style={{ marginTop: '20px' }}>
+            <Neo4jVisualization nodes={allNodes} relationships={allRelationships} />
           </div>
-        </Card>
-
-        {/* 第二行：可视化组件 */}
-        <div style={{ marginTop: '20px' }}>
-          <Neo4jVisualization nodes={allNodes} relationships={allRelationships} />
-        </div>
-      </Content>
-    </Layout>
+        </Content>
+      </Layout>
   );
 };
 

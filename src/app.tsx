@@ -22,8 +22,8 @@ export interface InitialState {
  * @see  https://umijs.org/zh-CN/plugins/plugin-initial-state
  * */
 export async function getInitialState(): Promise<InitialState> {
-  // Get saved language from localStorage or default to 'zh'
-  const savedLanguage = localStorage.getItem('language') || 'zh';
+  // Get saved language from localStorage or default to 'en'
+  const savedLanguage = localStorage.getItem('language') || 'en';
 
   const initialState: InitialState = {
     currentUser: undefined,
@@ -46,7 +46,7 @@ export async function getInitialState(): Promise<InitialState> {
 // Language switcher component with fixed positioning
 const LanguageSwitcher: React.FC = () => {
   const { initialState, setInitialState } = useModel('@@initialState');
-  const currentLanguage = initialState?.language || 'zh';
+  const currentLanguage = initialState?.language || 'en'; // Default to English
 
   const toggleLanguage = () => {
     const newLanguage = currentLanguage === 'zh' ? 'en' : 'zh';
@@ -61,25 +61,25 @@ const LanguageSwitcher: React.FC = () => {
 
     // Dispatch a custom event that child components can listen for
     window.dispatchEvent(
-      new CustomEvent('languageChange', { detail: { language: newLanguage } })
+        new CustomEvent('languageChange', { detail: { language: newLanguage } })
     );
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: '12px',
-      right: '135px',
-      zIndex: 1000,
-    }}>
-      <Button
-        type="primary"
-        icon={<GlobalOutlined />}
-        onClick={toggleLanguage}
-      >
-        {currentLanguage === 'zh' ? 'EN' : '中文'}
-      </Button>
-    </div>
+      <div style={{
+        position: 'fixed',
+        top: '12px',
+        right: '135px',
+        zIndex: 1000,
+      }}>
+        <Button
+            type="primary"
+            icon={<GlobalOutlined />}
+            onClick={toggleLanguage}
+        >
+          {currentLanguage === 'zh' ? '中文' : 'EN'}
+        </Button>
+      </div>
   );
 };
 
@@ -103,16 +103,16 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
 
     // 核心修改点：通过 childrenRender 注入悬浮窗和语言切换按钮
     childrenRender: (children) => (
-      <>
-        {/* 主内容区域 */}
-        {children}
+        <>
+          {/* 主内容区域 */}
+          {children}
 
-        {/* 全局悬浮窗（固定在右下角） */}
-        <FloatWindow />
+          {/* 全局悬浮窗（固定在右下角） */}
+          <FloatWindow />
 
-        {/* 语言切换按钮（固定在右上角） */}
-        <LanguageSwitcher />
-      </>
+          {/* 语言切换按钮（固定在右上角） */}
+          <LanguageSwitcher />
+        </>
     )
   };
 };
@@ -128,7 +128,7 @@ export const request = requestConfig;
 window.appLanguage = {
   // 获取当前语言
   getCurrentLanguage: () => {
-    return localStorage.getItem('language') || 'zh';
+    return localStorage.getItem('language') || 'en';
   },
 
   // 订阅语言变化
@@ -154,4 +154,3 @@ declare global {
     };
   }
 }
-
