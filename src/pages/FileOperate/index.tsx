@@ -13,15 +13,19 @@ import {
 } from '@/pages/GraphOperate/Components/apiFunctions';
 // 引入CSS文件lt
 
-import './Styles/Textarea.css';
-import './Styles/Canvas.css';
-import './Styles/Button.css';
-import './Styles/Other.css';
+// import './Styles/Textarea.css';
+// import './Styles/Canvas.css';
+// import './Styles/Button.css';
+// import './Styles/Other.css';
+
+import './Styles/FileOperate.css';
 
 // 引入常量
 import { indexClassColorMap, colorList, jsonNameColorMap } from './Constants/constants';
 import { Content } from 'antd/es/layout/layout';
 import {useModel} from "@umijs/max";
+import {FontAwesomeIcon} from "@fortawesome/react-fontawesome";
+import {faUpload} from "@fortawesome/free-solid-svg-icons";
 
 const { Option } = Select;
 
@@ -82,8 +86,8 @@ const translations = {
     next: 'Next',
     currentFile: 'Current File',
     function: 'Function',
-    allowColoring: 'Coloring',
-    notAllowColoring: 'Not Coloring',
+    allowColoring: 'Setting',
+    notAllowColoring: 'Not Setting',
     addProperty: 'Add Property',
     addNode: 'Add Node',
     nodeName: 'Node Name',
@@ -1475,255 +1479,210 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
   // endregion
   // @ts-ignore
   return (
-      <Layout>
-        <Content>
-          {/*整体的大Card*/}
-          <Card className="card-style" style={{ width: '100%', display: 'flex', justifyContent: 'space-between' }}>
-            {/* 左侧：文件标注部分 */}
-            <div style={{ width: '70%' }}>
-              {/* 左侧第一行：上传按钮、上一个按钮、下一个按钮 */}
-              <Card className="card-style" style={{ width: 900 }}>
-                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: 700 }}>
-                  <input
-                      type="file"
-                      webkitdirectory=""
-                      directory=""
-                      multiple
-                      onChange={handleFolderUpload}
-                      className="input-hidden-style"
-                      style={{ opacity: 0, width: 0, height: 0 }} // 隐藏input元素
-                  />
-                  <Button className="button-style" onClick={() => document.querySelector('input[type="file"]')?.click()}>{t.uploadFolder}</Button>
-                  <Button className="button-style" onClick={handleUndo}>{t.undo}</Button>
-                  <Popover
-                      content={(
-                          <div style={{ maxHeight: '200px', overflowY: 'scroll' }}>
-                            <Button onClick={handleSaveCurrentYoloAndJsonToLocal }>{t.saveCurrent}</Button>
-                            <Button onClick={handleSaveYoloAndJsonListToLocal}>{t.saveAll}</Button>
-                          </div>
-                      )}
-                      title="保存选项"
-                      trigger="click"
-                  >
-                    <Button className="button-style">{t.save}</Button>
-                  </Popover>
-                  <Button className="button-style" onClick={handleDeleteBox}>{t.deleteBox}</Button>
-                  <Button className="button-style" onClick={handleDeleteBoxUndo}>{t.restoreDeleted}</Button>
-                  <Popover
-                      content={(
-                          <div style={{ maxHeight: '200px', overflowY: 'scroll' }}>
-                            {Object.keys(indexClassColorMapState).map((classIndex) => {
-                              const { color, label } = indexClassColorMapState[classIndex];
-                              return (
-                                  <Button
-                                      key={classIndex}
-                                      onClick={() => selectCurrentClassByIndex(parseInt(classIndex))}
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        backgroundColor: color === currentClassColor ? 'lightgray' : 'transparent',
-                                        color: color === currentClassColor ? 'black' : 'inherit',
-                                      }}
-                                  >
-                                    <div
-                                        style={{
-                                          width: '20px',
-                                          height: '20px',
-                                          backgroundColor: color,
-                                          marginRight: '5px',
-                                          borderRadius: '50%',
-                                        }}
-                                    ></div>
-                                    {`Index: ${classIndex}, Class: ${label}, Color: ${color}`}
-                                  </Button>
-                              );
-                            })}
-                          </div>
-                      )}
-                      title={`${currentClassIndex} : [ ${currentClassLabel} ${currentClassColor}]`}
-                      trigger="click"
-                  >
-                    <Button className="button-style">{t.category}</Button>
-                  </Popover>
-                  <Select
-                      placeholder={t.chooseJsonName}
-                      value={selectedJsonName}
-                      onChange={handleJsonNameChange}
-                      style={{ width: 120, marginRight: '10px' }}
-                  >
-                    {jsonNames.map((name) => (
-                        <Option key={name} value={name}>{name}</Option>
-                    ))}
-                  </Select>
-                  <Select
-                      placeholder={t.chooseJsonType}
-                      value={selectedJsonType}
-                      onChange={handleJsonTypeChange}
-                      style={{ width: 120 }}
-                  >
-                    {jsonTypes.map((type) => (
-                        <Option key={type} value={type}>{type}</Option>
-                    ))}
-                  </Select>
-                  <Button onClick={handleAllowClickToFillRect}>
-                    {isAllowClickToFillRect ? t.allowColoring : t.notAllowColoring}
-                  </Button>
-                </div>
-              </Card>
-
-              {/* 左侧第二行：上一个/下一个按钮、文件名、inputnumber框 */}
-              <Card className="card-style" style={{ width: 700 }}>
-                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: 700 }}>
-                  <Button className="button-style" onClick={handlePrevIndex}>{t.previous}</Button>
-                  <Button className="button-style" onClick={handleNextIndex}>{t.next}</Button>
-                  {t.currentFile}: {currentPng?.name}
-                  <InputNumber
-                      style={{
-                        width: '100px',
-                        marginLeft: '10px',
-                        marginRight: '10px',
-                        textAlign: 'center',
-                        border: '1px solid #ccc',
-                      }}
-                      value={currentIndex + 1}
-                      onChange={(value) => {
-                        const newIndex = parseInt(value);
-                        if (!isNaN(newIndex) && newIndex >= 0 && newIndex <= pngList.length) {
-                          setCurrentIndex(newIndex - 1);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Delete' || e.key === 'Backspace') {
-                          e.preventDefault();
-                          setCurrentIndex(0);
-                        }
-                      }}
-                      min={0}
-                      max={pngList.length}
-                      step={1}
-                      parser={(value) => parseInt(value)}
-                      style={{ width: '50px' }}
-                  />
-                  <span style={{ marginLeft: '10px', marginRight: '10px' }}>/ {yoloList.length}</span>
-                  {/* 展示当前选择的index class color，从左至右依次是颜色块 index class color */}
-                  {currentClassColor && (
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <div
+    <Layout className="layout-container">
+      {/* 上半部分 */}
+      <div className="upper-section">
+        {/* 左侧 */}
+        <div className="left-upper">
+          {/* 功能按钮 */}
+          <Card className="card-style">
+            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+              <input
+                type="file"
+                webkitdirectory=""
+                directory=""
+                multiple
+                onChange={handleFolderUpload}
+                className="input-hidden-style"
+                style={{ display: 'none' }}
+              />
+              <Button className="button-style" onClick={() => document.querySelector('input[type="file"]')?.click()}><FontAwesomeIcon icon={faUpload} /> {t.uploadFolder}</Button>
+              <Button className="button-style" onClick={handleUndo}>{t.undo}</Button>
+              <Popover
+                content={(
+                  <div style={{ maxHeight: '200px', overflowY: 'scroll' }}>
+                    <Button onClick={handleSaveCurrentYoloAndJsonToLocal}>{t.saveCurrent}</Button>
+                    <Button onClick={handleSaveYoloAndJsonListToLocal}>{t.saveAll}</Button>
+                  </div>
+                )}
+                title="保存选项"
+                trigger="click"
+              >
+                <Button className="button-style">{t.save}</Button>
+              </Popover>
+              <Button className="button-style" onClick={handleDeleteBox}>{t.deleteBox}</Button>
+              <Button className="button-style" onClick={handleDeleteBoxUndo}>{t.restoreDeleted}</Button>
+              <Popover
+                content={(
+                  <div style={{ maxHeight: '200px', overflowY: 'scroll' }}>
+                    {Object.keys(indexClassColorMapState).map((classIndex) => {
+                      const { color, label } = indexClassColorMapState[classIndex];
+                      return (
+                        <Button
+                          key={classIndex}
+                          onClick={() => selectCurrentClassByIndex(parseInt(classIndex))}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            backgroundColor: color === currentClassColor ? 'lightgray' : 'transparent',
+                            color: color === currentClassColor ? 'black' : 'inherit',
+                          }}
+                        >
+                          <div
                             style={{
                               width: '20px',
                               height: '20px',
-                              backgroundColor: currentClassColor,
+                              backgroundColor: color,
                               marginRight: '5px',
                               borderRadius: '50%',
                             }}
-                        ></div>
-                        <span>Index: {currentClassIndex}, Class: {currentClassLabel}, Color: {currentClassColor}</span>
-                      </div>
-                  )}
-                </div>
-              </Card>
-
-              {/* 左侧第三行：canvas画布和textarea */}
-              <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: 1500 }}>
-                <canvas
-                    ref={canvasRef}
-                    className="canvas-element"
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={throttledHandleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onClick={handleJsonBoxClick}
-                />
-                <textarea  // 用于显示带有行号的currentYoloContent
-                    ref={textareaRef}
-                    value={addRectNameToYoloContent(currentYoloContent)}
-                    className="custom-textarea"
-                    style={{ width: '300px', height: '150px', resize: 'both' }}
-                />
-              </div>
-              {/*<div>*/}
-              {/*  <div>{`Class: ${currentClassLabelToShow} `}</div>*/}
-              {/*</div>*/}
-              {/* 解析后的 JSON 内容显示在右侧 */}
-              {/*<Card>*/}
-              {/*<div style={{ width: 600, marginTop: '20px', maxHeight: '300px', overflowY: 'auto' }}>*/}
-              {/*  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>*/}
-              {/*    <Typography.Title level={4}>local: </Typography.Title>*/}
-              {/*    {parsedJsonContent && (*/}
-              {/*        <Row gutter={16}>*/}
-              {/*          <Col span={12}>*/}
-              {/*            <Typography.Text strong>buildingBlocks:</Typography.Text>*/}
-              {/*            <ul>*/}
-              {/*              {Object.entries(parsedJsonContent.local.buildingBlocks).map(([name, values]) => (*/}
-              {/*                  <li key={name}>*/}
-              {/*                    <Typography.Text>{name}:</Typography.Text>*/}
-              {/*                    <ul>*/}
-              {/*                      {values.map((value, index) => (*/}
-              {/*                          <li key={index}>{value}</li>*/}
-              {/*                      ))}*/}
-              {/*                    </ul>*/}
-              {/*                  </li>*/}
-              {/*              ))}*/}
-              {/*            </ul>*/}
-              {/*          </Col>*/}
-              {/*          <Col span={12}>*/}
-              {/*            <Typography.Text strong>constants:</Typography.Text>*/}
-              {/*            <ul>*/}
-              {/*              {Object.entries(parsedJsonContent.local.constants).map(([name, values]) => (*/}
-              {/*                  <li key={name}>*/}
-              {/*                    <Typography.Text>{name}:</Typography.Text>*/}
-              {/*                    <ul>*/}
-              {/*                      {values.map((value, index) => (*/}
-              {/*                          <li key={index}>{value}</li>*/}
-              {/*                      ))}*/}
-              {/*                    </ul>*/}
-              {/*                  </li>*/}
-              {/*              ))}*/}
-              {/*            </ul>*/}
-              {/*          </Col>*/}
-              {/*        </Row>*/}
-              {/*    )}*/}
-              {/*  </div>*/}
-              {/*</div>*/}
-              {/*</Card>*/}
-            </div>
-
-            {/* 右侧：增加节点/属性部分 */}
-            <div style={{ width: '50%' }}>
-              <Card className="card-style" style={{ width: 400 }}>
-                {/*global:*/}
-                {t.function}:
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                  <Input
-                      placeholder={t.nodeName}
-                      value={nodeName}
-                      onChange={(e) => setNodeName(e.target.value)}
-                      style={{ marginBottom: '10px' }}
-                  />
-                  <Button onClick={handleAddNodeProperty}>{t.addProperty}</Button>
-                  {nodePropertiesKeys.map((key, index) => (
-                      <div key={index} style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>
-                        <Input
-                            placeholder="Key"
-                            value={key}
-                            onChange={(e) => handleUpdateNodeProperty(index, 'key', e.target.value)}
-                            style={{ marginRight: '10px' }}
-                        />
-                        <Input
-                            placeholder="Value"
-                            value={nodePropertiesValues[index]}
-                            onChange={(e) => handleUpdateNodeProperty(index, 'value', e.target.value)}
-                            style={{ marginRight: '10px' }}
-                        />
-                        <Button onClick={() => removeNodeProperty(index)}></Button>
-                      </div>
-                  ))}
-                  <Button onClick={handleCreateNode} style={{ marginTop: '10px' }}>{t.addNode}</Button>
-                </div>
-              </Card>
+                          ></div>
+                          {`Index: ${classIndex}, Class: ${label}, Color: ${color}`}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                )}
+                title={`${currentClassIndex} : [ ${currentClassLabel} ${currentClassColor}]`}
+                trigger="click"
+              >
+                <Button className="button-style">{t.category}</Button>
+              </Popover>
+              <Select
+                placeholder={t.chooseJsonName}
+                value={selectedJsonName}
+                onChange={handleJsonNameChange}
+                style={{ width: 120, marginRight: '10px' }}
+              >
+                {jsonNames.map((name) => (
+                  <Option key={name} value={name}>{name}</Option>
+                ))}
+              </Select>
+              <Select
+                placeholder={t.chooseJsonType}
+                value={selectedJsonType}
+                onChange={handleJsonTypeChange}
+                style={{ width: 120 }}
+              >
+                {jsonTypes.map((type) => (
+                  <Option key={type} value={type}>{type}</Option>
+                ))}
+              </Select>
+              <Button onClick={handleAllowClickToFillRect}>
+                {isAllowClickToFillRect ? t.allowColoring : t.notAllowColoring}
+              </Button>
             </div>
           </Card>
-        </Content>
-      </Layout>
+          {/* Previous, Next 等 */}
+          <Card className="card-style">
+            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+              <Button className="button-style" onClick={handlePrevIndex}>{t.previous}</Button>
+              <Button className="button-style" onClick={handleNextIndex}>{t.next}</Button>
+              {t.currentFile}: {currentPng?.name}
+              <InputNumber
+                style={{
+                  width: '100px',
+                  marginLeft: '10px',
+                  marginRight: '10px',
+                  textAlign: 'center',
+                  border: '1px solid #ccc',
+                }}
+                value={currentIndex + 1}
+                onChange={(value) => {
+                  const newIndex = parseInt(value);
+                  if (!isNaN(newIndex) && newIndex >= 0 && newIndex <= pngList.length) {
+                    setCurrentIndex(newIndex - 1);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault();
+                    setCurrentIndex(0);
+                  }
+                }}
+                min={0}
+                max={pngList.length}
+                step={1}
+                parser={(value) => parseInt(value)}
+                style={{ width: '50px' }}
+              />
+              <span style={{ marginLeft: '10px', marginRight: '10px' }}>/ {yoloList.length}</span>
+              {currentClassColor && (
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      width: '20px',
+                      height: '20px',
+                      backgroundColor: currentClassColor,
+                      marginRight: '5px',
+                      borderRadius: '50%',
+                    }}
+                  ></div>
+                  <span>Index: {currentClassIndex}, Class: {currentClassLabel}, Color: {currentClassColor}</span>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+        {/* 右侧 */}
+        <div className="right-upper">
+          <Card className="function-card">
+            {t.function}:
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <Input
+                placeholder={t.nodeName}
+                value={nodeName}
+                onChange={(e) => setNodeName(e.target.value)}
+                style={{ marginBottom: '10px' }}
+              />
+              <Button onClick={handleAddNodeProperty}>{t.addProperty}</Button>
+              {nodePropertiesKeys.map((key, index) => (
+                <div key={index} style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>
+                  <Input
+                    placeholder="Key"
+                    value={key}
+                    onChange={(e) => handleUpdateNodeProperty(index, 'key', e.target.value)}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <Input
+                    placeholder="Value"
+                    value={nodePropertiesValues[index]}
+                    onChange={(e) => handleUpdateNodeProperty(index, 'value', e.target.value)}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <Button onClick={() => removeNodeProperty(index)}></Button>
+                </div>
+              ))}
+              <Button onClick={handleCreateNode} style={{ marginTop: '10px' }}>{t.addNode}</Button>
+            </div>
+          </Card>
+        </div>
+      </div>
+      {/* 下半部分 */}
+      <div className="lower-section">
+        <div className="left-lower">
+          <div className="canvas-container">
+            <canvas
+              ref={canvasRef}
+              className="canvas-element"
+              onMouseDown={handleMouseDown}
+              onMouseMove={throttledHandleMouseMove}
+              onMouseUp={handleMouseUp}
+              onClick={handleJsonBoxClick}
+            />
+          </div>
+        </div>
+        <div className="right-lower">
+          <div className="textarea-container">
+            <textarea
+              ref={textareaRef}
+              value={addRectNameToYoloContent(currentYoloContent)}
+              className="custom-textarea"
+            />
+          </div>
+        </div>
+      </div>
+    </Layout>
   );
 };
 

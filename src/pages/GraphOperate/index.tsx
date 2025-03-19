@@ -9,6 +9,9 @@ import {
 import './Styles/customStyles.css';
 import './Styles/Button.css';
 
+import { DeleteOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
+
+
 import { Button, Card, Input, Layout, message, Space, Typography, Select } from 'antd';
 import Neo4jVisualization from './Components/Neo4jVisualization';
 const { Title } = Typography;
@@ -304,121 +307,162 @@ const GraphOperate = () => {
   };
 
   return (
-      <Layout>
-        <Content>
-          <Card style={{ width: 1700 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', width: 1700 }}>
-              {/* 左侧：节点CRUD操作 */}
-              <div style={{ width: '48%' }}>
-                <Title level={2}>{t.nodeCRUDOperations}</Title>
-                <Space direction="vertical">
-                  <Input
-                      placeholder={t.nodeName}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                  />
-                  <div>
-                    {nodePropertiesKeys.map((key, index) => (
-                        <div key={index} style={{ display: 'flex', marginBottom: '5px' }}>
-                          <Input
-                              placeholder={t.key}
-                              value={key}
-                              onChange={(e) => handleUpdateNodeProperty(index, e.target.value, nodePropertiesValues[index])}
-                          />
-                          <Input
-                              placeholder={t.value}
-                              value={nodePropertiesValues[index]}
-                              onChange={(e) => handleUpdateNodeProperty(index, nodePropertiesKeys[index], e.target.value)}
-                          />
-                          <Button className="button-style" onClick={() => handleRemoveNodeProperty(index)}>
-                            {t.removeNodeProperty}
-                          </Button>
-                        </div>
-                    ))}
-                    <Button className="button-style" onClick={handleAddNodeProperty}>
-                      {t.addNodeProperty}
-                    </Button>
-                  </div>
-                  <div>
-                    <Button className="button-style" onClick={handleCreateNode}>
-                      {t.createNode}
-                    </Button>
-                    <Button className="button-style" onClick={handleDeleteNode}>
-                      {t.deleteNode}
-                    </Button>
-                    <Button className="button-style" onClick={handleUpdateNode}>
-                      {t.updateNode}
-                    </Button>
-                    <Button className="button-style" onClick={handleFindNode}>
-                      {t.findNode}
-                    </Button>
-                  </div>
-                </Space>
+    <Layout className="graph-container">
+      <Content>
+        {/* Main Card containing all UI elements */}
+        <Card className="graph-card">
+          {/* Node and Relationship Panels Container */}
+          <div className="panels-container">
+            {/* Left Panel: Node Operations */}
+            <div className="panel">
+              <h2 className="panel-title">{t.nodeCRUDOperations}</h2>
+
+              {/* Node Name Input */}
+              <div className="property-group">
+                <Input
+                  className="text-input"
+                  placeholder={t.nodeName}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  prefix={<span style={{ color: '#1a73e8', marginRight: '8px' }}>N</span>}
+                />
               </div>
 
-              {/* 右侧：关系CRUD操作 */}
-              <div style={{ width: '48%' }}>
-                <Title level={2}>{t.relationshipCRUDOperations}</Title>
-                <Space direction="vertical">
-                  <Input
-                      placeholder={t.nodeName}
-                      value={relationshipName}
-                      onChange={(e) => setRelationshipName(e.target.value)}
-                  />
-                  <div>
-                    {relationshipPropertiesKeys.map((key, index) => (
-                        <div key={index} style={{ display: 'flex', marginBottom: '5px' }}>
-                          <Input
-                              placeholder={t.key}
-                              value={key}
-                              onChange={(e) => handleUpdateRelationshipProperty(index, e.target.value, relationshipPropertiesValues[index])}
-                          />
-                          <Input
-                              placeholder={t.value}
-                              value={relationshipPropertiesValues[index]}
-                              onChange={(e) => handleUpdateRelationshipProperty(index, relationshipPropertiesKeys[index], e.target.value)}
-                          />
-                          <Button className="button-style" onClick={() => handleRemoveRelationshipProperty(index)}>
-                            {t.removeNodeProperty}
-                          </Button>
-                        </div>
-                    ))}
-                    <Button className="button-style" onClick={handleAddRelationshipProperty}>
-                      {t.addRelationshipProperty}
-                    </Button>
+              {/* Node Properties */}
+              <div className="property-group">
+                {nodePropertiesKeys.map((key, index) => (
+                  <div key={index} className="input-row">
+                    <Input
+                      className="text-input"
+                      placeholder={t.key}
+                      value={key}
+                      onChange={(e) => handleUpdateNodeProperty(index, e.target.value, nodePropertiesValues[index])}
+                    />
+                    <Input
+                      className="text-input"
+                      placeholder={t.value}
+                      value={nodePropertiesValues[index]}
+                      onChange={(e) => handleUpdateNodeProperty(index, nodePropertiesKeys[index], e.target.value)}
+                    />
+                    <Button
+                      className="button button-danger"
+                      onClick={() => handleRemoveNodeProperty(index)}
+                      icon={<span>✕</span>}
+                    />
                   </div>
-                  <div>
-                    <Button className="button-style" onClick={handleCreateRelationship}>
-                      {t.createRelationship}
-                    </Button>
-                    <Button className="button-style" onClick={handleDeleteRelationship}>
-                      {t.deleteRelationship}
-                    </Button>
-                    <Button className="button-style" onClick={handleUpdateRelationship}>
-                      {t.updateRelationship}
-                    </Button>
-                    <Button className="button-style" onClick={handleFindRelationship}>
-                      {t.findRelationship}
-                    </Button>
-                  </div>
-                </Space>
+                ))}
+
+                {/* Add Node Property Button */}
+                <Button
+                  className="button button-secondary"
+                  onClick={handleAddNodeProperty}
+                  icon={<span>+</span>}
+                >
+                  {t.addNodeProperty}
+                </Button>
+              </div>
+
+              {/* Node Action Buttons */}
+              <div className="action-group">
+                <Button className="button button-primary" onClick={handleCreateNode}>
+                  {t.createNode}
+                </Button>
+                <Button className="button button-action" onClick={handleFindNode}>
+                  {t.findNode}
+                </Button>
+                <Button className="button button-action" onClick={handleUpdateNode}>
+                  {t.updateNode}
+                </Button>
+                <Button className="button button-danger" onClick={handleDeleteNode}>
+                  {t.deleteNode}
+                </Button>
               </div>
             </div>
 
-            {/* 下半部分：获取整张图的按钮 */}
-            <div style={{ marginTop: '20px', textAlign: 'center' }}>
-              <Button className="button-style" onClick={handleGetAllGraph}>
-                {t.getAllGraph}
-              </Button>
-            </div>
-          </Card>
+            {/* Right Panel: Relationship Operations */}
+            <div className="panel">
+              <h2 className="panel-title">{t.relationshipCRUDOperations}</h2>
 
-          {/* 第二行：可视化组件 */}
-          <div style={{ marginTop: '20px' }}>
-            <Neo4jVisualization nodes={allNodes} relationships={allRelationships} />
+              {/* Relationship Name Input */}
+              <div className="property-group">
+                <Input
+                  className="text-input"
+                  placeholder={t.nodeName}
+                  value={relationshipName}
+                  onChange={(e) => setRelationshipName(e.target.value)}
+                  prefix={<span style={{ color: '#34a853', marginRight: '8px' }}>R</span>}
+                />
+              </div>
+
+              {/* Relationship Properties */}
+              <div className="property-group">
+                {relationshipPropertiesKeys.map((key, index) => (
+                  <div key={index} className="input-row">
+                    <Input
+                      className="text-input"
+                      placeholder={t.key}
+                      value={key}
+                      onChange={(e) => handleUpdateRelationshipProperty(index, e.target.value, relationshipPropertiesValues[index])}
+                    />
+                    <Input
+                      className="text-input"
+                      placeholder={t.value}
+                      value={relationshipPropertiesValues[index]}
+                      onChange={(e) => handleUpdateRelationshipProperty(index, relationshipPropertiesKeys[index], e.target.value)}
+                    />
+                    <Button
+                      className="button button-danger"
+                      onClick={() => handleRemoveRelationshipProperty(index)}
+                      icon={<span>✕</span>}
+                    />
+                  </div>
+                ))}
+
+                {/* Add Relationship Property Button */}
+                <Button
+                  className="button button-secondary"
+                  onClick={handleAddRelationshipProperty}
+                  icon={<span>+</span>}
+                >
+                  {t.addRelationshipProperty}
+                </Button>
+              </div>
+
+              {/* Relationship Action Buttons */}
+              <div className="action-group">
+                <Button className="button button-primary" onClick={handleCreateRelationship}>
+                  {t.createRelationship}
+                </Button>
+                <Button className="button button-action" onClick={handleFindRelationship}>
+                  {t.findRelationship}
+                </Button>
+                <Button className="button button-action" onClick={handleUpdateRelationship}>
+                  {t.updateRelationship}
+                </Button>
+                <Button className="button button-danger" onClick={handleDeleteRelationship}>
+                  {t.deleteRelationship}
+                </Button>
+              </div>
+            </div>
           </div>
-        </Content>
-      </Layout>
+
+          {/* Fetch All Graph Button */}
+          <div className="text-center mt-20">
+            <Button className="button button-fetch fade-in" onClick={handleGetAllGraph} size="large">
+              {t.getAllGraph}
+            </Button>
+          </div>
+        </Card>
+
+        {/* Graph Visualization Container */}
+        <div className="visualization-container fade-in">
+          <Neo4jVisualization
+            nodes={allNodes}
+            relationships={allRelationships}
+          />
+        </div>
+      </Content>
+    </Layout>
   );
 };
 

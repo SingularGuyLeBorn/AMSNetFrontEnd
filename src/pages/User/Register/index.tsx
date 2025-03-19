@@ -4,7 +4,7 @@ import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { LoginForm, ProFormText } from '@ant-design/pro-components';
 import { useEmotionCss } from '@ant-design/use-emotion-css';
 import { Helmet, history, useModel } from '@umijs/max';
-import { message, Tabs } from 'antd';
+import { message, Tabs, Button } from 'antd';
 import React, { useState, useEffect } from 'react';
 import { Link } from 'umi';
 import Settings from '../../../../config/defaultSettings';
@@ -15,8 +15,8 @@ const translations = {
     register: '注册',
     registerSuccess: '注册成功！',
     registerFailure: '注册失败，',
-    fishFactoryRecruitment: '鱼厂招聘系统 - 注册',
-    efficientRecruitment: '高效招聘、爽快求职',
+    fishFactoryRecruitment: 'AMSNet标注平台注册页面',
+    efficientRecruitment: '高效标注',
     registerButton: '注册',
     newUserRegister: '新用户注册',
     accountPlaceholder: '请输入账号',
@@ -32,8 +32,8 @@ const translations = {
     register: 'Register',
     registerSuccess: 'Registration successful!',
     registerFailure: 'Registration failed, ',
-    fishFactoryRecruitment: 'Fish Factory Recruitment System - Register',
-    efficientRecruitment: 'Efficient recruitment, smooth job seeking',
+    fishFactoryRecruitment: 'AMSNet Label Platform Registration Page',
+    efficientRecruitment: 'Efficient Label',
     registerButton: 'Register',
     newUserRegister: 'New User Registration',
     accountPlaceholder: 'Please enter account',
@@ -66,8 +66,6 @@ const UserRegisterPage: React.FC = () => {
 
     window.addEventListener('languageChange', handleLanguageChange);
     setCurrentLang(initialState?.language || 'zh');
-    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
-
     return () => {
       window.removeEventListener('languageChange', handleLanguageChange);
     };
@@ -80,7 +78,7 @@ const UserRegisterPage: React.FC = () => {
       height: '100vh',
       overflow: 'auto',
       backgroundImage:
-          "url('https://mdn.alipayobjects.com/yuyan_qk0oxh/afts/img/V-_oS6r-i7wAAAAAAAAAAAAAFl94AQBr')",
+        "url('https://mdn.alipayobjects.com/yuyan_qk0oxh/afts/img/V-_oS6r-i7wAAAAAAAAAAAAAFl94AQBr')",
       backgroundSize: '100% 100%',
     };
   });
@@ -90,8 +88,6 @@ const UserRegisterPage: React.FC = () => {
    * @param values
    */
   const handleSubmit = async (values: API.UserRegisterRequest) => {
-    // 前端校验
-    // 1. 判断密码是否一致
     const { userPassword, checkPassword } = values;
     if (userPassword !== checkPassword) {
       message.error(t.passwordMismatch);
@@ -99,124 +95,131 @@ const UserRegisterPage: React.FC = () => {
     }
 
     try {
-      // 注册
-      await userRegisterUsingPost({
-        ...values,
-      });
-
-      const defaultLoginSuccessMessage = t.registerSuccess;
-      message.success(defaultLoginSuccessMessage);
+      await userRegisterUsingPost({ ...values });
+      message.success(t.registerSuccess);
       history.push('/user/login');
-      return;
     } catch (error: any) {
-      const defaultLoginFailureMessage = `${t.registerFailure}${error.message}`;
-      message.error(defaultLoginFailureMessage);
+      message.error(`${t.registerFailure}${error.message}`);
     }
   };
 
+  const toggleLanguage = () => {
+    setCurrentLang(currentLang === 'zh' ? 'en' : 'zh');
+    // Dispatch custom event to notify other parts of the app
+    window.dispatchEvent(new CustomEvent('languageChange', { detail: { language: currentLang === 'zh' ? 'en' : 'zh' } }));
+  };
+
   return (
-      <div className={containerClassName}>
-        <Helmet>
-          <title>
-            {t.register} - {Settings.title}
-          </title>
-        </Helmet>
-        <div
-            style={{
-              flex: '1',
-              padding: '32px 0',
-            }}
+    <div className={containerClassName}>
+      <Helmet>
+        <title>{t.register} - {Settings.title}</title>
+      </Helmet>
+
+      {/* Language Toggle Button */}
+      <Button
+        style={{
+          position: 'absolute',
+          top: 20,
+          right: 20,
+          fontSize: '16px',
+          zIndex: 10,
+        }}
+        onClick={toggleLanguage}
+      >
+        {currentLang === 'zh' ? 'EN' : '中文'}
+      </Button>
+
+      <div style={{ flex: '1', padding: '32px 0' }}>
+        <LoginForm
+          contentStyle={{
+            minWidth: 280,
+            maxWidth: '75vw',
+          }}
+          logo={<img alt="logo" style={{ height: '100%' }} src="/logo.svg" />}
+          title={t.fishFactoryRecruitment}
+          subTitle={t.efficientRecruitment}
+          initialValues={{
+            autoLogin: true,
+          }}
+          submitter={{
+            searchConfig: {
+              submitText: t.registerButton,
+            },
+          }}
+          onFinish={async (values) => {
+            await handleSubmit(values as API.UserLoginRequest);
+          }}
         >
-          <LoginForm
-              contentStyle={{
-                minWidth: 280,
-                maxWidth: '75vw',
-              }}
-              logo={<img alt="logo" style={{ height: '100%' }} src="/logo.svg" />}
-              title={t.fishFactoryRecruitment}
-              subTitle={t.efficientRecruitment}
-              initialValues={{
-                autoLogin: true,
-              }}
-              submitter={{
-                searchConfig: {
-                  submitText: t.registerButton,
-                },
-              }}
-              onFinish={async (values) => {
-                await handleSubmit(values as API.UserLoginRequest);
-              }}
-          >
-            <Tabs
-                activeKey={type}
-                onChange={setType}
-                centered
-                items={[
+          <Tabs
+            activeKey={type}
+            onChange={setType}
+            centered
+            items={[
+              {
+                key: 'account',
+                label: t.newUserRegister,
+              },
+            ]}
+          />
+          {type === 'account' && (
+            <>
+              <ProFormText
+                name="userAccount"
+                fieldProps={{
+                  size: 'large',
+                  prefix: <UserOutlined />,
+                }}
+                placeholder={t.accountPlaceholder}
+                rules={[
                   {
-                    key: 'account',
-                    label: t.newUserRegister,
+                    required: true,
+                    message: t.accountRequired,
                   },
                 ]}
-            />
-            {type === 'account' && (
-                <>
-                  <ProFormText
-                      name="userAccount"
-                      fieldProps={{
-                        size: 'large',
-                        prefix: <UserOutlined />,
-                      }}
-                      placeholder={t.accountPlaceholder}
-                      rules={[
-                        {
-                          required: true,
-                          message: t.accountRequired,
-                        },
-                      ]}
-                  />
-                  <ProFormText.Password
-                      name="userPassword"
-                      fieldProps={{
-                        size: 'large',
-                        prefix: <LockOutlined />,
-                      }}
-                      placeholder={t.passwordPlaceholder}
-                      rules={[
-                        {
-                          required: true,
-                          message: t.passwordRequired,
-                        },
-                      ]}
-                  />
-                  <ProFormText.Password
-                      name="checkPassword"
-                      fieldProps={{
-                        size: 'large',
-                        prefix: <LockOutlined />,
-                      }}
-                      placeholder={t.confirmPasswordPlaceholder}
-                      rules={[
-                        {
-                          required: true,
-                          message: t.confirmPasswordRequired,
-                        },
-                      ]}
-                  />
-                </>
-            )}
-
-            <div
-                style={{
-                  marginBottom: 24,
-                  textAlign: 'right',
+              />
+              <ProFormText.Password
+                name="userPassword"
+                fieldProps={{
+                  size: 'large',
+                  prefix: <LockOutlined />,
                 }}
-            >
-              <Link to="/user/login">{t.existingUserLogin}</Link>
-            </div>
-          </LoginForm>
-        </div>
-        <Footer />
+                placeholder={t.passwordPlaceholder}
+                rules={[
+                  {
+                    required: true,
+                    message: t.passwordRequired,
+                  },
+                ]}
+              />
+              <ProFormText.Password
+                name="checkPassword"
+                fieldProps={{
+                  size: 'large',
+                  prefix: <LockOutlined />,
+                }}
+                placeholder={t.confirmPasswordPlaceholder}
+                rules={[
+                  {
+                    required: true,
+                    message: t.confirmPasswordRequired,
+                  },
+                ]}
+              />
+            </>
+          )}
+
+          <div
+            style={{
+              marginBottom: 24,
+              textAlign: 'right',
+            }}
+          >
+            <Link to="/user/login">{t.existingUserLogin}</Link>
+          </div>
+        </LoginForm>
       </div>
+      <Footer />
+    </div>
   );
 };
 

@@ -4,7 +4,7 @@ import { categoryColors } from "./Styles/constants.js"; // 引入类别颜色映
 import { useModel } from 'umi';
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faUpload } from "@fortawesome/free-solid-svg-icons";
+import { faUpload, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
 
 // Add translations object for language support
 const translations = {
@@ -88,6 +88,10 @@ const MaskOperate = () => {
   const [imageBoxes, setImageBoxes] = useState({}); // 图片对应的标注框数据
   const canvasRef = useRef(null); // Canvas引用
   const [isDeleting, setIsDeleting] = useState(false); // 是否处于删除模式
+  // Add missing expandedBoxes state
+  const [expandedBoxes, setExpandedBoxes] = useState({});
+  // 添加图片尺寸状态
+  const [imageDimensions, setImageDimensions] = useState({ width: 800, height: 600 });
 
   // 判断是否有图片被上传
   const hasImages = images.length > 0;
@@ -127,24 +131,27 @@ const MaskOperate = () => {
    * 处理文件夹上传
    * @param {Event} e 上传事件
    */
+    // 当文件夹上传完成后，也应该自动显示第一张图片
   const handleFolderUpload = (e) => {
-    const files = Array.from(e.target.files);
-    // 检查是否有文件上传
-    if (files.length === 0) return;
+      const files = Array.from(e.target.files);
+      // 检查是否有文件上传
+      if (files.length === 0) return;
 
-    const folder = extractFolderName(files[0]?.webkitRelativePath || "");
-    setFolderName(folder);
+      const folder = extractFolderName(files[0]?.webkitRelativePath || "");
+      setFolderName(folder);
 
-    const imageFiles = filterImageFiles(files);
-    const jsonFiles = filterJsonFiles(files);
+      const imageFiles = filterImageFiles(files);
+      const jsonFiles = filterJsonFiles(files);
 
-    const sortedImageUrls = sortImageFiles(imageFiles);
-    setImages(sortedImageUrls);
+      const sortedImageUrls = sortImageFiles(imageFiles);
+      setImages(sortedImageUrls);
+      setCurrentImageIndex(0); // 确保设置为第一张图片
 
-    initializeImageBoxes(sortedImageUrls);
+      initializeImageBoxes(sortedImageUrls);
+      parseJsonFiles(jsonFiles);
 
-    parseJsonFiles(jsonFiles);
-  };
+      // 文件加载后，currentImage 会变化，触发 useEffect，不需要在这里调用 drawCanvas
+    };
 
   /**
    * 提取文件夹名称
@@ -157,7 +164,7 @@ const MaskOperate = () => {
 
   /**
    * 筛选图片文件
-   * @param {File[]} files 文件列表
+   *@param {File[]} files 文件列表
    * @returns {File[]} 图片文件列表
    */
   const filterImageFiles = (files) => {
@@ -180,7 +187,7 @@ const MaskOperate = () => {
    */
   const sortImageFiles = (imageFiles) => {
     return imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
-        .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
+      .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
   };
 
   /**
@@ -189,8 +196,11 @@ const MaskOperate = () => {
    */
   const initializeImageBoxes = (imageUrls) => {
     setImageBoxes(prevBoxes => {
-      imageUrls.forEach(img => prevBoxes[img.name] = prevBoxes[img.name] || []);
-      return { ...prevBoxes };
+      const newBoxes = { ...prevBoxes };
+      imageUrls.forEach(img => {
+        newBoxes[img.name] = prevBoxes[img.name] || [];
+      });
+      return newBoxes;
     });
   };
 
@@ -466,41 +476,68 @@ const MaskOperate = () => {
   };
 
   /**
-   * 绘制Canvas内容
+   * 预加载当前图片
    */
-  const drawCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+  useEffect(() => {
     if (currentImage) {
       const img = new Image();
       img.src = currentImage.url;
       img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        currentBoxes.forEach(box => {
-          if (box.points && box.points.length === 2) {
-            drawDiagonalRegionWithColor(box);
-          } else {
-            drawRectangleBox(box);
-          }
-        });
+        setImageDimensions({ width: img.width, height: img.height });
+        // 图片加载完毕后立即绘制，不需要等待点击
+        drawCanvas();
       };
-    } else {
-      // 没有图片时，绘制提示文本
-      ctx.fillStyle = "#f0f0f0";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.font = "20px Arial";
-      ctx.fillStyle = "#666";
-      ctx.textAlign = "center";
-      ctx.fillText(t.noImagesUploaded, canvas.width / 2, canvas.height / 2);
     }
-  };
+  }, [currentImage]);
+
+  /**
+   * 绘制Canvas内容
+   */
+    // 修改 drawCanvas 函数，解决异步加载问题
+  const drawCanvas = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (currentImage) {
+        const img = new Image();
+        img.src = currentImage.url;
+
+        // 先设置加载处理函数
+        img.onload = () => {
+          // 更新canvas尺寸为图片的实际尺寸
+          canvas.width = img.width;
+          canvas.height = img.height;
+
+          // 绘制图片
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          // 绘制标注框
+          currentBoxes.forEach(box => {
+            if (box.points && box.points.length === 2) {
+              drawDiagonalRegionWithColor(box);
+            } else {
+              drawRectangleBox(box);
+            }
+          });
+        };
+
+        // 如果图片已经缓存，可能不会触发 onload 事件，检查是否已完成加载
+        if (img.complete) {
+          img.onload();
+        }
+      } else {
+        // 没有图片时，绘制提示文本
+        ctx.fillStyle = "#f0f0f0";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.font = "20px Arial";
+        ctx.fillStyle = "#666";
+        ctx.textAlign = "center";
+        ctx.fillText(t.noImagesUploaded, canvas.width / 2, canvas.height / 2);
+      }
+    };
 
   /**
    * 绘制斜线区域，并使用对应的颜色
@@ -546,6 +583,7 @@ const MaskOperate = () => {
   const handlePreviousImage = () => {
     if (currentImageIndex > 0) {
       setCurrentImageIndex(prevIndex => prevIndex - 1);
+      // 这里不需要额外调用 drawCanvas，因为 currentImage 变化会触发 useEffect
     }
   };
 
@@ -555,6 +593,7 @@ const MaskOperate = () => {
   const handleNextImage = () => {
     if (currentImageIndex < images.length - 1) {
       setCurrentImageIndex(prevIndex => prevIndex + 1);
+      // 这里不需要额外调用 drawCanvas，因为 currentImage 变化会触发 useEffect
     }
   };
 
@@ -610,155 +649,193 @@ const MaskOperate = () => {
   };
 
   return (
-      <div className="container">
-        {/* 左侧控制区域 */}
-        <div className="left-panel">
-          <section className="upload-section">
-            <h3>{t.uploadFolder}</h3>
-            <div className="upload-button-container">
-              <button
-                  className="icon-button"
-                  onClick={() => document.querySelector('.file-input').click()}
+    <div className="mask-operate-container">
+      {/* Top section with buttons */}
+      <div className="top-section">
+        <div className="button-group">
+          <button
+            className="control-button upload-button"
+            onClick={() => document.querySelector('.file-input').click()}
+          >
+            <FontAwesomeIcon icon={faUpload} /> {t.uploadFolder}
+          </button>
+          <input
+            type="file"
+            webkitdirectory="true"
+            multiple
+            onChange={handleFolderUpload}
+            className="file-input"
+            style={{ display: 'none' }}
+          />
+
+          <select
+            value={currentCategory}
+            onChange={e => setCurrentCategory(e.target.value)}
+            className="category-select"
+            disabled={!hasImages}
+          >
+            {Object.keys(categoryColors).map(category => (
+              <option
+                key={category}
+                value={category}
+                style={{
+                  background: categoryColors[category],
+                  color: "white"
+                }}
               >
-                <FontAwesomeIcon icon={faUpload} />
-              </button>
-              <input
-                  type="file"
-                  webkitdirectory="true"
-                  multiple
-                  onChange={handleFolderUpload}
-                  className="file-input"
-                  style={{ display: 'none' }}
-              />
-            </div>
-            {folderName && <p className="folder-name">{t.folderName} {folderName}</p>}
-          </section>
+                {category}
+              </option>
+            ))}
+          </select>
 
-          <section className="category-section">
-            <h3>{t.selectCategory}</h3>
-            <select
-                value={currentCategory}
-                onChange={e => setCurrentCategory(e.target.value)}
-                className="category-select-with-color"
-                disabled={!hasImages}
-            >
-              {Object.keys(categoryColors).map(category => (
-                  <option
-                      key={category}
-                      value={category}
-                      style={{
-                        background: categoryColors[category],
-                        color: "white",
-                        paddingLeft: "1.5em",
-                      }}
-                  >
-                    {category}
-                  </option>
-              ))}
-            </select>
-          </section>
-
-          <section className="control-section">
-            <h3>{t.setRectWidth}</h3>
+          <div className="line-width-control">
+            <span>{t.setRectWidth}:</span>
             <input
-                type="number"
-                value={lineWidth}
-                onChange={e => setLineWidth(parseFloat(e.target.value))}
-                min={0.1}
-                step={0.1}
-                className="line-width-input"
-                disabled={!hasImages}
+              type="number"
+              value={lineWidth}
+              onChange={e => setLineWidth(parseFloat(e.target.value))}
+              min={0.1}
+              step={0.1}
+              className="line-width-input"
+              disabled={!hasImages}
             />
-          </section>
+          </div>
 
-          <section className="action-section">
-            <button
-                onClick={handleUndo}
-                className="action-button"
-                disabled={!hasImages || currentBoxes.length === 0}
-            >
-              {t.undo}
-            </button>
-            <button
-                onClick={handleExport}
-                className="action-button"
-                disabled={!hasImages || currentBoxes.length === 0}
-            >
-              {t.exportJSON}
-            </button>
-            <button
-                onClick={() => hasImages && setIsDrawingDiagonal(prev => !prev)}
-                className={`action-button ${isDrawingDiagonal ? 'active' : ''}`}
-                disabled={!hasImages}
-            >
-              {t.diagonalAnnotation}
-            </button>
-            <button
-                onClick={handleDeleteMode}
-                className={`action-button ${isDeleting ? 'active' : ''}`}
-                disabled={!hasImages}
-            >
-              {t.deleteMode}
-            </button>
-          </section>
+          <button
+            onClick={handleUndo}
+            className="control-button"
+            disabled={!hasImages || currentBoxes.length === 0}
+          >
+            {t.undo}
+          </button>
+
+          <button
+            onClick={handleExport}
+            className="control-button"
+            disabled={!hasImages || currentBoxes.length === 0}
+          >
+            {t.exportJSON}
+          </button>
+
+          <button
+            onClick={() => hasImages && setIsDrawingDiagonal(prev => !prev)}
+            className={`control-button ${isDrawingDiagonal ? 'active' : ''}`}
+            disabled={!hasImages}
+          >
+            {t.diagonalAnnotation}
+          </button>
+
+          <button
+            onClick={handleDeleteMode}
+            className={`control-button ${isDeleting ? 'active' : ''}`}
+            disabled={!hasImages}
+          >
+            {t.deleteMode}
+          </button>
         </div>
+      </div>
 
-        {/* 中间Canvas绘图区 */}
-        <div className="center-panel">
+      {/* Bottom section with canvas and annotation info */}
+      <div className="bottom-section">
+        {/* Left side - Canvas */}
+        <div className="canvas-section">
           <div className="navigation-controls">
             <button
-                onClick={handlePreviousImage}
-                disabled={!hasImages || currentImageIndex === 0}
-                className="nav-button"
+              onClick={handlePreviousImage}
+              disabled={!hasImages || currentImageIndex === 0}
+              className="nav-button"
             >
               {t.previousImage}
             </button>
-            {currentImage && <span className="current-image">{t.currentImageName} {currentImage.name}</span>}
+
+            {currentImage &&
+              <span className="current-image">
+                {t.currentImageName} {currentImage.name}
+              </span>
+            }
+
             <button
-                onClick={handleNextImage}
-                disabled={!hasImages || currentImageIndex === images.length - 1}
-                className="nav-button"
+              onClick={handleNextImage}
+              disabled={!hasImages || currentImageIndex === images.length - 1}
+              className="nav-button"
             >
               {t.nextImage}
             </button>
           </div>
 
-          <canvas
+          <div className="canvas-container" style={{ overflow: 'auto', width: '100%', height: '800px' }}>
+            <canvas
               ref={canvasRef}
-              width={800}
-              height={600}
+              width={imageDimensions.width}
+              height={imageDimensions.height}
               className={`drawing-canvas ${!hasImages ? 'no-images' : ''}`}
               onClick={handleCanvasClick}
-          ></canvas>
+              style={{
+                maxWidth: 'none',
+                maxHeight: 'none',
+                display: 'block'
+              }}
+            ></canvas>
+          </div>
         </div>
 
-        {/* 右侧显示区域 */}
-        <div className="right-panel">
-          <h3>{t.drawnBoxInfo}</h3>
+        {/* Right side - Annotation info */}
+        <div className="annotation-info-section">
+          <h3 className="info-title">{t.drawnBoxInfo}</h3>
+
           {hasImages && currentBoxes.length > 0 ? (
-              <ul className="box-list">
-                {currentBoxes.map((box, index) => (
-                    <li key={index} className="box-item">
-                      <div
-                          className="color-block"
-                          style={{ backgroundColor: box.color }}
-                      ></div>
-                      <span className="box-details">
-                {box.category}: {
-                        box.points
-                            ? `${t.diagonalArea} (${box.points.map(point =>
-                                `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`).join(', ')})`
-                            : `(${box.x.toFixed(2)}, ${box.y.toFixed(2)}) - ${box.width.toFixed(2)}x${box.height.toFixed(2)}`
-                      }
-              </span>
-                    </li>
-                ))}
-              </ul>
+            <ul className="annotation-list">
+              {currentBoxes.map((box, index) => (
+                <li key={index} className="annotation-item">
+                  {/* Basic info */}
+                  <div className="annotation-summary">
+                    <div
+                      className="color-indicator"
+                      style={{ backgroundColor: box.color }}
+                    ></div>
+                    <span className="category-name">{box.category}</span>
+
+                    <button
+                      className="toggle-details-btn"
+                      onClick={() => setExpandedBoxes(prev => ({
+                        ...prev,
+                        [index]: !prev[index]
+                      }))}
+                    >
+                      <FontAwesomeIcon
+                        icon={expandedBoxes[index] ? faChevronUp : faChevronDown}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Detailed info - collapsible */}
+                  {expandedBoxes[index] && (
+                    <div className="annotation-details">
+                      {box.points ? (
+                        <p>
+                          {t.diagonalArea}: {box.points.map(point =>
+                          `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`
+                        ).join(', ')}
+                        </p>
+                      ) : (
+                        <p>
+                          Position: ({box.x.toFixed(2)}, {box.y.toFixed(2)}) -
+                          {box.width.toFixed(2)}×{box.height.toFixed(2)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
           ) : (
-              <p className="no-data">{t.noImagesUploaded}</p>
+            <p className="no-data-message">
+              {hasImages ? t.noImagesUploaded : t.noImagesUploaded}
+            </p>
           )}
         </div>
       </div>
+    </div>
   );
 };
 

@@ -41,20 +41,19 @@ interface InfoCardProps {
 }
 
 /**
- * 单个信息卡片组件
+ * 带花哨动画效果的信息卡片组件
  */
 const InfoCard: React.FC<InfoCardProps> = ({ title, href, index, desc, learnMoreText }) => {
   const { token } = theme.useToken();
-
   return (
-    <div className="info-card">
+    <div className="info-card flashy-card">
       <div className="card-header">
-        <div className="index-box">{index}</div>
+        <div className="index-box flashy-index">{index}</div>
         <div className="title" style={{ color: token.colorText }}>{title}</div>
       </div>
       <div className="desc">{desc}</div>
       <a href={href} target="_blank" rel="noreferrer" className="learn-more">
-        {learnMoreText} &gt;
+        {learnMoreText} <span className="arrow">&rarr;</span>
       </a>
     </div>
   );
@@ -84,18 +83,11 @@ const Welcome: React.FC = () => {
   return (
     <PageContainer>
       <Card
-        className="welcome-card"
-        style={{
-          borderRadius: 12,
-          // 根据导航主题设置背景渐变
-          background: initialState?.settings?.navTheme === 'realDark'
-            ? 'linear-gradient(75deg, #1A1B1F, #191C1F)'
-            : 'linear-gradient(75deg, #FBFDFF, #F5F7FF)'
-        }}
+        className="welcome-card flashy-background"
         bodyStyle={{ padding: '40px' }}
       >
         <div className="welcome-content">
-          <h1 className="welcome-title" style={{ color: token.colorTextHeading }}>
+          <h1 className="welcome-title flashy-text" style={{ color: token.colorTextHeading }}>
             {t.welcomeTitle}
           </h1>
           <p className="welcome-desc" style={{ color: token.colorTextSecondary }}>

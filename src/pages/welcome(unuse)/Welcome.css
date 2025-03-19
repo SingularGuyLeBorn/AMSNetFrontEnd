@@ -1,0 +1,190 @@
+/* Welcome.css */
+
+/* 全局渐隐动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 动态背景渐变动画 */
+@keyframes gradientAnimation {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* 文本闪烁（剪裁渐变） */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* 欢迎卡片整体样式，带动态背景 */
+.welcome-card {
+  border-radius: 16px;
+  animation: fadeIn 1s ease-out;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  border: none;
+  position: relative;
+  z-index: 1;
+}
+
+/* 花哨的背景渐变 */
+.flashy-background {
+  background: linear-gradient(45deg, #ff6b6b, #f7d794, #6a89cc, #82ccdd);
+  background-size: 400% 400%;
+  animation: gradientAnimation 10s ease infinite;
+}
+
+/* 主内容区域 */
+.welcome-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* 欢迎标题带渐变文字效果 */
+.welcome-title {
+  font-size: 32px;
+  font-weight: bold;
+  margin: 0;
+  background: linear-gradient(90deg, #ff6b6b, #f7d794, #6a89cc, #82ccdd);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+
+/* 欢迎描述 */
+.welcome-desc {
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+  animation: fadeIn 1.2s ease-out;
+}
+
+/* 卡片组容器 */
+.cards-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  animation: fadeIn 1.4s ease-out;
+}
+
+/* 信息卡片基础样式 */
+.info-card {
+  background-color: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  flex: 1;
+  min-width: 260px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* 花哨卡片：伪元素实现动态边框 */
+.flashy-card::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, #ff6b6b, #f7d794, #6a89cc, #82ccdd);
+  background-size: 400% 400%;
+  z-index: -1;
+  border-radius: inherit;
+  animation: gradientAnimation 5s ease infinite;
+}
+
+/* 卡片悬停时放大并加深阴影 */
+.info-card:hover {
+  transform: scale(1.03);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+}
+
+/* 卡片头部：编号和标题 */
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+/* 编号框 */
+.index-box {
+  width: 48px;
+  height: 48px;
+  background-color: #1890ff;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-weight: bold;
+  font-size: 18px;
+  flex-shrink: 0;
+  transition: background-color 0.3s ease;
+}
+
+/* 编号框悬停颜色变化 */
+.info-card:hover .index-box {
+  background-color: #147ad6;
+}
+
+/* 卡片标题 */
+.title {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+/* 卡片描述 */
+.desc {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+/* “了解更多”链接样式 */
+.learn-more {
+  font-size: 14px;
+  color: #1890ff;
+  text-decoration: none;
+  position: relative;
+  transition: color 0.3s ease;
+}
+
+/* 动态箭头效果 */
+.arrow {
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+
+/* 链接悬停效果 */
+.learn-more:hover {
+  color: #147ad6;
+}
+
+.learn-more:hover .arrow {
+  transform: translateX(5px);
+}
+
+/* 响应式设计：移动端布局 */
+@media (max-width: 768px) {
+  .cards-container {
+    flex-direction: column;
+  }
+  .info-card {
+    min-width: 100%;
+  }
+}
