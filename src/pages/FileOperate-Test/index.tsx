@@ -1626,36 +1626,36 @@ const FileOperate: React.FC<FileOperateProps> = ({}) => {
         </div>
         {/* 右侧 */}
         <div className="right-upper">
-          {/*<Card className="function-card">*/}
-          {/*  {t.function}:*/}
-          {/*  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>*/}
-          {/*    <Input*/}
-          {/*      placeholder={t.nodeName}*/}
-          {/*      value={nodeName}*/}
-          {/*      onChange={(e) => setNodeName(e.target.value)}*/}
-          {/*      style={{ marginBottom: '10px' }}*/}
-          {/*    />*/}
-          {/*    <Button onClick={handleAddNodeProperty}>{t.addProperty}</Button>*/}
-          {/*    {nodePropertiesKeys.map((key, index) => (*/}
-          {/*      <div key={index} style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>*/}
-          {/*        <Input*/}
-          {/*          placeholder="Key"*/}
-          {/*          value={key}*/}
-          {/*          onChange={(e) => handleUpdateNodeProperty(index, 'key', e.target.value)}*/}
-          {/*          style={{ marginRight: '10px' }}*/}
-          {/*        />*/}
-          {/*        <Input*/}
-          {/*          placeholder="Value"*/}
-          {/*          value={nodePropertiesValues[index]}*/}
-          {/*          onChange={(e) => handleUpdateNodeProperty(index, 'value', e.target.value)}*/}
-          {/*          style={{ marginRight: '10px' }}*/}
-          {/*        />*/}
-          {/*        <Button onClick={() => removeNodeProperty(index)}></Button>*/}
-          {/*      </div>*/}
-          {/*    ))}*/}
-          {/*    <Button onClick={handleCreateNode} style={{ marginTop: '10px' }}>{t.addNode}</Button>*/}
-          {/*  </div>*/}
-          {/*</Card>*/}
+          <Card className="function-card">
+            {t.function}:
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <Input
+                placeholder={t.nodeName}
+                value={nodeName}
+                onChange={(e) => setNodeName(e.target.value)}
+                style={{ marginBottom: '10px' }}
+              />
+              <Button onClick={handleAddNodeProperty}>{t.addProperty}</Button>
+              {nodePropertiesKeys.map((key, index) => (
+                <div key={index} style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>
+                  <Input
+                    placeholder="Key"
+                    value={key}
+                    onChange={(e) => handleUpdateNodeProperty(index, 'key', e.target.value)}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <Input
+                    placeholder="Value"
+                    value={nodePropertiesValues[index]}
+                    onChange={(e) => handleUpdateNodeProperty(index, 'value', e.target.value)}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <Button onClick={() => removeNodeProperty(index)}></Button>
+                </div>
+              ))}
+              <Button onClick={handleCreateNode} style={{ marginTop: '10px' }}>{t.addNode}</Button>
+            </div>
+          </Card>
         </div>
       </div>
       {/* 下半部分 */}

@@ -107,8 +107,8 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
           {/* 主内容区域 */}
           {children}
 
-          {/* 全局悬浮窗（固定在右下角） */}
-          <FloatWindow />
+          {/*/!* 全局悬浮窗（固定在右下角） *!/*/}
+          {/*<FloatWindow />*/}
 
           {/* 语言切换按钮（固定在右上角） */}
           <LanguageSwitcher />
