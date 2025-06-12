@@ -1,632 +1,300 @@
-import React, { useState, useRef, useEffect } from "react";
-import "./Styles/MaskOperate.css"; // 引入样式文件
-import { categoryColors } from "./Styles/constants.js"; // 引入类别颜色映射
+// index.tsx
+
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useModel } from 'umi';
-
+import { Card, Button, Select, InputNumber, Layout, message, Typography, List, Collapse, Space, Tooltip, Form } from 'antd';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faUpload, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import {
+  faUpload, faChevronLeft, faChevronRight, faUndo,
+  faSave, faDrawPolygon, faTrash, faPaintBrush, faArrowsAltH,
+  faCog, faList, faMousePointer
+} from "@fortawesome/free-solid-svg-icons";
+import { categoryColors } from "./Styles/constants.js";
+import './index.css';
 
-// Add translations object for language support
+const { Title, Text } = Typography;
+const { Panel } = Collapse;
+const { Option } = Select;
+
+// ===================================================================
+// 接口与类型定义 (Interfaces & Type Definitions)
+// ===================================================================
+type Point = { x: number; y: number };
+type Box = {
+  x: number; y: number; width: number; height: number;
+  category: string; color: string; lineWidth: number;
+};
+type Diagonal = {
+  points: [Point, Point];
+  category: string; color: string;
+};
+type Annotation = Box | Diagonal;
+type UndoOperation = { type: 'add_annotation'; data: Annotation };
+type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete';
+
+// ===================================================================
+// 国际化文本 (i18n Translations)
+// ===================================================================
 const translations = {
   zh: {
-    // Left panel
-    uploadFolder: "上传文件夹",
-    folderName: "文件夹名：",
-    selectCategory: "选择类别",
-    setRectWidth: "设置矩形宽度",
-    undo: "撤回",
-    exportJSON: "导出JSON",
-    diagonalAnnotation: "斜线标注",
-    deleteMode: "删除模式",
-    noImagesUploaded: "请先上传文件夹",
-
-    // Center panel
-    previousImage: "上一张",
-    nextImage: "下一张",
-    currentImageName: "当前图片名：",
-
-    // Right panel
-    drawnBoxInfo: "已绘制框信息",
-    diagonalArea: "斜线区域"
+    uploadFolder: "上传", undo: "撤销", exportJSON: "导出",
+    previous: "上一张", next: "下一张", currentImage: "当前:",
+    annotations: "标注列表", tools: "工具", settings: "设置",
+    noAnnotations: "当前图片无标注", noImages: "请先上传文件夹",
+    category: "类别", lineWidth: "线宽",
+    selectTool: "选择/移动", rectTool: "矩形工具", diagonalTool: "斜线工具", deleteTool: "删除工具",
+    showSettings: "显示设置", showAnnotations: "显示列表",
+    imageSize: "图像尺寸", mouseCoords: "鼠标坐标",
+    diagonalArea: "斜线区域", positionAndSize: "位置与尺寸",
   },
   en: {
-    // Left panel
-    uploadFolder: "Upload Folder",
-    folderName: "Folder Name:",
-    selectCategory: "Select Category",
-    setRectWidth: "Set Rectangle Width",
-    undo: "Undo",
-    exportJSON: "Export JSON",
-    diagonalAnnotation: "Diagonal Annotation",
-    deleteMode: "Delete Mode",
-    noImagesUploaded: "Please upload a folder first",
-
-    // Center panel
-    previousImage: "Previous",
-    nextImage: "Next",
-    currentImageName: "Current Image:",
-
-    // Right panel
-    drawnBoxInfo: "Drawn Box Information",
-    diagonalArea: "Diagonal Area"
+    uploadFolder: "Upload", undo: "Undo", exportJSON: "Export",
+    previous: "Previous", next: "Next", currentImage: "Current:",
+    annotations: "Annotations", tools: "Tools", settings: "Settings",
+    noAnnotations: "No annotations for this image", noImages: "Please upload a folder first",
+    category: "Category", lineWidth: "Line Width",
+    selectTool: "Select/Move", rectTool: "Rectangle", diagonalTool: "Diagonal", deleteTool: "Delete",
+    showSettings: "Show Settings", showAnnotations: "Show List",
+    imageSize: "Image Size", mouseCoords: "Mouse Coords",
+    diagonalArea: "Diagonal Area", positionAndSize: "Position & Size",
   }
 };
 
+// ===================================================================
+// 主组件 (Main Component)
+// ===================================================================
 const MaskOperate = () => {
-  // Add language support
+  // --- 状态管理 (State Management) ---
   const { initialState } = useModel('@@initialState');
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang];
 
-  // Update language when global language changes
-  useEffect(() => {
-    const handleLanguageChange = (event) => {
-      const customEvent = event;
-      setCurrentLang(customEvent.detail.language);
-    };
+  const [images, setImages] = useState<{name: string, url: string}[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [imageBoxes, setImageBoxes] = useState<{[key: string]: Annotation[]}>({});
 
-    window.addEventListener('languageChange', handleLanguageChange);
-    setCurrentLang(initialState?.language || 'zh');
+  const [activeTool, setActiveTool] = useState<ActiveTool>('rectangle');
+  const [currentCategory, setCurrentCategory] = useState("Net 1");
+  const [lineWidth, setLineWidth] = useState(12);
 
-    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
+  const [isLeftPanelVisible, setIsLeftPanelVisible] = useState(true);
+  const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
 
-    return () => {
-      window.removeEventListener('languageChange', handleLanguageChange);
-    };
-  }, [initialState?.language]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [startPosition, setStartPosition] = useState<Point | null>(null);
+  const [diagonalPoints, setDiagonalPoints] = useState<Point[]>([]);
 
-  // 状态管理
-  const [folderName, setFolderName] = useState(""); // 当前文件夹名称
-  const [images, setImages] = useState([]); // 图片列表
-  const [currentImageIndex, setCurrentImageIndex] = useState(0); // 当前图片索引
-  const [currentCategory, setCurrentCategory] = useState("Net 1"); // 当前选择的类别
-  const [lineWidth, setLineWidth] = useState(12); // 矩形宽度
-  const [isDrawing, setIsDrawing] = useState(false); // 是否在绘制矩形
-  const [startPosition, setStartPosition] = useState(null); // 绘制起始位置
-  const [isDrawingDiagonal, setIsDrawingDiagonal] = useState(false); // 是否在绘制斜线区域
-  const [diagonalPoints, setDiagonalPoints] = useState([]); // 斜线区域的两个点
-  const [imageBoxes, setImageBoxes] = useState({}); // 图片对应的标注框数据
-  const canvasRef = useRef(null); // Canvas引用
-  const [isDeleting, setIsDeleting] = useState(false); // 是否处于删除模式
-  // Add missing expandedBoxes state
-  const [expandedBoxes, setExpandedBoxes] = useState({});
-  // 添加图片尺寸状态
-  const [imageDimensions, setImageDimensions] = useState({ width: 800, height: 600 });
+  const [undoHistory, setUndoHistory] = useState<UndoOperation[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<string[] | number[]>([]);
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  const [mousePosition, setMousePosition] = useState<Point>({ x: 0, y: 0 });
 
-  // 判断是否有图片被上传
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // 创建一个ref来引用文件输入元素
+
+  // --- 派生状态与常量 (Derived State & Constants) ---
   const hasImages = images.length > 0;
-
-  const categories = Object.keys(categoryColors);
-
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      // 如果没有图片，不处理键盘事件
-      if (!hasImages) return;
-
-      if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'w' || event.key === 's') {
-        const currentIndex = categories.indexOf(currentCategory);
-        if (currentIndex === -1) return; // 当前类别不在列表中，不处理
-
-        let newIndex;
-        if (event.key === 'ArrowUp' || event.key === 'w') {
-          newIndex = (currentIndex - 1 + categories.length) % categories.length;
-        } else if (event.key === 'ArrowDown' || event.key === 's') {
-          newIndex = (currentIndex + 1) % categories.length;
-        }
-        setCurrentCategory(categories[newIndex]);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [categories, currentCategory, hasImages]);
-
-  // 当前图片和标注框数据
   const currentImage = images[currentImageIndex];
   const currentBoxes = currentImage ? (imageBoxes[currentImage.name] || []) : [];
+  const categories = Object.keys(categoryColors);
 
-  /**
-   * 处理文件夹上传
-   * @param {Event} e 上传事件
-   */
-    // 当文件夹上传完成后，也应该自动显示第一张图片
-  const handleFolderUpload = (e) => {
-      const files = Array.from(e.target.files);
-      // 检查是否有文件上传
-      if (files.length === 0) return;
-
-      const folder = extractFolderName(files[0]?.webkitRelativePath || "");
-      setFolderName(folder);
-
-      const imageFiles = filterImageFiles(files);
-      const jsonFiles = filterJsonFiles(files);
-
-      const sortedImageUrls = sortImageFiles(imageFiles);
-      setImages(sortedImageUrls);
-      setCurrentImageIndex(0); // 确保设置为第一张图片
-
-      initializeImageBoxes(sortedImageUrls);
-      parseJsonFiles(jsonFiles);
-
-      // 文件加载后，currentImage 会变化，触发 useEffect，不需要在这里调用 drawCanvas
-    };
-
-  /**
-   * 提取文件夹名称
-   * @param {string} path 文件路径
-   * @returns {string} 文件夹名称
-   */
-  const extractFolderName = (path) => {
-    return path.split("/")[0];
-  };
-
-  /**
-   * 筛选图片文件
-   *@param {File[]} files 文件列表
-   * @returns {File[]} 图片文件列表
-   */
-  const filterImageFiles = (files) => {
-    return files.filter(file => file.type.match(/image\/(jpeg|png)/));
-  };
-
-  /**
-   * 筛选JSON文件
-   * @param {File[]} files 文件列表
-   * @returns {File[]} JSON文件列表
-   */
-  const filterJsonFiles = (files) => {
-    return files.filter(file => file.name.endsWith(".json"));
-  };
-
-  /**
-   * 对图片文件进行排序
-   * @param {File[]} imageFiles 图片文件列表
-   * @returns {Object[]} 排序后的图片URL列表
-   */
-  const sortImageFiles = (imageFiles) => {
-    return imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
-      .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
-  };
-
-  /**
-   * 初始化图片对应的标注框数据
-   * @param {Object[]} imageUrls 图片URL列表
-   */
-  const initializeImageBoxes = (imageUrls) => {
-    setImageBoxes(prevBoxes => {
-      const newBoxes = { ...prevBoxes };
-      imageUrls.forEach(img => {
-        newBoxes[img.name] = prevBoxes[img.name] || [];
-      });
-      return newBoxes;
-    });
-  };
-
-  /**
-   * 解析JSON文件并更新标注框数据
-   * @param {File[]} jsonFiles JSON文件列表
-   */
-  const parseJsonFiles = (jsonFiles) => {
-    jsonFiles.forEach(jsonFile => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const jsonData = JSON.parse(event.target.result);
-        const fileName = jsonFile.name.replace(".json", ".jpg");
-        if (images.some(img => img.name === fileName)) {
-          setImageBoxes(prevBoxes => ({
-            ...prevBoxes,
-            [fileName]: jsonData.map(box => ({
-              ...box,
-              color: categoryColors[box.category] || "rgba(128, 128, 128, 0.3)",
-            })),
-          }));
-        }
-      };
-      reader.readAsText(jsonFile);
-    });
-  };
-
-  /**
-   * 处理Canvas点击事件
-   * @param {Event} e 点击事件
-   */
-  const handleCanvasClick = (e) => {
-    // 如果没有图片，不处理点击事件
-    if (!hasImages) return;
-
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-
-    if (isDeleting) {
-      deleteBoxByPoint(x, y);
-    } else if (isDrawingDiagonal) {
-      handleDiagonalDrawing(x, y);
-    } else if (isDrawing) {
-      handleRectangleDrawing(x, y);
-    } else {
-      setStartPosition({ x, y });
-      setIsDrawing(true);
-    }
-  };
-
-  /**
-   * 删除点击点所在的标注框
-   * @param {number} x 点击点X坐标
-   * @param {number} y 点击点Y坐标
-   */
-  const deleteBoxByPoint = (x, y) => {
-    const boxToRemove = findBoxByPoint(x, y);
-    if (boxToRemove) {
-      setImageBoxes(prevBoxes => {
-        const newBoxes = { ...prevBoxes };
-        newBoxes[currentImage.name] = prevBoxes[currentImage.name].filter(box => box !== boxToRemove);
-        return newBoxes;
-      });
-      drawCanvas();
-    }
-  };
-
-  /**
-   * 处理斜线区域绘制
-   * @param {number} x 点击点X坐标
-   * @param {number} y 点击点Y坐标
-   */
-  const handleDiagonalDrawing = (x, y) => {
-    setDiagonalPoints(prevPoints => {
-      const newPoints = [...prevPoints, { x, y }];
-      if (newPoints.length === 2) {
-        drawDiagonalRegion(newPoints);
-        saveDiagonalRegion(newPoints);
-        setDiagonalPoints([]);
-        setIsDrawingDiagonal(false);
-      }
-      return newPoints;
-    });
-  };
-
-  /**
-   * 处理矩形绘制
-   * @param {number} x 点击点X坐标
-   * @param {number} y 点击点Y坐标
-   */
-  const handleRectangleDrawing = (x, y) => {
-    const endPosition = { x, y };
-    const { boxX, boxY, boxWidth, boxHeight } = calculateBoxDimensions(startPosition, endPosition);
-
-    const newBox = createBox(boxX, boxY, boxWidth, boxHeight);
-    setImageBoxes(prevBoxes => ({
-      ...prevBoxes,
-      [currentImage.name]: [...prevBoxes[currentImage.name], newBox],
-    }));
-    drawCanvas();
-    setIsDrawing(false);
-    setStartPosition(null);
-  };
-
-  /**
-   * 计算矩形的尺寸
-   * @param {Object} startPosition 起始点
-   * @param {Object} endPosition 结束点
-   * @returns {Object} 矩形的X、Y、宽度和高度
-   */
-  const calculateBoxDimensions = (startPosition, endPosition) => {
-    const dx = Math.abs(endPosition.x - startPosition.x);
-    const dy = Math.abs(endPosition.y - startPosition.y);
-
-    let boxX, boxY, boxWidth, boxHeight;
-
-    if (dy < 5) {
-      boxX = Math.min(startPosition.x, endPosition.x);
-      boxY = (startPosition.y + endPosition.y) / 2 - lineWidth / 2;
-      boxWidth = dx;
-      boxHeight = lineWidth;
-    } else if (dx < 5) {
-      boxX = (startPosition.x + endPosition.x) / 2 - lineWidth / 2;
-      boxY = Math.min(startPosition.y, endPosition.y);
-      boxWidth = lineWidth;
-      boxHeight = dy;
-    } else {
-      boxX = Math.min(startPosition.x, endPosition.x);
-      boxY = Math.min(startPosition.y, endPosition.y);
-      boxWidth = dx;
-      boxHeight = dy;
-    }
-
-    return { boxX, boxY, boxWidth, boxHeight };
-  };
-
-  /**
-   * 创建新的标注框对象
-   * @param {number} x X坐标
-   * @param {number} y Y坐标
-   * @param {number} width 宽度
-   * @param {number} height 高度
-   * @returns {Object} 标注框对象
-   */
-  const createBox = (x, y, width, height) => {
-    return {
-      x: parseFloat(x.toFixed(2)),
-      y: parseFloat(y.toFixed(2)),
-      width: parseFloat(width.toFixed(2)),
-      height: parseFloat(height.toFixed(2)),
-      category: currentCategory,
-      color: categoryColors[currentCategory],
-      lineWidth: 0.3,
-    };
-  };
-
-  /**
-   * 查找点击点所在的标注框
-   * @param {number} x 点击点X坐标
-   * @param {number} y 点击点Y坐标
-   * @returns {Object|null} 找到的标注框或null
-   */
-  const findBoxByPoint = (x, y) => {
-    for (let i = currentBoxes.length - 1; i >= 0; i--) {
-      const box = currentBoxes[i];
-      if (box.points && box.points.length === 2) {
-        if (isPointInRotatedRect(x, y, box.points[0], box.points[1], lineWidth)) {
-          return box;
-        }
-      } else {
-        if (isPointInBox(x, y, box)) {
-          return box;
-        }
-      }
-    }
-    return null;
-  };
-
-  /**
-   * 检查点是否在旋转的矩形内
-   * @param {number} x 点X坐标
-   * @param {number} y 点Y坐标
-   * @param {Object} p1 点1
-   * @param {Object} p2 点2
-   * @param {number} height 矩形高度
-   * @returns {boolean} 是否在旋转矩形内
-   */
-  const isPointInRotatedRect = (x, y, p1, p2, height) => {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    const rot = Math.atan2(dy, dx);
-    const cos = Math.cos(rot);
-    const sin = Math.sin(rot);
-
-    const px = x - (p1.x + p2.x) / 2;
-    const py = y - (p1.y + p2.y) / 2;
-    const xr = px * cos + py * sin;
-    const yr = -px * sin + py * cos;
-
-    if (Math.abs(xr) <= len / 2 + 1 && Math.abs(yr) <= height / 2 + 1) {
-      return true;
-    }
-    return false;
-  };
-
-  /**
-   * 检查点是否在矩形框内
-   * @param {number} x 点X坐标
-   * @param {number} y 点Y坐标
-   * @param {Object} box 标注框对象
-   * @returns {boolean} 是否在矩形框内
-   */
-  const isPointInBox = (x, y, box) => {
-    return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
-  };
-
-  /**
-   * 绘制斜线区域
-   * @param {Object[]} points 斜线区域的两个点
-   */
-  const drawDiagonalRegion = (points) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const { angle, width, height, centerX, centerY } = calculateRotationParams(points);
-
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.rect(-width / 2, -height / 2, width, height);
-    ctx.fillStyle = categoryColors[currentCategory] || "rgba(128, 128, 128, 0.3)";
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  };
-
-  /**
-   * 计算旋转参数
-   * @param {Object[]} points 斜线区域的两个点
-   * @returns {Object} 旋转角度、宽度、高度、中心X、中心Y
-   */
-  const calculateRotationParams = (points) => {
-    const dx = points[1].x - points[0].x;
-    const dy = points[1].y - points[0].y;
-    const angle = Math.atan2(dy, dx);
-    const width = Math.sqrt(dx * dx + dy * dy);
-    const height = lineWidth;
-    const centerX = (points[0].x + points[1].x) / 2;
-    const centerY = (points[0].y + points[1].y) / 2;
-    return { angle, width, height, centerX, centerY };
-  };
-
-  /**
-   * 保存斜线区域到标注框数据
-   * @param {Object[]} points 斜线区域的两个点
-   */
-  const saveDiagonalRegion = (points) => {
-    const newRegion = {
-      points: points.map(point => ({ x: point.x, y: point.y })),
-      category: currentCategory,
-      color: categoryColors[currentCategory],
-    };
-    setImageBoxes(prevBoxes => ({
-      ...prevBoxes,
-      [currentImage.name]: [...prevBoxes[currentImage.name], newRegion],
-    }));
-    drawCanvas();
-  };
-
-  /**
-   * 预加载当前图片
-   */
+  // --- 副作用钩子 (useEffect Hooks) ---
   useEffect(() => {
+    drawCanvas();
+  }, [imageBoxes, currentImage]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      setMousePosition({
+        x: Math.round((e.clientX - rect.left) * scaleX),
+        y: Math.round((e.clientY - rect.top) * scaleY)
+      });
+    };
+    const wrapper = canvas.parentElement;
+    wrapper?.addEventListener('mousemove', handleMouseMove);
+    return () => wrapper?.removeEventListener('mousemove', handleMouseMove);
+  }, [hasImages, currentImage]);
+
+
+  // --- 核心功能函数 (Core Functions) ---
+  const drawCanvas = () => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+
     if (currentImage) {
       const img = new Image();
       img.src = currentImage.url;
       img.onload = () => {
-        setImageDimensions({ width: img.width, height: img.height });
-        // 图片加载完毕后立即绘制，不需要等待点击
-        drawCanvas();
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+        ctx.drawImage(img, 0, 0);
+        (imageBoxes[currentImage.name] || []).forEach(box => {
+          if ('points' in box) drawDiagonalRegion(box as Diagonal);
+          else drawRectangleBox(box as Box);
+        });
       };
-    }
-  }, [currentImage]);
-
-  /**
-   * 绘制Canvas内容
-   */
-    // 修改 drawCanvas 函数，解决异步加载问题
-  const drawCanvas = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const ctx = canvas.getContext("2d");
+      if (img.complete) img.onload();
+    } else {
+      canvas.width = 800; canvas.height = 600;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (currentImage) {
-        const img = new Image();
-        img.src = currentImage.url;
-
-        // 先设置加载处理函数
-        img.onload = () => {
-          // 更新canvas尺寸为图片的实际尺寸
-          canvas.width = img.width;
-          canvas.height = img.height;
-
-          // 绘制图片
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-          // 绘制标注框
-          currentBoxes.forEach(box => {
-            if (box.points && box.points.length === 2) {
-              drawDiagonalRegionWithColor(box);
-            } else {
-              drawRectangleBox(box);
-            }
-          });
-        };
-
-        // 如果图片已经缓存，可能不会触发 onload 事件，检查是否已完成加载
-        if (img.complete) {
-          img.onload();
-        }
-      } else {
-        // 没有图片时，绘制提示文本
-        ctx.fillStyle = "#f0f0f0";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.font = "20px Arial";
-        ctx.fillStyle = "#666";
-        ctx.textAlign = "center";
-        ctx.fillText(t.noImagesUploaded, canvas.width / 2, canvas.height / 2);
-      }
-    };
-
-  /**
-   * 绘制斜线区域，并使用对应的颜色
-   * @param {Object} box 标注框对象
-   */
-  const drawDiagonalRegionWithColor = (box) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const { angle, width, height, centerX, centerY } = calculateRotationParams(box.points);
-
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.rect(-width / 2, -height / 2, width, height);
-    ctx.fillStyle = box.color || "rgba(128, 128, 128, 0.3)";
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+      ctx.fillStyle = "#eef2f7"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.font = "20px Arial"; ctx.fillStyle = "#6b7280"; ctx.textAlign = "center";
+      ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
+    }
   };
 
-  /**
-   * 绘制矩形框
-   * @param {Object} box 标注框对象
-   */
-  const drawRectangleBox = (box) => {
-    const ctx = canvasRef.current.getContext("2d");
-    ctx.fillStyle = box.color;
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = box.lineWidth || 1;
+  const drawRectangleBox = (box: Box) => {
+    const ctx = canvasRef.current?.getContext("2d"); if (!ctx) return;
+    ctx.fillStyle = box.color; ctx.strokeStyle = "black"; ctx.lineWidth = box.lineWidth || 1;
     ctx.fillRect(box.x, box.y, box.width, box.height);
     ctx.strokeRect(box.x, box.y, box.width, box.height);
   };
 
-  // 更新Canvas内容
-  useEffect(() => {
-    drawCanvas();
-  }, [currentImage, currentBoxes, lineWidth, diagonalPoints]);
-
-  /**
-   * 切换到上一张图片
-   */
-  const handlePreviousImage = () => {
-    if (currentImageIndex > 0) {
-      setCurrentImageIndex(prevIndex => prevIndex - 1);
-      // 这里不需要额外调用 drawCanvas，因为 currentImage 变化会触发 useEffect
-    }
+  const drawDiagonalRegion = (box: Diagonal) => {
+    const ctx = canvasRef.current?.getContext("2d"); if (!ctx) return;
+    const { angle, width, centerX, centerY } = calculateRotationParams(box.points);
+    ctx.save();
+    ctx.translate(centerX, centerY); ctx.rotate(angle);
+    ctx.beginPath(); ctx.rect(-width / 2, -lineWidth / 2, width, lineWidth);
+    ctx.fillStyle = box.color || "rgba(128, 128, 128, 0.3)";
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
   };
 
-  /**
-   * 切换到下一张图片
-   */
-  const handleNextImage = () => {
-    if (currentImageIndex < images.length - 1) {
-      setCurrentImageIndex(prevIndex => prevIndex + 1);
-      // 这里不需要额外调用 drawCanvas，因为 currentImage 变化会触发 useEffect
-    }
+  const calculateRotationParams = (points: [Point, Point]) => {
+    const dx = points[1].x - points[0].x; const dy = points[1].y - points[0].y;
+    return {
+      angle: Math.atan2(dy, dx),
+      width: Math.sqrt(dx * dx + dy * dy),
+      centerX: (points[0].x + points[1].x) / 2,
+      centerY: (points[0].y + points[1].y) / 2,
+    };
   };
 
-  /**
-   * 撤回最后一个标注框
-   */
-  const handleUndo = () => {
-    if (!hasImages) return;
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const imageFiles = files.filter(f => f.type.match(/image\/(jpeg|png)/));
+    const jsonFiles = files.filter(f => f.name.endsWith(".json"));
+    const sortedImages = imageFiles
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+      .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
 
-    setImageBoxes(prevBoxes => ({
-      ...prevBoxes,
-      [currentImage.name]: currentBoxes.slice(0, -1),
+    setImages(sortedImages); setCurrentImageIndex(0); setUndoHistory([]);
+
+    const initialBoxes: {[key: string]: Annotation[]} = {};
+    sortedImages.forEach(img => { initialBoxes[img.name] = []; });
+
+    const jsonPromises = jsonFiles.map(jsonFile => new Promise<void>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const jsonData = JSON.parse(event.target!.result as string);
+          const imgName = jsonFile.name.replace(/\.json$/, '.jpg');
+          if (initialBoxes.hasOwnProperty(imgName)) {
+            initialBoxes[imgName] = jsonData.map((box: any) => ({ ...box, color: categoryColors[box.category] || "#808080" }));
+          }
+          resolve();
+        } catch (error) { reject(new Error(`解析JSON失败 ${jsonFile.name}: ${error}`)); }
+      };
+      reader.onerror = () => reject(new Error(`读取文件失败 ${jsonFile.name}`));
+      reader.readAsText(jsonFile);
     }));
-    drawCanvas();
+
+    try {
+      await Promise.all(jsonPromises);
+      setImageBoxes(initialBoxes);
+    } catch (error) { message.error((error as Error).message); }
   };
 
-  /**
-   * 导出标注框数据为JSON文件
-   */
-  const handleExport = () => {
-    if (!hasImages || !currentImage) return;
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!hasImages) return;
+    const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX, y = (e.clientY - rect.top) * scaleY;
 
-    const groupedBoxes = currentBoxes.reduce((acc, box) => {
-      if (!acc[box.category]) acc[box.category] = [];
-      if (box.points) {
-        acc[box.category].push({ points: box.points.map(point => ({ x: point.x, y: point.y })) });
-      } else {
-        acc[box.category].push({ x: box.x, y: box.y, width: box.width, height: box.height });
+    if (activeTool === 'delete') {
+      const boxIndexToRemove = findBoxIndexByPoint(x, y);
+      if (boxIndexToRemove > -1) {
+        const newBoxes = [...currentBoxes]; newBoxes.splice(boxIndexToRemove, 1);
+        setImageBoxes(prev => ({ ...prev, [currentImage.name]: newBoxes }));
       }
-      return acc;
-    }, {});
+    } else if (activeTool === 'diagonal') {
+      const newPoints = [...diagonalPoints, { x, y }]; setDiagonalPoints(newPoints);
+      if (newPoints.length === 2) {
+        const newDiagonal: Diagonal = {
+          points: newPoints.map(p => ({ x: parseFloat(p.x.toFixed(2)), y: parseFloat(p.y.toFixed(2)) })) as [Point, Point],
+          category: currentCategory, color: categoryColors[currentCategory],
+        };
+        addAnnotation(newDiagonal); setDiagonalPoints([]);
+      }
+    } else if (activeTool === 'rectangle') {
+      if (!isDrawing) { setStartPosition({x, y}); setIsDrawing(true); }
+      else {
+        const endPosition = { x, y };
+        const dx = Math.abs(endPosition.x - startPosition!.x), dy = Math.abs(endPosition.y - startPosition!.y);
+        let boxX, boxY, boxWidth, boxHeight;
+        if (dy < 5) {
+          boxX = Math.min(startPosition!.x, endPosition.x); boxY = (startPosition!.y + endPosition.y) / 2 - lineWidth / 2;
+          boxWidth = dx; boxHeight = lineWidth;
+        } else if (dx < 5) {
+          boxX = (startPosition!.x + endPosition.x) / 2 - lineWidth / 2; boxY = Math.min(startPosition!.y, endPosition.y);
+          boxWidth = lineWidth; boxHeight = dy;
+        } else {
+          boxX = Math.min(startPosition!.x, endPosition.x); boxY = Math.min(startPosition!.y, endPosition.y);
+          boxWidth = dx; boxHeight = dy;
+        }
+        const newBox: Box = {
+          x: parseFloat(boxX.toFixed(2)), y: parseFloat(boxY.toFixed(2)),
+          width: parseFloat(boxWidth.toFixed(2)), height: parseFloat(boxHeight.toFixed(2)),
+          category: currentCategory, color: categoryColors[currentCategory], lineWidth: 0.3
+        };
+        addAnnotation(newBox); setIsDrawing(false); setStartPosition(null);
+      }
+    }
+  };
 
-    const jsonContent = JSON.stringify(groupedBoxes, null, 2);
+  const findBoxIndexByPoint = (x: number, y: number): number => {
+    for (let i = currentBoxes.length - 1; i >= 0; i--) {
+      const box = currentBoxes[i];
+      if ('points' in box) {
+        const { points } = box as Diagonal;
+        const { angle, width, centerX, centerY } = calculateRotationParams(points);
+        const px = x - centerX, py = y - centerY;
+        const xr = px * Math.cos(angle) + py * Math.sin(angle);
+        const yr = -px * Math.sin(angle) + py * Math.cos(angle);
+        if (Math.abs(xr) <= width / 2 && Math.abs(yr) <= lineWidth / 2) return i;
+      } else {
+        const b = box as Box;
+        if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) return i;
+      }
+    }
+    return -1;
+  };
+
+  const addAnnotation = (annotation: Annotation) => {
+    const newBoxes = [...currentBoxes, annotation];
+    setImageBoxes(prev => ({ ...prev, [currentImage.name]: newBoxes }));
+    setUndoHistory(prev => [...prev, { type: 'add_annotation', data: annotation }]);
+  };
+
+  const handleUndo = () => {
+    if (undoHistory.length === 0) { message.info("没有可撤销的操作"); return; }
+    setUndoHistory(prev => prev.slice(0, -1));
+    setImageBoxes(prev => ({ ...prev, [currentImage.name]: currentBoxes.slice(0, -1) }));
+    message.success("撤销成功");
+  };
+
+  const handleExport = () => {
+    if (!hasImages || !currentImage) { message.warn("没有可导出的数据"); return; }
+    const dataToExport = currentBoxes.map(({ color, ...rest }) => rest);
+    const jsonContent = JSON.stringify(dataToExport, null, 2);
     const blob = new Blob([jsonContent], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -634,206 +302,99 @@ const MaskOperate = () => {
     link.click();
   };
 
-  /**
-   * 切换删除模式
-   */
-  const handleDeleteMode = () => {
-    if (!hasImages) return;
-
-    setIsDeleting(prev => !prev);
-    if (isDrawing) {
-      setIsDrawing(false);
-      setIsDrawingDiagonal(false);
-      setDiagonalPoints([]);
+  const switchImage = (offset: number) => {
+    const newIndex = currentImageIndex + offset;
+    if (newIndex >= 0 && newIndex < images.length) {
+      setCurrentImageIndex(newIndex); setUndoHistory([]); setExpandedKeys([]);
     }
   };
 
   return (
-    <div className="mask-operate-container">
-      {/* Top section with buttons */}
-      <div className="top-section">
-        <div className="button-group">
-          <button
-            className="control-button upload-button"
-            onClick={() => document.querySelector('.file-input').click()}
-          >
-            <FontAwesomeIcon icon={faUpload} /> {t.uploadFolder}
-          </button>
-          <input
-            type="file"
-            webkitdirectory="true"
-            multiple
-            onChange={handleFolderUpload}
-            className="file-input"
-            style={{ display: 'none' }}
-          />
+    <div className="mask-operate-app">
+      <div className="canvas-wrapper">
+        <canvas ref={canvasRef} onClick={handleCanvasClick} className={`drawing-canvas ${activeTool === 'delete' ? 'deleting-mode' : ''}`}/>
+      </div>
 
-          <select
-            value={currentCategory}
-            onChange={e => setCurrentCategory(e.target.value)}
-            className="category-select"
-            disabled={!hasImages}
-          >
-            {Object.keys(categoryColors).map(category => (
-              <option
-                key={category}
-                value={category}
-                style={{
-                  background: categoryColors[category],
-                  color: "white"
-                }}
-              >
-                {category}
-              </option>
-            ))}
-          </select>
-
-          <div className="line-width-control">
-            <span>{t.setRectWidth}:</span>
-            <input
-              type="number"
-              value={lineWidth}
-              onChange={e => setLineWidth(parseFloat(e.target.value))}
-              min={0.1}
-              step={0.1}
-              className="line-width-input"
-              disabled={!hasImages}
-            />
-          </div>
-
-          <button
-            onClick={handleUndo}
-            className="control-button"
-            disabled={!hasImages || currentBoxes.length === 0}
-          >
-            {t.undo}
-          </button>
-
-          <button
-            onClick={handleExport}
-            className="control-button"
-            disabled={!hasImages || currentBoxes.length === 0}
-          >
-            {t.exportJSON}
-          </button>
-
-          <button
-            onClick={() => hasImages && setIsDrawingDiagonal(prev => !prev)}
-            className={`control-button ${isDrawingDiagonal ? 'active' : ''}`}
-            disabled={!hasImages}
-          >
-            {t.diagonalAnnotation}
-          </button>
-
-          <button
-            onClick={handleDeleteMode}
-            className={`control-button ${isDeleting ? 'active' : ''}`}
-            disabled={!hasImages}
-          >
-            {t.deleteMode}
-          </button>
+      <div className="top-toolbar">
+        <div className="tool-group">
+          {/* 关键修复：将隐藏的input元素放在这里，并使用ref来触发点击 */}
+          <Button type="primary" onClick={() => fileInputRef.current?.click()} icon={<FontAwesomeIcon icon={faUpload} />}>{t.uploadFolder}</Button>
+          <input ref={fileInputRef} type="file" webkitdirectory="true" directory="true" multiple onChange={handleFolderUpload} className="file-input-hidden" />
+        </div>
+        <div className="tool-group">
+          <Button onClick={() => switchImage(-1)} disabled={!hasImages || currentImageIndex === 0} icon={<FontAwesomeIcon icon={faChevronLeft} />} />
+          <Button onClick={() => switchImage(1)} disabled={!hasImages || currentImageIndex >= images.length - 1} icon={<FontAwesomeIcon icon={faChevronRight} />} />
+        </div>
+        <div className="tool-group">
+          <Tooltip title={t.selectTool}><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faMousePointer} />} /></Tooltip>
+          <Tooltip title={t.rectTool}><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faPaintBrush} />} /></Tooltip>
+          <Tooltip title={t.diagonalTool}><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faDrawPolygon} />} /></Tooltip>
+          <Tooltip title={t.deleteTool}><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} /></Tooltip>
+        </div>
+        <div className="tool-group">
+          <Button onClick={handleUndo} disabled={undoHistory.length === 0} icon={<FontAwesomeIcon icon={faUndo} />}>{t.undo}</Button>
+          <Button onClick={handleExport} disabled={!hasImages} icon={<FontAwesomeIcon icon={faSave} />}>{t.exportJSON}</Button>
+        </div>
+        <div className="tool-group">
+          <Tooltip title={t.showSettings}><Button onClick={() => setIsLeftPanelVisible(!isLeftPanelVisible)} type={isLeftPanelVisible ? 'default' : 'text'} icon={<FontAwesomeIcon icon={faCog} />} /></Tooltip>
+          <Tooltip title={t.showAnnotations}><Button onClick={() => setIsRightPanelVisible(!isRightPanelVisible)} type={isRightPanelVisible ? 'default' : 'text'} icon={<FontAwesomeIcon icon={faList} />} /></Tooltip>
         </div>
       </div>
 
-      {/* Bottom section with canvas and annotation info */}
-      <div className="bottom-section">
-        {/* Left side - Canvas */}
-        <div className="canvas-section">
-          <div className="navigation-controls">
-            <button
-              onClick={handlePreviousImage}
-              disabled={!hasImages || currentImageIndex === 0}
-              className="nav-button"
-            >
-              {t.previousImage}
-            </button>
+      <aside className={`left-panel ${isLeftPanelVisible ? 'visible' : ''}`}>
+        <Card title={t.settings}>
+          <Form layout="vertical" className="settings-form">
+            <Form.Item label={t.category}>
+              <Select value={currentCategory} onChange={setCurrentCategory} style={{width: '100%'}} disabled={!hasImages}>
+                {categories.map(cat => <Option key={cat} value={cat}>{cat}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item label={t.lineWidth}>
+              <InputNumber min={1} value={lineWidth} onChange={(val) => setLineWidth(val || 1)} style={{width: '100%'}} disabled={!hasImages}/>
+            </Form.Item>
+          </Form>
+        </Card>
+      </aside>
 
-            {currentImage &&
-              <span className="current-image">
-                {t.currentImageName} {currentImage.name}
-              </span>
-            }
-
-            <button
-              onClick={handleNextImage}
-              disabled={!hasImages || currentImageIndex === images.length - 1}
-              className="nav-button"
-            >
-              {t.nextImage}
-            </button>
-          </div>
-
-          <div className="canvas-container" style={{ overflow: 'auto', width: '100%', height: '800px' }}>
-            <canvas
-              ref={canvasRef}
-              width={imageDimensions.width}
-              height={imageDimensions.height}
-              className={`drawing-canvas ${!hasImages ? 'no-images' : ''}`}
-              onClick={handleCanvasClick}
-              style={{
-                maxWidth: 'none',
-                maxHeight: 'none',
-                display: 'block'
-              }}
-            ></canvas>
-          </div>
-        </div>
-
-        {/* Right side - Annotation info */}
-        <div className="annotation-info-section">
-          <h3 className="info-title">{t.drawnBoxInfo}</h3>
-
-          {hasImages && currentBoxes.length > 0 ? (
-            <ul className="annotation-list">
-              {currentBoxes.map((box, index) => (
-                <li key={index} className="annotation-item">
-                  {/* Basic info */}
-                  <div className="annotation-summary">
-                    <div
-                      className="color-indicator"
-                      style={{ backgroundColor: box.color }}
-                    ></div>
-                    <span className="category-name">{box.category}</span>
-
-                    <button
-                      className="toggle-details-btn"
-                      onClick={() => setExpandedBoxes(prev => ({
-                        ...prev,
-                        [index]: !prev[index]
-                      }))}
-                    >
-                      <FontAwesomeIcon
-                        icon={expandedBoxes[index] ? faChevronUp : faChevronDown}
-                      />
-                    </button>
-                  </div>
-
-                  {/* Detailed info - collapsible */}
-                  {expandedBoxes[index] && (
+      <aside className={`right-panel ${isRightPanelVisible ? 'visible' : ''}`}>
+        <Card title={t.annotations} bodyStyle={{padding: '1px 0 0 0', height: 'calc(100% - 57px)'}}>
+          <div className="info-panel-content">
+            {hasImages && currentBoxes.length > 0 ? (
+              <Collapse activeKey={expandedKeys} onChange={setExpandedKeys} accordion>
+                {currentBoxes.map((item, index) => (
+                  <Panel
+                    className="annotation-item"
+                    key={index}
+                    header={
+                      <Space align="center">
+                        <div className="color-indicator" style={{backgroundColor: item.color}} />
+                        <Text className="category-name">{item.category}</Text>
+                      </Space>
+                    }
+                  >
                     <div className="annotation-details">
-                      {box.points ? (
-                        <p>
-                          {t.diagonalArea}: {box.points.map(point =>
-                          `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`
-                        ).join(', ')}
-                        </p>
+                      {'points' in item ? (
+                        <p>{t.diagonalArea}: {item.points.map(p => `(${p.x}, ${p.y})`).join(', ')}</p>
                       ) : (
-                        <p>
-                          Position: ({box.x.toFixed(2)}, {box.y.toFixed(2)}) -
-                          {box.width.toFixed(2)}×{box.height.toFixed(2)}
-                        </p>
+                        <p>{t.positionAndSize}: ({item.x}, {item.y}) - {item.width}×{item.height}</p>
                       )}
                     </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="no-data-message">
-              {hasImages ? t.noImagesUploaded : t.noImagesUploaded}
-            </p>
-          )}
-        </div>
+                  </Panel>
+                ))}
+              </Collapse>
+            ) : (
+              <Text type="secondary" style={{padding: '16px', display: 'block', textAlign: 'center'}}>{hasImages ? t.noAnnotations : t.noImages}</Text>
+            )}
+          </div>
+        </Card>
+      </aside>
+
+      <div className="bottom-statusbar">
+        <Text ellipsis style={{maxWidth: '50%'}}>{hasImages ? `${t.currentImage} ${currentImage.name}` : t.noImages}</Text>
+        <Space>
+          <Text>{t.imageSize}: {imageDimensions.width} x {imageDimensions.height}</Text>
+          <Text>{t.mouseCoords}: ({mousePosition.x}, {mousePosition.y})</Text>
+        </Space>
       </div>
     </div>
   );

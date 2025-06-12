@@ -1,0 +1,133 @@
+/* index.css */
+
+/*
+ * ===================================================================
+ * 全局及基础设定 (Global & Base Settings)
+ * ===================================================================
+ */
+:root {
+  --primary-color: #1677ff;
+  --danger-color: #ff4d4f;
+  --success-color: #52c41a;
+  --background-color: #f5f7fa;
+  --component-background: #ffffff;
+  --border-color: #d9d9d9;
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --border-radius: 8px;
+}
+
+body {
+  background-color: var(--background-color);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+}
+
+/*
+ * ===================================================================
+ * 页面布局容器 (Page Layout Container)
+ * ===================================================================
+ */
+.graph-operate-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 48px); /* 减去通常的页头高度 */
+  padding: 24px;
+  gap: 24px;
+}
+
+/*
+ * ===================================================================
+ * 操作面板卡片 (Control Panel Card)
+ * ===================================================================
+ */
+.control-panel-card {
+  background: var(--component-background);
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-shadow);
+  border: none;
+  flex-shrink: 0; /* 防止在flex布局中被压缩 */
+}
+
+.control-panel-card .ant-tabs-nav {
+  margin-bottom: 24px;
+}
+
+.tab-pane-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.properties-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/*
+ * ===================================================================
+ * 图谱可视化区域 (Graph Visualization Area)
+ * ===================================================================
+ */
+.visualization-wrapper {
+  flex-grow: 1; /* 占据所有剩余的垂直空间 */
+  background: var(--component-background);
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  position: relative; /* 为全屏按钮定位提供基础 */
+}
+
+.visualization-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.visualization-container {
+  flex-grow: 1;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * ===================================================================
+ * 通用组件样式 (General Component Styles)
+ * ===================================================================
+ */
+.property-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.property-row .ant-input {
+  flex: 1;
+}
+
+.fullscreen-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}

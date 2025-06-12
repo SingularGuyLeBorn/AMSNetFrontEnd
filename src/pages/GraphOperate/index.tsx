@@ -1,3 +1,5 @@
+// index.tsx
+
 import React, { useEffect, useState } from 'react';
 import { useModel } from 'umi';
 import {
@@ -6,19 +8,33 @@ import {
   createRelationship, deleteRelationship, updateRelationship, findRelationship,
   getAllRelationships
 } from '@/pages/GraphOperate/Components/apiFunctions';
-import './Styles/customStyles.css';
-import './Styles/Button.css';
-
-import { DeleteOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
-
-
-import { Button, Card, Input, Layout, message, Space, Typography, Select } from 'antd';
+import './index.css';
+import { DeleteOutlined, PlusOutlined, FullscreenOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
+import { Button, Card, Input, Layout, message, Space, Typography, Select, Tabs } from 'antd';
 import Neo4jVisualization from './Components/Neo4jVisualization';
+
 const { Title } = Typography;
 const { Content } = Layout;
 const { Option } = Select;
+const { TabPane } = Tabs;
 
-// 添加translations对象，定义中英文文本
+// ===================================================================
+// 接口与类型定义 (Interfaces & Type Definitions)
+// ===================================================================
+interface Node {
+  id: string;
+  name: string;
+  properties: { [key: string]: any };
+}
+
+interface Relationship {
+  name: string;
+  properties: { [key: string]: any };
+}
+
+// ===================================================================
+// 国际化文本 (i18n Translations)
+// ===================================================================
 const translations = {
   zh: {
     createNode: '创建节点',
@@ -29,19 +45,17 @@ const translations = {
     deleteRelationship: '删除关系',
     updateRelationship: '更新关系',
     findRelationship: '查询关系',
-    getAllGraph: '获取整张图',
+    getAllGraph: '获取/刷新全图',
     nodeName: '节点名称',
     key: '键',
     value: '值',
-    addNodeProperty: '添加节点属性',
-    removeNodeProperty: '删除',
-    addRelationshipProperty: '添加关系属性',
-    removeRelationshipProperty: '删除关系属性',
-    nodeCRUDOperations: '节点CRUD操作',
-    relationshipCRUDOperations: '关系CRUD操作',
+    addProperty: '添加属性',
+    nodeOperations: '节点操作',
+    relationshipOperations: '关系操作',
     nodeSuccessMessage: '节点查找成功',
     nodeNotExistMessage: '节点不存在',
-    languageSelect: '选择语言'
+    relationshipName: '关系名称',
+    graphVisualization: '图谱可视化',
   },
   en: {
     createNode: 'Create Node',
@@ -52,414 +66,295 @@ const translations = {
     deleteRelationship: 'Delete Relationship',
     updateRelationship: 'Update Relationship',
     findRelationship: 'Find Relationship',
-    getAllGraph: 'Get All Graph',
+    getAllGraph: 'Get/Refresh Full Graph',
     nodeName: 'Node Name',
     key: 'Key',
     value: 'Value',
-    addNodeProperty: 'Add Node Property',
-    removeNodeProperty: 'Remove',
-    addRelationshipProperty: 'Add Relationship Property',
-    removeRelationshipProperty: 'Remove Relationship Property',
-    nodeCRUDOperations: 'Node CRUD Operations',
-    relationshipCRUDOperations: 'Relationship CRUD Operations',
+    addProperty: 'Add Property',
+    nodeOperations: 'Node Operations',
+    relationshipOperations: 'Relationship Operations',
     nodeSuccessMessage: 'Node found successfully',
     nodeNotExistMessage: 'Node does not exist',
-    languageSelect: 'Select Language'
+    relationshipName: 'Relationship Name',
+    graphVisualization: 'Graph Visualization',
   }
 };
 
-interface Node {
-  id: string; // 确保包含节点的ID
-  name: string;
-  properties: { [key: string]: any };
-}
-
-interface Relationship {
-  name: string;
-  properties: { [key: string]: any };
-}
-
+// ===================================================================
+// 主组件 (Main Component)
+// ===================================================================
 const GraphOperate = () => {
-  // 使用全局语言状态
+  // --- 状态管理 (State Management) ---
   const { initialState } = useModel('@@initialState');
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang as keyof typeof translations];
 
-  // Update language when global language changes
-  useEffect(() => {
-    const handleLanguageChange = (event: Event) => {
-      const customEvent = event as CustomEvent;
-      setCurrentLang(customEvent.detail.language);
-    };
-
-    window.addEventListener('languageChange', handleLanguageChange);
-    setCurrentLang(initialState?.language || 'zh');
-
-    // message.info(currentLang === 'zh' ? '已切换为中文' : 'Language changed to English');
-
-    return () => {
-      window.removeEventListener('languageChange', handleLanguageChange);
-    };
-  }, [initialState?.language]);
-
   // 节点相关状态
   const [name, setName] = useState('');
-  const [nodePropertiesKeys, setNodePropertiesKeys] = useState<string[]>([]);
-  const [nodePropertiesValues, setNodePropertiesValues] = useState<string[]>([]);
+  const [nodeProperties, setNodeProperties] = useState<{ key: string, value: string }[]>([]);
   const [nodeResult, setNodeResult] = useState<Node | null>(null);
   const [allNodes, setAllNodes] = useState<Node[]>([]);
 
   // 关系相关状态
   const [relationshipName, setRelationshipName] = useState('');
-  const [relationshipPropertiesKeys, setRelationshipPropertiesKeys] = useState<string[]>([]);
-  const [relationshipPropertiesValues, setRelationshipPropertiesValues] = useState<string[]>([]);
+  const [relationshipProperties, setRelationshipProperties] = useState<{ key: string, value: string }[]>([]);
   const [relationshipResult, setRelationshipResult] = useState<Relationship | null>(null);
   const [allRelationships, setAllRelationships] = useState<Relationship[]>([]);
 
-  // 处理节点属性键值对添加
-  const handleAddNodeProperty = () => {
-    setNodePropertiesKeys([...nodePropertiesKeys, '']);
-    setNodePropertiesValues([...nodePropertiesValues, '']);
-  };
+  // --- 副作用钩子 (useEffect Hooks) ---
+  useEffect(() => {
+    const handleLanguageChange = (event: Event) => setCurrentLang((event as CustomEvent).detail.language);
+    window.addEventListener('languageChange', handleLanguageChange);
+    setCurrentLang(initialState?.language || 'zh');
+    return () => window.removeEventListener('languageChange', handleLanguageChange);
+  }, [initialState?.language]);
 
-  // 处理节点属性键值对更新
-  const handleUpdateNodeProperty = (index: number, key: string, value: string) => {
-    const newKeys = [...nodePropertiesKeys];
-    newKeys[index] = key;
-    setNodePropertiesKeys(newKeys);
-    const newValues = [...nodePropertiesValues];
-    newValues[index] = value;
-    setNodePropertiesValues(newValues);
-  };
-
-  // 处理节点属性键值对删除
-  const handleRemoveNodeProperty = (index: number) => {
-    const newKeys = [...nodePropertiesKeys];
-    newKeys.splice(index, 1);
-    setNodePropertiesKeys(newKeys);
-    const newValues = [...nodePropertiesValues];
-    newValues.splice(index, 1);
-    setNodePropertiesValues(newValues);
-  };
-
-  // 处理关系属性键值对添加
-  const handleAddRelationshipProperty = () => {
-    setRelationshipPropertiesKeys([...relationshipPropertiesKeys, '']);
-    setRelationshipPropertiesValues([...relationshipPropertiesValues, '']);
-  };
-
-  // 处理关系属性键值对更新
-  const handleUpdateRelationshipProperty = (index: number, key: string, value: string) => {
-    const newKeys = [...relationshipPropertiesKeys];
-    newKeys[index] = key;
-    setRelationshipPropertiesKeys(newKeys);
-    const newValues = [...relationshipPropertiesValues];
-    newValues[index] = value;
-    setRelationshipPropertiesValues(newValues);
-  };
-
-  // 处理关系属性键值对删除
-  const handleRemoveRelationshipProperty = (index: number) => {
-    const newKeys = [...relationshipPropertiesKeys];
-    newKeys.splice(index, 1);
-    setRelationshipPropertiesKeys(newKeys);
-    const newValues = [...relationshipPropertiesValues];
-    newValues.splice(index, 1);
-    setRelationshipPropertiesValues(newValues);
-  };
-
-  // 创建节点并根据属性查找或创建相关节点
-  const handleCreateNode = async () => {
-    const propertiesObj = {};
-    nodePropertiesKeys.forEach((key, index) => {
-      propertiesObj[key] = nodePropertiesValues[index];
-    });
-    const newNode = { name, properties: propertiesObj };
-
-    try {
-      // 尝试创建节点并检查结果
-      const result = await createNode(newNode);
-      if (result !== true) {
-        // 如果结果代码不是0，打印错误信息并退出函数
-        console.error(`Failed to create node with error code: ${result}`);
-        return;
-      }
-      // 节点创建成功，设置节点结果
-      setNodeResult(newNode);
-
-      // 遍历节点属性，处理关系创建
-      for (const [key, value] of Object.entries(propertiesObj)) {
-        const nodeName = `${key}_${value}`;
-        try {
-          const relatedNode = await findNode({ name: nodeName });
-          if (!relatedNode) {
-            // 如果没有找到同名节点，创建新节点
-            let newRelatedNode = { name: nodeName, properties: { [key]: value } };
-            await createNode(newRelatedNode);
-            console.log(`Created new node ${newRelatedNode.name} because no existing node shared the ${key} value of ${value}`);
-
-            // 创建新节点与原始节点的关系
-            await createRelationship({
-              name: key, // 关系名称是属性名
-              properties: {
-                fromNode: newNode.name,
-                toNode: newRelatedNode.name
-              }
-            });
-            console.log(`Connected ${newNode.name} to ${newRelatedNode.name} as no node shared the ${key} value of ${value}`);
-          } else {
-            // 如果找到具有相同属性值的节点，创建关系
-            await createRelationship({
-              name: key, // 关系名称是属性名
-              properties: {
-                fromNode: newNode.name,
-                toNode: relatedNode.data.name
-              }
-            });
-            console.log(`Connected ${newNode.name} to ${relatedNode.data.name} via property ${key}`);
-          }
-        } catch (error) {
-          console.error(`Error handling property ${key}: ${error}`);
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to create initial node: ${error}`);
+  // --- 属性处理函数 (Property Handlers) ---
+  const handleAddProperty = (type: 'node' | 'relationship') => {
+    if (type === 'node') {
+      setNodeProperties([...nodeProperties, { key: '', value: '' }]);
+    } else {
+      setRelationshipProperties([...relationshipProperties, { key: '', value: '' }]);
     }
   };
 
-  // 删除节点
-  const handleDeleteNode = async () => {
-    await deleteNode({ name });
+  const handleUpdateProperty = (type: 'node' | 'relationship', index: number, field: 'key' | 'value', val: string) => {
+    if (type === 'node') {
+      const newProps = [...nodeProperties];
+      newProps[index][field] = val;
+      setNodeProperties(newProps);
+    } else {
+      const newProps = [...relationshipProperties];
+      newProps[index][field] = val;
+      setRelationshipProperties(newProps);
+    }
   };
 
-  // 更新节点
-  const handleUpdateNode = async () => {
-    const propertiesObj: { [key: string]: any } = {};
-    nodePropertiesKeys.forEach((key, index) => {
-      propertiesObj[key] = nodePropertiesValues[index];
-    });
+  const handleRemoveProperty = (type: 'node' | 'relationship', index: number) => {
+    if (type === 'node') {
+      setNodeProperties(nodeProperties.filter((_, i) => i !== index));
+    } else {
+      setRelationshipProperties(relationshipProperties.filter((_, i) => i !== index));
+    }
+  };
 
+  const propertiesToObject = (props: { key: string, value: string }[]) => {
+    return props.reduce((acc, prop) => {
+      if (prop.key) acc[prop.key] = prop.value;
+      return acc;
+    }, {} as { [key: string]: any });
+  };
+
+  // --- 核心API操作函数 (Core API Operations) ---
+  const handleCreateNode = async () => {
+    if (!name) { message.warn('节点名称不能为空'); return; }
+    const propertiesObj = propertiesToObject(nodeProperties);
+    const newNode = { name, properties: propertiesObj };
+    try {
+      const result = await createNode(newNode);
+      // API的返回格式可能不一致，这里做兼容处理
+      if (result === true || (result && result.code === 0)) {
+        message.success(`节点 "${name}" 创建成功`);
+        setNodeResult(newNode as Node);
+        // 创建成功后自动刷新全图，以便看到新节点
+        await handleGetAllGraph();
+      } else {
+        message.error(`创建节点失败: ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      message.error(`创建节点时发生网络或未知错误`);
+    }
+  };
+
+  const handleDeleteNode = async () => {
+    if (!name) { message.warn('请输入要删除的节点名称'); return; }
+    await deleteNode({ name });
+    message.success(`删除节点 "${name}" 的请求已发送`);
+    await handleGetAllGraph();
+  };
+
+  const handleUpdateNode = async () => {
+    if (!name) { message.warn('请输入要更新的节点名称'); return; }
+    const propertiesObj = propertiesToObject(nodeProperties);
     const updatedNode: Node = { id: '', name, properties: propertiesObj };
     await updateNode(updatedNode);
+    message.success(`更新节点 "${name}" 的请求已发送`);
     setNodeResult(updatedNode);
+    await handleGetAllGraph();
   };
 
-  // 查找节点
   const handleFindNode = async () => {
-    const result: Node | null = await findNode({ name });
-    if (result) {
-      setNodeResult(result);
+    if (!name) { message.warn('请输入要查询的节点名称'); return; }
+    const result = await findNode({ name });
+    // API返回格式兼容
+    const foundNode = result?.data || result;
+    if (foundNode && Object.keys(foundNode).length > 0) {
+      setNodeResult(foundNode);
       message.success(t.nodeSuccessMessage);
     } else {
       setNodeResult(null);
-      message.warning(t.nodeNotExistMessage);
+      message.warn(t.nodeNotExistMessage);
     }
   };
 
-  // 获取所有节点
-  const handleGetAllNodes = async () => {
-    const result: Node[] = await getAllNodes({ includeProperties: true });
-    setAllNodes(result.data);
-  };
-
-  // 创建关系
   const handleCreateRelationship = async () => {
-    const propertiesObj: { [key: string]: any } = {};
-    relationshipPropertiesKeys.forEach((key, index) => {
-      propertiesObj[key] = relationshipPropertiesValues[index];
-    });
+    if (!relationshipName) { message.warn('关系名称不能为空'); return; }
+    const propertiesObj = propertiesToObject(relationshipProperties);
+    // 关系创建通常需要源节点和目标节点，这里假设API封装了此逻辑
+    // 原始代码中fromNode, toNode在属性中，保持一致
+    if (!propertiesObj.fromNode || !propertiesObj.toNode) {
+      message.warn('创建关系必须在属性中指定 fromNode 和 toNode');
+      return;
+    }
     const newRelationship: Relationship = { name: relationshipName, properties: propertiesObj };
     await createRelationship(newRelationship);
+    message.success(`创建关系 "${relationshipName}" 的请求已发送`);
     setRelationshipResult(newRelationship);
+    await handleGetAllGraph();
   };
 
-  // 删除关系
   const handleDeleteRelationship = async () => {
-    const result = await deleteRelationship({ name: relationshipName });
+    if (!relationshipName) { message.warn('请输入要删除的关系名称'); return; }
+    await deleteRelationship({ name: relationshipName });
+    message.success(`删除关系 "${relationshipName}" 的请求已发送`);
+    await handleGetAllGraph();
   };
 
-  // 更新关系
   const handleUpdateRelationship = async () => {
-    const propertiesObj: { [key: string]: any } = {};
-    relationshipPropertiesKeys.forEach((key, index) => {
-      propertiesObj[key] = relationshipPropertiesValues[index];
-    });
+    if (!relationshipName) { message.warn('请输入要更新的关系名称'); return; }
+    const propertiesObj = propertiesToObject(relationshipProperties);
     const updatedRelationship: Relationship = { name: relationshipName, properties: propertiesObj };
     await updateRelationship(updatedRelationship);
+    message.success(`更新关系 "${relationshipName}" 的请求已发送`);
     setRelationshipResult(updatedRelationship);
+    await handleGetAllGraph();
   };
 
-  // 查找关系
   const handleFindRelationship = async () => {
-    const result: Relationship | null = await findRelationship({ name: relationshipName });
+    if (!relationshipName) { message.warn('请输入要查询的关系名称'); return; }
+    const result = await findRelationship({ name: relationshipName });
+    const foundRel = result?.data || result;
+    if (foundRel) {
+      setRelationshipResult(foundRel);
+      message.success('关系查找成功');
+    } else {
+      setRelationshipResult(null);
+      message.warn('关系不存在');
+    }
   };
 
-  // 获取所有关系
+  const handleGetAllNodes = async () => {
+    const result = await getAllNodes({ includeProperties: true });
+    setAllNodes(result?.data || []);
+  };
+
   const handleGetAllRelationships = async () => {
-    const result: Relationship[] = await getAllRelationships({ includeProperties: true });
-    setAllRelationships(result.data);
+    const result = await getAllRelationships({ includeProperties: true });
+    setAllRelationships(result?.data || []);
   };
 
-  // 获取整张图 先执行 获取节点 再执行获取关系
   const handleGetAllGraph = async () => {
-    await handleGetAllNodes();
-    await handleGetAllRelationships();
+    message.loading('正在加载图谱数据...', 0);
+    await Promise.all([handleGetAllNodes(), handleGetAllRelationships()]);
+    message.destroy();
+    message.success('图谱数据加载完成');
+  };
+
+  // --- 渲染函数 (Render Functions) ---
+  const renderPropertiesEditor = (type: 'node' | 'relationship') => {
+    const props = type === 'node' ? nodeProperties : relationshipProperties;
+    return (
+      <div className="properties-list">
+        {props.map((prop, index) => (
+          <div key={index} className="property-row">
+            <Input
+              placeholder={t.key}
+              value={prop.key}
+              onChange={(e) => handleUpdateProperty(type, index, 'key', e.target.value)}
+            />
+            <Input
+              placeholder={t.value}
+              value={prop.value}
+              onChange={(e) => handleUpdateProperty(type, index, 'value', e.target.value)}
+            />
+            <Button
+              type="text"
+              danger
+              onClick={() => handleRemoveProperty(type, index)}
+              icon={<DeleteOutlined />}
+            />
+          </div>
+        ))}
+        <Button
+          type="dashed"
+          onClick={() => handleAddProperty(type)}
+          icon={<PlusOutlined />}
+        >
+          {t.addProperty}
+        </Button>
+      </div>
+    );
   };
 
   return (
-    <Layout className="graph-container">
-      <Content>
-        {/* Main Card containing all UI elements */}
-        <Card className="graph-card">
-          {/* Node and Relationship Panels Container */}
-          <div className="panels-container">
-            {/* Left Panel: Node Operations */}
-            <div className="panel">
-              <h2 className="panel-title">{t.nodeCRUDOperations}</h2>
-
-              {/* Node Name Input */}
-              <div className="property-group">
-                <Input
-                  className="text-input"
-                  placeholder={t.nodeName}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  prefix={<span style={{ color: '#1a73e8', marginRight: '8px' }}>N</span>}
-                />
+    <Layout>
+      <Content className="graph-operate-container">
+        <Card className="control-panel-card">
+          <Tabs defaultActiveKey="1">
+            <TabPane tab={t.nodeOperations} key="1">
+              <div className="tab-pane-content">
+                <div className="input-section">
+                  <Input
+                    size="large"
+                    placeholder={t.nodeName}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  {renderPropertiesEditor('node')}
+                </div>
+                <div className="action-buttons">
+                  <Button type="primary" onClick={handleCreateNode} icon={<PlusOutlined />}>{t.createNode}</Button>
+                  <Button onClick={handleFindNode} icon={<SearchOutlined />}>{t.findNode}</Button>
+                  <Button onClick={handleUpdateNode}>{t.updateNode}</Button>
+                  <Button danger onClick={handleDeleteNode}>{t.deleteNode}</Button>
+                </div>
               </div>
-
-              {/* Node Properties */}
-              <div className="property-group">
-                {nodePropertiesKeys.map((key, index) => (
-                  <div key={index} className="input-row">
-                    <Input
-                      className="text-input"
-                      placeholder={t.key}
-                      value={key}
-                      onChange={(e) => handleUpdateNodeProperty(index, e.target.value, nodePropertiesValues[index])}
-                    />
-                    <Input
-                      className="text-input"
-                      placeholder={t.value}
-                      value={nodePropertiesValues[index]}
-                      onChange={(e) => handleUpdateNodeProperty(index, nodePropertiesKeys[index], e.target.value)}
-                    />
-                    <Button
-                      className="button button-danger"
-                      onClick={() => handleRemoveNodeProperty(index)}
-                      icon={<span>✕</span>}
-                    />
-                  </div>
-                ))}
-
-                {/* Add Node Property Button */}
-                <Button
-                  className="button button-secondary"
-                  onClick={handleAddNodeProperty}
-                  icon={<span>+</span>}
-                >
-                  {t.addNodeProperty}
-                </Button>
+            </TabPane>
+            <TabPane tab={t.relationshipOperations} key="2">
+              <div className="tab-pane-content">
+                <div className="input-section">
+                  <Input
+                    size="large"
+                    placeholder={t.relationshipName}
+                    value={relationshipName}
+                    onChange={(e) => setRelationshipName(e.target.value)}
+                  />
+                  {renderPropertiesEditor('relationship')}
+                </div>
+                <div className="action-buttons">
+                  <Button type="primary" onClick={handleCreateRelationship} icon={<PlusOutlined />}>{t.createRelationship}</Button>
+                  <Button onClick={handleFindRelationship} icon={<SearchOutlined />}>{t.findRelationship}</Button>
+                  <Button onClick={handleUpdateRelationship}>{t.updateRelationship}</Button>
+                  <Button danger onClick={handleDeleteRelationship}>{t.deleteRelationship}</Button>
+                </div>
               </div>
-
-              {/* Node Action Buttons */}
-              <div className="action-group">
-                <Button className="button button-primary" onClick={handleCreateNode}>
-                  {t.createNode}
-                </Button>
-                <Button className="button button-action" onClick={handleFindNode}>
-                  {t.findNode}
-                </Button>
-                <Button className="button button-action" onClick={handleUpdateNode}>
-                  {t.updateNode}
-                </Button>
-                <Button className="button button-danger" onClick={handleDeleteNode}>
-                  {t.deleteNode}
-                </Button>
-              </div>
-            </div>
-
-            {/* Right Panel: Relationship Operations */}
-            <div className="panel">
-              <h2 className="panel-title">{t.relationshipCRUDOperations}</h2>
-
-              {/* Relationship Name Input */}
-              <div className="property-group">
-                <Input
-                  className="text-input"
-                  placeholder={t.nodeName}
-                  value={relationshipName}
-                  onChange={(e) => setRelationshipName(e.target.value)}
-                  prefix={<span style={{ color: '#34a853', marginRight: '8px' }}>R</span>}
-                />
-              </div>
-
-              {/* Relationship Properties */}
-              <div className="property-group">
-                {relationshipPropertiesKeys.map((key, index) => (
-                  <div key={index} className="input-row">
-                    <Input
-                      className="text-input"
-                      placeholder={t.key}
-                      value={key}
-                      onChange={(e) => handleUpdateRelationshipProperty(index, e.target.value, relationshipPropertiesValues[index])}
-                    />
-                    <Input
-                      className="text-input"
-                      placeholder={t.value}
-                      value={relationshipPropertiesValues[index]}
-                      onChange={(e) => handleUpdateRelationshipProperty(index, relationshipPropertiesKeys[index], e.target.value)}
-                    />
-                    <Button
-                      className="button button-danger"
-                      onClick={() => handleRemoveRelationshipProperty(index)}
-                      icon={<span>✕</span>}
-                    />
-                  </div>
-                ))}
-
-                {/* Add Relationship Property Button */}
-                <Button
-                  className="button button-secondary"
-                  onClick={handleAddRelationshipProperty}
-                  icon={<span>+</span>}
-                >
-                  {t.addRelationshipProperty}
-                </Button>
-              </div>
-
-              {/* Relationship Action Buttons */}
-              <div className="action-group">
-                <Button className="button button-primary" onClick={handleCreateRelationship}>
-                  {t.createRelationship}
-                </Button>
-                <Button className="button button-action" onClick={handleFindRelationship}>
-                  {t.findRelationship}
-                </Button>
-                <Button className="button button-action" onClick={handleUpdateRelationship}>
-                  {t.updateRelationship}
-                </Button>
-                <Button className="button button-danger" onClick={handleDeleteRelationship}>
-                  {t.deleteRelationship}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Fetch All Graph Button */}
-          <div className="text-center mt-20">
-            <Button className="button button-fetch fade-in" onClick={handleGetAllGraph} size="large">
-              {t.getAllGraph}
-            </Button>
-          </div>
+            </TabPane>
+          </Tabs>
         </Card>
 
-        {/* Graph Visualization Container */}
-        <div className="visualization-container fade-in">
-          <Neo4jVisualization
-            nodes={allNodes}
-            relationships={allRelationships}
-          />
+        <div className="visualization-wrapper">
+          <div className="visualization-header">
+            <Title level={4} style={{ margin: 0 }}>{t.graphVisualization}</Title>
+            <Button type="primary" onClick={handleGetAllGraph} icon={<SyncOutlined />}>{t.getAllGraph}</Button>
+          </div>
+          <div className="visualization-container">
+            <Neo4jVisualization
+              nodes={allNodes}
+              relationships={allRelationships}
+              // 添加一个key，当数据变化时强制重新渲染组件，解决可视化库可能不更新的问题
+              key={allNodes.length + allRelationships.length}
+            />
+          </div>
         </div>
       </Content>
     </Layout>

@@ -1,0 +1,199 @@
+/* index.css */
+
+/*
+ * ===================================================================
+ * 全局及基础设定 (Global & Base Settings)
+ * ===================================================================
+ */
+:root {
+  --sidebar-width: 380px;
+  --primary-color: #1890ff;
+  --primary-hover-color: #40a9ff;
+  --light-gray: #f0f2f5;
+  --border-color: #d9d9d9;
+  --text-color-primary: #333;
+  --text-color-secondary: #666;
+  --card-background: #ffffff;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.09);
+  --border-radius: 8px;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  overflow: hidden; /* 防止页面滚动 */
+  background-color: var(--light-gray);
+}
+
+/*
+ * ===================================================================
+ * 主应用布局 (Main App Layout)
+ * 这是全新的、基于侧边栏和主内容区的核心布局结构。
+ * ===================================================================
+ */
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: 320px; /* 侧边栏最小宽度 */
+  height: 100vh;
+  background-color: var(--card-background);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+
+.main-content-wrapper {
+  flex-grow: 1;
+  display: flex;
+  height: 100vh;
+  background-color: var(--light-gray);
+}
+
+.canvas-pane {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  overflow: auto;
+  height: 100%;
+}
+
+.data-pane {
+  min-width: 250px; /* 数据面板最小宽度 */
+  height: 100%;
+  padding: 16px;
+  background-color: #fafafa;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/*
+ * ===================================================================
+ * 可拖拽分割条 (Resizable Handle)
+ * 这是实现动态布局的关键元素。
+ * ===================================================================
+ */
+.resizable-handle {
+  width: 8px;
+  background-color: #e8e8e8;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s ease;
+}
+
+.resizable-handle:hover {
+  background-color: var(--primary-hover-color);
+}
+
+.resizable-handle::after {
+  content: '⋮';
+  color: #888;
+  font-size: 16px;
+  line-height: 0;
+}
+
+
+/*
+ * ===================================================================
+ * 侧边栏控件样式 (Sidebar Control Styles)
+ * ===================================================================
+ */
+.sidebar .ant-card {
+  margin-bottom: 16px;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+}
+
+.sidebar .ant-card-head {
+  font-weight: 600;
+  background-color: #fafafa;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.control-group .ant-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.control-group .file-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-info {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--text-color-secondary);
+  word-break: break-all;
+  text-align: center;
+}
+
+/*
+ * ===================================================================
+ * 画布与文本域新样式 (New Canvas & Textarea Styles)
+ * ===================================================================
+ */
+.canvas-element {
+  max-width: 100%;
+  max-height: 100%;
+  background-color: white;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow);
+  cursor: crosshair;
+  transition: box-shadow 0.3s ease;
+}
+
+.canvas-element:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.data-pane .ant-typography {
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.custom-textarea {
+  width: 100%;
+  height: 100%; /* 占满数据面板剩余空间 */
+  flex-grow: 1;
+  resize: none; /* 禁用原生resize，因为面板本身可调 */
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 12px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  background-color: #fff;
+  line-height: 1.5;
+}
+
+.custom-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+/* 隐藏用于上传文件夹的 input 元素 */
+.input-hidden-style {
+  display: none;
+}
