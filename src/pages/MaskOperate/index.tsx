@@ -1,403 +1,1022 @@
-// index.tsx
-
+// MaskOperate/index.tsx
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useModel } from 'umi';
-import { Card, Button, Select, InputNumber, Layout, message, Typography, List, Collapse, Space, Tooltip, Form } from 'antd';
+import { Card, Button, Select, InputNumber, Layout, message, Typography, List, Collapse, Space, Tooltip, Form, Radio, Upload, Switch as AntSwitch } from 'antd';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faUpload, faChevronLeft, faChevronRight, faUndo,
-  faSave, faDrawPolygon, faTrash, faPaintBrush, faArrowsAltH,
-  faCog, faList, faMousePointer
+  faUpload, faChevronLeft, faChevronRight, faUndo, faRedo, // 新增 faRedo 图标
+  faSave, faDrawPolygon, faTrash, faPaintBrush,
+  faCog, faList, faMousePointer, faFileArchive, faEraser, faEye, faEyeSlash,
 } from "@fortawesome/free-solid-svg-icons";
-import { categoryColors } from "./Styles/constants.js";
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+import { defaultCategoryColors, translations, RESIZE_HANDLE_SIZE } from './constants.js';
 import './index.css';
 
 const { Title, Text } = Typography;
 const { Panel } = Collapse;
 const { Option } = Select;
 
+
 // ===================================================================
-// 接口与类型定义 (Interfaces & Type Definitions)
+// 接口与类型定义
 // ===================================================================
 type Point = { x: number; y: number };
-type Box = {
+
+type BaseBoxAnnotation = {
   x: number; y: number; width: number; height: number;
-  category: string; color: string; lineWidth: number;
+  lineWidth?: number;
 };
-type Diagonal = {
+type BaseDiagonalAnnotation = {
   points: [Point, Point];
-  category: string; color: string;
+  thickness?: number;
 };
-type Annotation = Box | Diagonal;
-type UndoOperation = { type: 'add_annotation'; data: Annotation };
+
+type ViewBoxAnnotation = {
+  id: string;
+  x: number; y: number; width: number; height: number;
+  category: string; color: string; sourceLineWidth: number;
+};
+type ViewDiagonalAnnotation = {
+  id: string;
+  points: [Point, Point];
+  category: string; color: string; thickness: number;
+};
+type ViewAnnotation = ViewBoxAnnotation | ViewDiagonalAnnotation;
+
+
+type ImageFileInfo = {
+  name: string;
+  url: string;
+  originalFile: File;
+  width: number;
+  height: number;
+};
+
+type ImageAnnotationData = {
+  jsonAnnotations: ViewAnnotation[];
+  txtAnnotations: ViewAnnotation[];
+  originalTxtFileContent?: string;
+};
+
+type UndoOperation = {
+  imageId: string;
+  previousJsonAnnotations: ViewAnnotation[];
+};
+
 type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete';
+type AnnotationSourceType = 'json' | 'txt' | 'none';
+
+// 新增类型：用于拖动和缩放状态
+type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
+type DraggingState = {
+  type: 'move' | 'resize';
+  handle?: ResizeHandle; // Only for resize
+  startMousePos: Point;
+  startAnnotationState: ViewAnnotation;
+} | null;
+
 
 // ===================================================================
-// 国际化文本 (i18n Translations)
+// 辅助函数
 // ===================================================================
-const translations = {
-  zh: {
-    uploadFolder: "上传", undo: "撤销", exportJSON: "导出",
-    previous: "上一张", next: "下一张", currentImage: "当前:",
-    annotations: "标注列表", tools: "工具", settings: "设置",
-    noAnnotations: "当前图片无标注", noImages: "请先上传文件夹",
-    category: "类别", lineWidth: "线宽",
-    selectTool: "选择/移动", rectTool: "矩形工具", diagonalTool: "斜线工具", deleteTool: "删除工具",
-    showSettings: "显示设置", showAnnotations: "显示列表",
-    imageSize: "图像尺寸", mouseCoords: "鼠标坐标",
-    diagonalArea: "斜线区域", positionAndSize: "位置与尺寸",
-  },
-  en: {
-    uploadFolder: "Upload", undo: "Undo", exportJSON: "Export",
-    previous: "Previous", next: "Next", currentImage: "Current:",
-    annotations: "Annotations", tools: "Tools", settings: "Settings",
-    noAnnotations: "No annotations for this image", noImages: "Please upload a folder first",
-    category: "Category", lineWidth: "Line Width",
-    selectTool: "Select/Move", rectTool: "Rectangle", diagonalTool: "Diagonal", deleteTool: "Delete",
-    showSettings: "Show Settings", showAnnotations: "Show List",
-    imageSize: "Image Size", mouseCoords: "Mouse Coords",
-    diagonalArea: "Diagonal Area", positionAndSize: "Position & Size",
-  }
+const getFileNameWithoutExtension = (fileName: string): string => {
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex === -1) return fileName;
+  return fileName.substring(0, lastDotIndex);
 };
 
+const generateUniqueId = (): string => `anno_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+const getCategoryColor = (categoryName: string, currentCategoryColors: { [key: string]: string }, allClasses: string[], defaultColors: {[key:string]:string}): string => {
+  if (currentCategoryColors[categoryName]) {
+    return currentCategoryColors[categoryName];
+  }
+  if (defaultColors[categoryName]) {
+    return defaultColors[categoryName];
+  }
+  const categoryIndexInAll = allClasses.indexOf(categoryName);
+  const defaultColorKeys = Object.keys(defaultColors);
+  if (defaultColorKeys.length > 0) {
+    if (categoryIndexInAll !== -1) {
+      return defaultColors[defaultColorKeys[categoryIndexInAll % defaultColorKeys.length]];
+    } else {
+      const knownColorCategories = Object.keys(currentCategoryColors);
+      return defaultColors[defaultColorKeys[knownColorCategories.length % defaultColorKeys.length]];
+    }
+  }
+  return "rgba(128, 128, 128, 0.4)";
+};
+
+
 // ===================================================================
-// 主组件 (Main Component)
+// 主组件
 // ===================================================================
-const MaskOperate = () => {
-  // --- 状态管理 (State Management) ---
+const MaskOperatePro = () => {
   const { initialState } = useModel('@@initialState');
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang];
 
-  const [images, setImages] = useState<{name: string, url: string}[]>([]);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [imageBoxes, setImageBoxes] = useState<{[key: string]: Annotation[]}>({});
+  const [images, setImages] = useState<ImageFileInfo[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(-1);
+
+  const [allImageAnnotations, setAllImageAnnotations] = useState<{ [imageName: string]: ImageAnnotationData }>({});
+
+  const [categories, setCategories] = useState<string[]>(Object.keys(defaultCategoryColors));
+  const [categoryColors, setCategoryColors] = useState<{ [key: string]: string }>({...defaultCategoryColors});
 
   const [activeTool, setActiveTool] = useState<ActiveTool>('rectangle');
-  const [currentCategory, setCurrentCategory] = useState("Net 1");
-  const [lineWidth, setLineWidth] = useState(12);
+  const [currentCategory, setCurrentCategory] = useState<string>(Object.keys(defaultCategoryColors)[0] || "");
+  const [currentLineWidth, setCurrentLineWidth] = useState<number>(5);
 
-  const [isLeftPanelVisible, setIsLeftPanelVisible] = useState(true);
-  const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
+  const [isLeftPanelVisible, setIsLeftPanelVisible] = useState<boolean>(true);
+  const [isRightPanelVisible, setIsRightPanelVisible] = useState<boolean>(true);
 
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [startPosition, setStartPosition] = useState<Point | null>(null);
-  const [diagonalPoints, setDiagonalPoints] = useState<Point[]>([]);
+  // ================================================================
+  // ========== 新增 Redo Stack 状态 ==========
+  // ================================================================
+  const [undoStack, setUndoStack] = useState<UndoOperation[]>([]);
+  const [redoStack, setRedoStack] = useState<UndoOperation[]>([]);
 
-  const [undoHistory, setUndoHistory] = useState<UndoOperation[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<string[] | number[]>([]);
-  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
-  const [mousePosition, setMousePosition] = useState<Point>({ x: 0, y: 0 });
+  const [annotationListExpandedKeys, setAnnotationListExpandedKeys] = useState<string[] | number[]>([]);
+  const [canvasMousePosition, setCanvasMousePosition] = useState<Point>({ x: 0, y: 0 });
+
+  const [selectedAnnotationSource, setSelectedAnnotationSource] = useState<AnnotationSourceType>('json');
+  const [showAnnotationsOnCanvas, setShowAnnotationsOnCanvas] = useState<boolean>(true);
+  const [showCategoryInBox, setShowCategoryInBox] = useState<boolean>(true);
+
+  const [tempDiagonalPoints, setTempDiagonalPoints] = useState<Point[]>([]);
+
+  // --- 新状态：用于编辑功能 ---
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [draggingState, setDraggingState] = useState<DraggingState>(null);
+  const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // 创建一个ref来引用文件输入元素
+  const folderUploadInputRef = useRef<HTMLInputElement>(null);
+  const classesFileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- 派生状态与常量 (Derived State & Constants) ---
-  const hasImages = images.length > 0;
-  const currentImage = images[currentImageIndex];
-  const currentBoxes = currentImage ? (imageBoxes[currentImage.name] || []) : [];
-  const categories = Object.keys(categoryColors);
+  const hasActiveImage = images.length > 0 && currentImageIndex >= 0 && currentImageIndex < images.length;
+  const currentImageInfo = hasActiveImage ? images[currentImageIndex] : null;
 
-  // --- 副作用钩子 (useEffect Hooks) ---
+  const activeViewAnnotations = useCallback((): ViewAnnotation[] => {
+    if (!currentImageInfo || !showAnnotationsOnCanvas) return [];
+    const annotationsForCurrentImage = allImageAnnotations[currentImageInfo.name];
+    if (!annotationsForCurrentImage) return [];
+
+    if (selectedAnnotationSource === 'json') return annotationsForCurrentImage.jsonAnnotations || [];
+    if (selectedAnnotationSource === 'txt') return annotationsForCurrentImage.txtAnnotations || [];
+    return [];
+  }, [currentImageInfo, allImageAnnotations, selectedAnnotationSource, showAnnotationsOnCanvas]);
+
+  const currentCanvasAnnotations = activeViewAnnotations();
+  const selectedAnnotation = currentCanvasAnnotations.find(a => a.id === selectedAnnotationId);
+
   useEffect(() => {
-    drawCanvas();
-  }, [imageBoxes, currentImage]);
+    if (categories.length > 0 && (!currentCategory || !categories.includes(currentCategory))) {
+      setCurrentCategory(categories[0]);
+    } else if (categories.length === 0 && currentCategory !== "") {
+      setCurrentCategory("");
+    }
+  }, [categories, currentCategory]);
 
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return;
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      setMousePosition({
-        x: Math.round((e.clientX - rect.left) * scaleX),
-        y: Math.round((e.clientY - rect.top) * scaleY)
-      });
+    redrawCanvas();
+  }, [currentImageInfo, currentCanvasAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, tempDiagonalPoints, canvasMousePosition]);
+
+  useEffect(() => {
+    // This effect handles changing the cursor style based on mouse position over handles
+    const canvas = canvasRef.current;
+    if (!canvas || activeTool !== 'select' || !selectedAnnotation || 'points' in selectedAnnotation) {
+      if(canvas) canvas.style.cursor = 'default';
+      return;
+    }
+
+    const checkHandles = (mousePos: Point) => {
+      const handles = getResizeHandles(selectedAnnotation as ViewBoxAnnotation);
+      for(const handle of Object.keys(handles)) {
+        const h = handles[handle as ResizeHandle];
+        if(isPointInRect(mousePos, {x: h.x, y: h.y, width: h.size, height: h.size})) {
+          setHoveredHandle(handle as ResizeHandle);
+          canvas.style.cursor = handles[handle as ResizeHandle].cursor;
+          return;
+        }
+      }
+      // If not over a handle, check if over the main body for move cursor
+      if(isPointInRect(mousePos, selectedAnnotation)) {
+        canvas.style.cursor = 'move';
+      } else {
+        canvas.style.cursor = 'default';
+      }
+      setHoveredHandle(null);
     };
-    const wrapper = canvas.parentElement;
-    wrapper?.addEventListener('mousemove', handleMouseMove);
-    return () => wrapper?.removeEventListener('mousemove', handleMouseMove);
-  }, [hasImages, currentImage]);
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (draggingState) return; // Don't change cursor while dragging
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0 || !currentImageInfo) return;
+
+      const scaleX = currentImageInfo.width / rect.width;
+      const scaleY = currentImageInfo.height / rect.height;
+      const xOnImage = (e.clientX - rect.left) * scaleX;
+      const yOnImage = (e.clientY - rect.top) * scaleY;
+
+      checkHandles({ x: xOnImage, y: yOnImage });
+    };
+
+    canvas.addEventListener('mousemove', handleMouseMove);
+    return () => canvas.removeEventListener('mousemove', handleMouseMove);
+
+  }, [selectedAnnotation, activeTool, draggingState, currentImageInfo]);
 
 
-  // --- 核心功能函数 (Core Functions) ---
-  const drawCanvas = () => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
+  useEffect(() => {
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) return;
 
-    if (currentImage) {
+    const handleMouseMoveForCoords = (event: MouseEvent) => {
+      if (!currentImageInfo || !canvasRef.current) {
+        setCanvasMousePosition({ x: 0, y: 0 });
+        return;
+      }
+      const rect = canvasRef.current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      const scaleX = currentImageInfo.width / rect.width;
+      const scaleY = currentImageInfo.height / rect.height;
+      const xOnImage = Math.round((event.clientX - rect.left) * scaleX);
+      const yOnImage = Math.round((event.clientY - rect.top) * scaleY);
+      setCanvasMousePosition({ x: Math.max(0, xOnImage), y: Math.max(0, yOnImage) });
+    };
+
+    canvasElement.addEventListener('mousemove', handleMouseMoveForCoords);
+    return () => canvasElement.removeEventListener('mousemove', handleMouseMoveForCoords);
+  }, [currentImageInfo]);
+
+  // ===================================================================
+  // 渲染与绘制逻辑
+  // ===================================================================
+
+  const getResizeHandles = (box: ViewBoxAnnotation): {[key in ResizeHandle]: {x: number, y: number, size: number, cursor: string}} => {
+    const s = RESIZE_HANDLE_SIZE;
+    const { x, y, width, height } = box;
+    return {
+      topLeft:    { x: x - s/2, y: y - s/2, size: s, cursor: 'nwse-resize' },
+      top:        { x: x + width/2 - s/2, y: y - s/2, size: s, cursor: 'ns-resize' },
+      topRight:   { x: x + width - s/2, y: y - s/2, size: s, cursor: 'nesw-resize' },
+      left:       { x: x - s/2, y: y + height/2 - s/2, size: s, cursor: 'ew-resize' },
+      right:      { x: x + width - s/2, y: y + height/2 - s/2, size: s, cursor: 'ew-resize' },
+      bottomLeft: { x: x - s/2, y: y + height - s/2, size: s, cursor: 'nesw-resize' },
+      bottom:     { x: x + width/2 - s/2, y: y + height - s/2, size: s, cursor: 'ns-resize' },
+      bottomRight:{ x: x + width - s/2, y: y + height - s/2, size: s, cursor: 'nwse-resize' },
+    };
+  };
+
+  const isPointInRect = (point: Point, rect: { x: number; y: number; width: number; height: number }): boolean => {
+    return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+  };
+
+  const redrawCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    if (currentImageInfo) {
       const img = new Image();
-      img.src = currentImage.url;
+      img.src = currentImageInfo.url;
       img.onload = () => {
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
-        ctx.drawImage(img, 0, 0);
-        (imageBoxes[currentImage.name] || []).forEach(box => {
-          if ('points' in box) drawDiagonalRegion(box as Diagonal);
-          else drawRectangleBox(box as Box);
+        canvas.width = currentImageInfo.width;
+        canvas.height = currentImageInfo.height;
+        ctx.clearRect(0,0, canvas.width, canvas.height);
+
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 3]);
+        ctx.strokeRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+
+        currentCanvasAnnotations.forEach(anno => {
+          const isSelected = anno.id === selectedAnnotationId;
+          ctx.globalAlpha = isSelected ? 1.0 : 0.75;
+          if ('points' in anno) {
+            renderDiagonal(anno, ctx, false, isSelected);
+          } else {
+            renderRectangle(anno, ctx, false, isSelected);
+          }
         });
+
+        if (draggingState && activeTool === 'rectangle') {
+          const startPoint = draggingState.startMousePos;
+          const endPoint = canvasMousePosition;
+          const previewRect = createRectangleFromPoints(startPoint, endPoint, currentCategory, categoryColors[currentCategory] || 'rgba(0,0,0,0.2)', currentLineWidth);
+          renderRectangle(previewRect, ctx, true);
+        }
+
+        if (tempDiagonalPoints.length === 1 && currentCategory && categoryColors[currentCategory]) {
+          const tempDiag: ViewDiagonalAnnotation = {
+            id: 'temp',
+            points: [tempDiagonalPoints[0], canvasMousePosition],
+            category: currentCategory,
+            color: categoryColors[currentCategory],
+            thickness: currentLineWidth
+          };
+          renderDiagonal(tempDiag, ctx, true, false);
+        }
+
+        ctx.globalAlpha = 1.0;
       };
       if (img.complete) img.onload();
     } else {
-      canvas.width = 800; canvas.height = 600;
+      const displayWidth = canvas.offsetWidth || 800;
+      const displayHeight = canvas.offsetHeight || 600;
+      canvas.width = displayWidth; canvas.height = displayHeight;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#eef2f7"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.font = "20px Arial"; ctx.fillStyle = "#6b7280"; ctx.textAlign = "center";
+      ctx.fillStyle = "#e0e8f0"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0050b3"; ctx.textAlign = "center";
       ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
   };
 
-  const drawRectangleBox = (box: Box) => {
-    const ctx = canvasRef.current?.getContext("2d"); if (!ctx) return;
-    ctx.fillStyle = box.color; ctx.strokeStyle = "black"; ctx.lineWidth = box.lineWidth || 1;
+  const renderRectangle = (box: ViewBoxAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
+    if (isPreview) {
+      ctx.save();
+      ctx.setLineDash([8, 4]);
+      ctx.strokeStyle = "#4A90E2";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(box.x, box.y, box.width, box.height);
+      ctx.restore();
+      return;
+    }
+
+    ctx.fillStyle = box.color;
+    ctx.strokeStyle = isSelected ? "#007bff" : "rgba(0,0,0,0.8)";
+    ctx.lineWidth = isSelected ? 2.5 : 1.5;
     ctx.fillRect(box.x, box.y, box.width, box.height);
     ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+    if (showCategoryInBox && !isPreview) {
+      ctx.fillStyle = "black";
+      ctx.font = "bold 12px Arial";
+      ctx.textBaseline = "top";
+      const maxTextWidth = box.width - 6;
+      let displayText = box.category;
+      if(ctx.measureText(displayText).width > maxTextWidth && maxTextWidth > 10) {
+        let newText = "";
+        for(let char of box.category){
+          if(ctx.measureText(newText + char + "...").width > maxTextWidth) break;
+          newText += char;
+        }
+        displayText = newText ? newText + "..." : "";
+      }
+      if(displayText) ctx.fillText(displayText, box.x + 3, box.y + 3);
+    }
+
+    if (isSelected && !isPreview) {
+      const handles = getResizeHandles(box);
+      ctx.fillStyle = '#007bff';
+      for (const handle of Object.values(handles)) {
+        ctx.fillRect(handle.x, handle.y, handle.size, handle.size);
+      }
+    }
   };
 
-  const drawDiagonalRegion = (box: Diagonal) => {
-    const ctx = canvasRef.current?.getContext("2d"); if (!ctx) return;
-    const { angle, width, centerX, centerY } = calculateRotationParams(box.points);
+  const renderDiagonal = (diag: ViewDiagonalAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
+    const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points);
+    if (length === 0) return;
     ctx.save();
-    ctx.translate(centerX, centerY); ctx.rotate(angle);
-    ctx.beginPath(); ctx.rect(-width / 2, -lineWidth / 2, width, lineWidth);
-    ctx.fillStyle = box.color || "rgba(128, 128, 128, 0.3)";
-    ctx.fill(); ctx.stroke();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(angleRad);
+    ctx.beginPath();
+    ctx.rect(-length / 2, -diag.thickness / 2, length, diag.thickness);
+    ctx.fillStyle = diag.color;
+    if (isSelected) {
+      ctx.strokeStyle = "#007bff";
+      ctx.lineWidth = 2.5;
+    } else {
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.lineWidth = 1;
+    }
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
+
+    if (showCategoryInBox && !isPreview) {
+      ctx.fillStyle = "black";
+      ctx.font = "bold 12px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(diag.category, centerX, centerY - diag.thickness / 2 - 5);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
   };
 
-  const calculateRotationParams = (points: [Point, Point]) => {
-    const dx = points[1].x - points[0].x; const dy = points[1].y - points[0].y;
+  const getDiagonalParameters = (points: [Point, Point]) => {
+    const dx = points[1].x - points[0].x;
+    const dy = points[1].y - points[0].y;
     return {
-      angle: Math.atan2(dy, dx),
-      width: Math.sqrt(dx * dx + dy * dy),
+      angleRad: Math.atan2(dy, dx),
+      length: Math.sqrt(dx * dx + dy * dy),
       centerX: (points[0].x + points[1].x) / 2,
       centerY: (points[0].y + points[1].y) / 2,
     };
   };
 
-  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    const imageFiles = files.filter(f => f.type.match(/image\/(jpeg|png)/));
-    const jsonFiles = files.filter(f => f.name.endsWith(".json"));
-    const sortedImages = imageFiles
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
-      .map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
-
-    setImages(sortedImages); setCurrentImageIndex(0); setUndoHistory([]);
-
-    const initialBoxes: {[key: string]: Annotation[]} = {};
-    sortedImages.forEach(img => { initialBoxes[img.name] = []; });
-
-    const jsonPromises = jsonFiles.map(jsonFile => new Promise<void>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const jsonData = JSON.parse(event.target!.result as string);
-          const imgName = jsonFile.name.replace(/\.json$/, '.jpg');
-          if (initialBoxes.hasOwnProperty(imgName)) {
-            initialBoxes[imgName] = jsonData.map((box: any) => ({ ...box, color: categoryColors[box.category] || "#808080" }));
-          }
-          resolve();
-        } catch (error) { reject(new Error(`解析JSON失败 ${jsonFile.name}: ${error}`)); }
-      };
-      reader.onerror = () => reject(new Error(`读取文件失败 ${jsonFile.name}`));
-      reader.readAsText(jsonFile);
-    }));
-
-    try {
-      await Promise.all(jsonPromises);
-      setImageBoxes(initialBoxes);
-    } catch (error) { message.error((error as Error).message); }
+  const createRectangleFromPoints = (p1: Point, p2: Point, categoryName: string, colorStr: string, lineWidthVal: number): ViewBoxAnnotation => {
+    const x = Math.min(p1.x, p2.x);
+    const y = Math.min(p1.y, p2.y);
+    const width = Math.abs(p1.x - p2.x);
+    const height = Math.abs(p1.y - p2.y);
+    return {
+      id: generateUniqueId(),
+      x: parseFloat(x.toFixed(2)), y: parseFloat(y.toFixed(2)),
+      width: parseFloat(width.toFixed(2)), height: parseFloat(height.toFixed(2)),
+      category: categoryName, color: colorStr, sourceLineWidth: lineWidthVal,
+    };
   };
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!hasImages) return;
-    const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX, y = (e.clientY - rect.top) * scaleY;
+  // ===================================================================
+  // 事件处理
+  // ===================================================================
 
-    if (activeTool === 'delete') {
-      const boxIndexToRemove = findBoxIndexByPoint(x, y);
-      if (boxIndexToRemove > -1) {
-        const newBoxes = [...currentBoxes]; newBoxes.splice(boxIndexToRemove, 1);
-        setImageBoxes(prev => ({ ...prev, [currentImage.name]: newBoxes }));
-      }
-    } else if (activeTool === 'diagonal') {
-      const newPoints = [...diagonalPoints, { x, y }]; setDiagonalPoints(newPoints);
-      if (newPoints.length === 2) {
-        const newDiagonal: Diagonal = {
-          points: newPoints.map(p => ({ x: parseFloat(p.x.toFixed(2)), y: parseFloat(p.y.toFixed(2)) })) as [Point, Point],
-          category: currentCategory, color: categoryColors[currentCategory],
-        };
-        addAnnotation(newDiagonal); setDiagonalPoints([]);
-      }
-    } else if (activeTool === 'rectangle') {
-      if (!isDrawing) { setStartPosition({x, y}); setIsDrawing(true); }
-      else {
-        const endPosition = { x, y };
-        const dx = Math.abs(endPosition.x - startPosition!.x), dy = Math.abs(endPosition.y - startPosition!.y);
-        let boxX, boxY, boxWidth, boxHeight;
-        if (dy < 5) {
-          boxX = Math.min(startPosition!.x, endPosition.x); boxY = (startPosition!.y + endPosition.y) / 2 - lineWidth / 2;
-          boxWidth = dx; boxHeight = lineWidth;
-        } else if (dx < 5) {
-          boxX = (startPosition!.x + endPosition.x) / 2 - lineWidth / 2; boxY = Math.min(startPosition!.y, endPosition.y);
-          boxWidth = lineWidth; boxHeight = dy;
-        } else {
-          boxX = Math.min(startPosition!.x, endPosition.x); boxY = Math.min(startPosition!.y, endPosition.y);
-          boxWidth = dx; boxHeight = dy;
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!currentImageInfo) return;
+    const mousePos = canvasMousePosition;
+
+    if (activeTool === 'select') {
+      let clickedOnAnnotation: ViewAnnotation | undefined = undefined;
+      let clickedHandle: ResizeHandle | null = null;
+
+      const selectedAnno = currentCanvasAnnotations.find(a => a.id === selectedAnnotationId);
+      if (selectedAnno && !('points' in selectedAnno)) {
+        const handles = getResizeHandles(selectedAnno);
+        for(const handleKey of Object.keys(handles)) {
+          const handle = handles[handleKey as ResizeHandle];
+          if(isPointInRect(mousePos, {x: handle.x, y: handle.y, width: handle.size, height: handle.size})) {
+            clickedOnAnnotation = selectedAnno;
+            clickedHandle = handleKey as ResizeHandle;
+            break;
+          }
         }
-        const newBox: Box = {
-          x: parseFloat(boxX.toFixed(2)), y: parseFloat(boxY.toFixed(2)),
-          width: parseFloat(boxWidth.toFixed(2)), height: parseFloat(boxHeight.toFixed(2)),
-          category: currentCategory, color: categoryColors[currentCategory], lineWidth: 0.3
-        };
-        addAnnotation(newBox); setIsDrawing(false); setStartPosition(null);
+      }
+
+      if (!clickedOnAnnotation) {
+        for (let i = currentCanvasAnnotations.length - 1; i >= 0; i--) {
+          const anno = currentCanvasAnnotations[i];
+          if ('points' in anno) {
+            const diag = anno as ViewDiagonalAnnotation;
+            const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points);
+            const translatedX = mousePos.x - centerX;
+            const translatedY = mousePos.y - centerY;
+            const rotatedX = translatedX * Math.cos(-angleRad) - translatedY * Math.sin(-angleRad);
+            const rotatedY = translatedX * Math.sin(-angleRad) + translatedY * Math.cos(-angleRad);
+            if (Math.abs(rotatedX) <= length / 2 && Math.abs(rotatedY) <= diag.thickness / 2) {
+              clickedOnAnnotation = anno;
+              break;
+            }
+          } else {
+            if (isPointInRect(mousePos, anno as ViewBoxAnnotation)) {
+              clickedOnAnnotation = anno;
+              break;
+            }
+          }
+        }
+      }
+
+      if (clickedOnAnnotation) {
+        setSelectedAnnotationId(clickedOnAnnotation.id);
+        addUndoRecord(currentImageInfo.name, currentCanvasAnnotations);
+        setDraggingState({
+          type: clickedHandle ? 'resize' : 'move',
+          handle: clickedHandle || undefined,
+          startMousePos: mousePos,
+          startAnnotationState: JSON.parse(JSON.stringify(clickedOnAnnotation))
+        });
+      } else {
+        setSelectedAnnotationId(null);
+      }
+
+    } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
+      if (!currentCategory || !categoryColors[currentCategory]) {
+        if (!currentCategory) message.warn("请先选择一个类别再进行标注!");
+        else message.error(`类别 "${currentCategory}" 缺少颜色配置，无法标注!`);
+        return;
+      }
+      const startPoint = { x: mousePos.x, y: mousePos.y };
+      if (activeTool === 'rectangle') {
+        setDraggingState({ type: 'move' , startMousePos: startPoint, startAnnotationState: {} as any });
       }
     }
   };
 
-  const findBoxIndexByPoint = (x: number, y: number): number => {
-    for (let i = currentBoxes.length - 1; i >= 0; i--) {
-      const box = currentBoxes[i];
-      if ('points' in box) {
-        const { points } = box as Diagonal;
-        const { angle, width, centerX, centerY } = calculateRotationParams(points);
-        const px = x - centerX, py = y - centerY;
-        const xr = px * Math.cos(angle) + py * Math.sin(angle);
-        const yr = -px * Math.sin(angle) + py * Math.cos(angle);
-        if (Math.abs(xr) <= width / 2 && Math.abs(yr) <= lineWidth / 2) return i;
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!draggingState || !currentImageInfo) return;
+
+    const mousePos = canvasMousePosition;
+    const dx = mousePos.x - draggingState.startMousePos.x;
+    const dy = mousePos.y - draggingState.startMousePos.y;
+
+    if (activeTool === 'select') {
+      const updatedAnnotations = currentCanvasAnnotations.map(anno => {
+        if (anno.id === draggingState.startAnnotationState.id) {
+          const startState = draggingState.startAnnotationState;
+          let newAnno = { ...startState };
+
+          if (draggingState.type === 'move') {
+            if ('points' in startState) {
+              newAnno.points = [
+                { x: startState.points[0].x + dx, y: startState.points[0].y + dy },
+                { x: startState.points[1].x + dx, y: startState.points[1].y + dy }
+              ] as [Point, Point];
+            } else {
+              (newAnno as ViewBoxAnnotation).x = (startState as ViewBoxAnnotation).x + dx;
+              (newAnno as ViewBoxAnnotation).y = (startState as ViewBoxAnnotation).y + dy;
+            }
+          } else if (draggingState.type === 'resize' && draggingState.handle && !('points' in startState)) {
+            const handle = draggingState.handle;
+            const startBox = startState as ViewBoxAnnotation;
+            let newBox = newAnno as ViewBoxAnnotation;
+            if (handle.includes('right')) newBox.width = Math.max(1, startBox.width + dx);
+            if (handle.includes('left')) {
+              newBox.x = startBox.x + dx;
+              newBox.width = Math.max(1, startBox.width - dx);
+            }
+            if (handle.includes('bottom')) newBox.height = Math.max(1, startBox.height + dy);
+            if (handle.includes('top')) {
+              newBox.y = startBox.y + dy;
+              newBox.height = Math.max(1, startBox.height - dy);
+            }
+          }
+          return newAnno;
+        }
+        return anno;
+      });
+
+      setAllImageAnnotations(prev => ({
+        ...prev,
+        [currentImageInfo.name]: {
+          ...prev[currentImageInfo.name],
+          jsonAnnotations: updatedAnnotations
+        }
+      }));
+
+    }
+  };
+
+  const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!currentImageInfo) return;
+
+    if (draggingState && activeTool === 'rectangle') {
+      const startPoint = draggingState.startMousePos;
+      const endPoint = canvasMousePosition;
+      const newRect = createRectangleFromPoints(startPoint, endPoint, currentCategory, categoryColors[currentCategory], currentLineWidth);
+      if (newRect.width > 2 && newRect.height > 2) {
+        addAnnotationToCurrentImage(newRect);
+      }
+    }
+
+    setDraggingState(null);
+  };
+
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!currentImageInfo || draggingState) return;
+
+    if (activeTool === 'delete') {
+      const clickPoint = canvasMousePosition;
+      const annoIndexToRemove = findAnnotationIndexAtPoint(clickPoint, currentCanvasAnnotations);
+      if (annoIndexToRemove > -1) {
+        removeAnnotationFromCurrentImageByIndex(annoIndexToRemove);
+      }
+    } else if (activeTool === 'diagonal') {
+      const clickPoint = canvasMousePosition;
+      if (!currentCategory || !categoryColors[currentCategory]) {
+        if (!currentCategory) message.warn("请先选择一个类别再进行标注!");
+        else message.error(`类别 "${currentCategory}" 缺少颜色配置，无法标注!`);
+        return;
+      }
+
+      const newPoints = [...tempDiagonalPoints, clickPoint];
+      setTempDiagonalPoints(newPoints);
+      if (newPoints.length === 2) {
+        const newDiagonal: ViewDiagonalAnnotation = {
+          id: generateUniqueId(),
+          points: [newPoints[0], newPoints[1]] as [Point, Point],
+          category: currentCategory,
+          color: categoryColors[currentCategory],
+          thickness: currentLineWidth,
+        };
+        if(getDiagonalParameters(newDiagonal.points).length > 2) {
+          addAnnotationToCurrentImage(newDiagonal);
+        }
+        setTempDiagonalPoints([]);
+      }
+    }
+  };
+
+  const yoloLineToViewAnnotation = (line: string, imgWidth: number, imgHeight: number, classList: string[], colorMap: { [key: string]: string }, defaultLineWidth: number): ViewBoxAnnotation | null => {
+    const parts = line.split(' ');
+    if (parts.length < 5) return null;
+    const classIndex = parseInt(parts[0], 10);
+    const x_center = parseFloat(parts[1]) * imgWidth;
+    const y_center = parseFloat(parts[2]) * imgHeight;
+    const width = parseFloat(parts[3]) * imgWidth;
+    const height = parseFloat(parts[4]) * imgHeight;
+    const category = classList[classIndex] || `Class_${classIndex}`;
+    const color = getCategoryColor(category, colorMap, classList, defaultCategoryColors);
+    return {
+      id: generateUniqueId(),
+      x: x_center - width / 2,
+      y: y_center - height / 2,
+      width: width,
+      height: height,
+      category: category,
+      color: color,
+      sourceLineWidth: defaultLineWidth,
+    };
+  };
+
+  const viewAnnotationToYoloString = (anno: ViewBoxAnnotation, imgWidth: number, imgHeight: number, classList: string[]): string | null => {
+    const classIndex = classList.indexOf(anno.category);
+    if (classIndex === -1) return null;
+    const x_center = (anno.x + anno.width / 2) / imgWidth;
+    const y_center = (anno.y + anno.height / 2) / imgHeight;
+    const width = anno.width / imgWidth;
+    const height = anno.height / imgHeight;
+    return `${classIndex} ${x_center.toFixed(6)} ${y_center.toFixed(6)} ${width.toFixed(6)} ${height.toFixed(6)}`;
+  };
+
+  const exportAllDataAsZip = async () => {
+    if (images.length === 0) return;
+    message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
+    const zip = new JSZip();
+    for (const imageInfo of images) {
+      const { originalFile, name: imageName } = imageInfo;
+      const annotationsForImage = allImageAnnotations[imageName];
+      if (originalFile) {
+        zip.file(imageName, originalFile);
+      }
+      if (annotationsForImage && annotationsForImage.jsonAnnotations.length > 0) {
+        const outputJson: { [category: string]: any[] } = {};
+        annotationsForImage.jsonAnnotations.forEach(anno => {
+          if (!outputJson[anno.category]) outputJson[anno.category] = [];
+          if ('points' in anno) {
+            outputJson[anno.category].push({
+              points: anno.points.map(p => ({ x: parseFloat(p.x.toFixed(2)), y: parseFloat(p.y.toFixed(2)) })),
+              thickness: anno.thickness
+            });
+          } else {
+            outputJson[anno.category].push({
+              x: parseFloat(anno.x.toFixed(2)), y: parseFloat(anno.y.toFixed(2)),
+              width: parseFloat(anno.width.toFixed(2)), height: parseFloat(anno.height.toFixed(2)),
+              lineWidth: anno.sourceLineWidth
+            });
+          }
+        });
+        const baseName = getFileNameWithoutExtension(imageName);
+        zip.file(`${baseName}.json`, JSON.stringify(outputJson, null, 2));
+      }
+    }
+    const classesContent = categories.join('\n');
+    zip.file("classes.txt", classesContent);
+    try {
+      const content = await zip.generateAsync({ type: "blob" });
+      saveAs(content, "annotated_data.zip");
+      message.success({ content: t.exportSuccessMessage, key: 'exporting', duration: 3 });
+    } catch (error) {
+      message.error({ content: `${t.exportFailureMessage} ${(error as Error).message}`, key: 'exporting', duration: 3 });
+      console.error("ZIP Export Error:", error);
+    }
+  };
+
+  const processUploadedFiles = async (uploadedFiles: File[]) => {
+    message.loading({ content: t.uploadFolder, key: 'fileProcessing', duration: 0 });
+    let workingCategories = [...categories];
+    let workingCategoryColors = {...categoryColors};
+    const classesFile = uploadedFiles.find(f => f.name.toLowerCase() === "classes.txt");
+    if (classesFile) {
+      try {
+        const classesText = await classesFile.text();
+        const parsedCats = classesText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        if (parsedCats.length > 0) {
+          workingCategories = parsedCats;
+          const newClrs: { [key: string]: string } = {};
+          parsedCats.forEach((cat, idx) => {
+            newClrs[cat] = categoryColors[cat] || defaultCategoryColors[cat] || Object.values(defaultCategoryColors)[idx % Object.values(defaultCategoryColors).length] || `hsl(${ (idx * 360 / parsedCats.length) % 360 }, 70%, 60%)`;
+          });
+          workingCategoryColors = newClrs;
+        }
+      } catch (e) { message.error(`${t.errorReadFileGeneric} classes.txt: ${(e as Error).message}`); }
+    }
+    const imageInputFiles = uploadedFiles.filter(f => f.type.match(/image\/(jpeg|png|jpg)/i));
+    const jsonInputFiles = uploadedFiles.filter(f => f.name.toLowerCase().endsWith(".json"));
+    const txtInputFiles = uploadedFiles.filter(f => f.name.toLowerCase().endsWith(".txt") && f.name.toLowerCase() !== "classes.txt");
+    const newImages: ImageFileInfo[] = [];
+    const newAnnotationsData: { [imageName: string]: ImageAnnotationData } = {};
+    let jsonAnnotationsFoundCount = 0;
+    let filesProcessedCount = 0;
+    for (const imgFile of imageInputFiles.sort((a,b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+      filesProcessedCount++;
+      const originalImageName = imgFile.name;
+      const baseImageName = getFileNameWithoutExtension(originalImageName);
+      const imageUrl = URL.createObjectURL(imgFile);
+      try {
+        const imageInfo = await new Promise<ImageFileInfo>((resolve, reject) => {
+          const imageElement = new Image();
+          imageElement.onload = () => resolve({ name: originalImageName, url: imageUrl, originalFile: imgFile, width: imageElement.naturalWidth, height: imageElement.naturalHeight });
+          imageElement.onerror = () => reject(new Error(`无法加载图片: ${originalImageName}`));
+          imageElement.src = imageUrl;
+        });
+        newImages.push(imageInfo);
+        newAnnotationsData[imageInfo.name] = { jsonAnnotations: [], txtAnnotations: [], originalTxtFileContent: undefined };
+        const currentImgWidth = imageInfo.width;
+        const currentImgHeight = imageInfo.height;
+        const correspondingJsonFile = jsonInputFiles.find(f => getFileNameWithoutExtension(f.name) === baseImageName);
+        if (correspondingJsonFile) {
+          try {
+            const jsonContentText = await correspondingJsonFile.text();
+            const rawJsonObject = JSON.parse(jsonContentText);
+            if (rawJsonObject && typeof rawJsonObject === 'object' && !Array.isArray(rawJsonObject)) {
+              for (const categoryName in rawJsonObject) {
+                if (Object.prototype.hasOwnProperty.call(rawJsonObject, categoryName)) {
+                  const annotationsForCategory = rawJsonObject[categoryName];
+                  if (!Array.isArray(annotationsForCategory)) continue;
+                  if (!workingCategories.includes(categoryName)) {
+                    workingCategories.push(categoryName);
+                    message.info(t.categoryNotFoundInClasses.replace('%s', categoryName));
+                  }
+                  if(!workingCategoryColors[categoryName]){
+                    const defaultColorKeys = Object.keys(defaultCategoryColors);
+                    workingCategoryColors[categoryName] = defaultCategoryColors[categoryName] || (defaultColorKeys.length > 0 ? defaultCategoryColors[defaultColorKeys[Object.keys(workingCategoryColors).length % defaultColorKeys.length]] : "rgba(100,100,100,0.5)");
+                  }
+                  const annoColor = workingCategoryColors[categoryName];
+                  annotationsForCategory.forEach((anno: any) => {
+                    let newViewAnnotation: ViewAnnotation | null = null;
+                    if (anno.points && Array.isArray(anno.points) && anno.points.length === 2 && typeof anno.points[0]?.x === 'number' && typeof anno.points[0]?.y === 'number' && typeof anno.points[1]?.x === 'number' && typeof anno.points[1]?.y === 'number') {
+                      newViewAnnotation = { id: generateUniqueId(), points: [{x: anno.points[0].x, y: anno.points[0].y}, {x: anno.points[1].x, y: anno.points[1].y}] as [Point, Point], category: categoryName, color: annoColor, thickness: (typeof anno.thickness === 'number' && anno.thickness > 0) ? anno.thickness : currentLineWidth };
+                    } else if (typeof anno.x === 'number' && typeof anno.y === 'number' && typeof anno.width === 'number' && anno.width > 0 && typeof anno.height === 'number' && anno.height > 0) {
+                      newViewAnnotation = { id: generateUniqueId(), x: anno.x, y: anno.y, width: anno.width, height: anno.height, category: categoryName, color: annoColor, sourceLineWidth: (typeof anno.lineWidth === 'number' && anno.lineWidth > 0) ? anno.lineWidth : currentLineWidth };
+                    }
+                    if(newViewAnnotation) {
+                      newAnnotationsData[imageInfo.name].jsonAnnotations.push(newViewAnnotation);
+                      jsonAnnotationsFoundCount++;
+                    }
+                  });
+                }
+              }
+            } else { message.error(t.jsonNotObjectError.replace('%s', correspondingJsonFile.name)); }
+          } catch (e) { message.error(`${t.errorParseJsonFile} ${correspondingJsonFile.name}: ${(e as Error).message}`); console.error("JSON parsing error details for file " + correspondingJsonFile.name + ":", e); }
+        }
+        const correspondingTxtFile = txtInputFiles.find(f => getFileNameWithoutExtension(f.name) === baseImageName);
+        if (correspondingTxtFile) {
+          try {
+            const txtContent = await correspondingTxtFile.text();
+            newAnnotationsData[imageInfo.name].originalTxtFileContent = txtContent;
+            const yoloLines = txtContent.split('\n').filter(line => line.trim() !== '');
+            newAnnotationsData[imageInfo.name].txtAnnotations = yoloLines.map(line => yoloLineToViewAnnotation(line, currentImgWidth, currentImgHeight, workingCategories, workingCategoryColors, currentLineWidth)).filter(anno => anno !== null) as ViewBoxAnnotation[];
+          } catch (e) { message.error(`${t.errorParseTxtFile} ${correspondingTxtFile.name}: ${(e as Error).message}`); }
+        }
+      } catch (imgError) { message.error((imgError as Error).message); }
+    }
+    setCategories(workingCategories);
+    setCategoryColors(workingCategoryColors);
+    if (workingCategories.length > 0 && (!currentCategory || !workingCategories.includes(currentCategory))) { setCurrentCategory(workingCategories[0]); }
+    setImages(newImages);
+    setAllImageAnnotations(prev => ({ ...prev, ...newAnnotationsData }));
+    setCurrentImageIndex(newImages.length > 0 ? 0 : -1);
+    setUndoStack([]);
+    setRedoStack([]); // 清空历史记录
+    let successMsg = `${filesProcessedCount} ${t.filesProcessed} `;
+    if (jsonAnnotationsFoundCount > 0) { successMsg += `${jsonAnnotationsFoundCount} JSON ${t.annotations.toLowerCase()} ${t.jsonLoadSuccess.toLowerCase()}. `; }
+    successMsg += t.fileProcessingComplete;
+    message.success({ content: successMsg, key: 'fileProcessing', duration: 5 });
+    if (folderUploadInputRef.current) folderUploadInputRef.current.value = "";
+  };
+
+  const findAnnotationIndexAtPoint = (point: Point, annotationsToSearch: ViewAnnotation[]): number => {
+    for (let i = annotationsToSearch.length - 1; i >= 0; i--) {
+      const anno = annotationsToSearch[i];
+      if ('points' in anno) {
+        const diag = anno as ViewDiagonalAnnotation;
+        const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points);
+        if (length === 0) continue;
+        const translatedX = point.x - centerX;
+        const translatedY = point.y - centerY;
+        const rotatedX = translatedX * Math.cos(-angleRad) - translatedY * Math.sin(-angleRad);
+        const rotatedY = translatedX * Math.sin(-angleRad) + translatedY * Math.cos(-angleRad);
+        if (Math.abs(rotatedX) <= length / 2 && Math.abs(rotatedY) <= diag.thickness / 2) { return i; }
       } else {
-        const b = box as Box;
-        if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) return i;
+        const box = anno as ViewBoxAnnotation;
+        if (point.x >= box.x && point.x <= box.x + box.width && point.y >= box.y && point.y <= box.y + box.height) { return i; }
       }
     }
     return -1;
   };
 
-  const addAnnotation = (annotation: Annotation) => {
-    const newBoxes = [...currentBoxes, annotation];
-    setImageBoxes(prev => ({ ...prev, [currentImage.name]: newBoxes }));
-    setUndoHistory(prev => [...prev, { type: 'add_annotation', data: annotation }]);
+  const addAnnotationToCurrentImage = (newAnnotation: ViewAnnotation) => {
+    if (!currentImageInfo) return;
+    const currentAnnosData = allImageAnnotations[currentImageInfo.name] || { jsonAnnotations: [], txtAnnotations: [], originalTxtFileContent: undefined };
+    addUndoRecord(currentImageInfo.name, currentAnnosData.jsonAnnotations);
+    const updatedJsonAnnotations = [...currentAnnosData.jsonAnnotations, newAnnotation];
+    setAllImageAnnotations(prev => ({...prev, [currentImageInfo.name]: { ...currentAnnosData, jsonAnnotations: updatedJsonAnnotations } }));
   };
 
-  const handleUndo = () => {
-    if (undoHistory.length === 0) { message.info("没有可撤销的操作"); return; }
-    setUndoHistory(prev => prev.slice(0, -1));
-    setImageBoxes(prev => ({ ...prev, [currentImage.name]: currentBoxes.slice(0, -1) }));
-    message.success("撤销成功");
+  const removeAnnotationFromCurrentImageByIndex = (indexInView: number) => {
+    if (!currentImageInfo || indexInView < 0 || !currentCanvasAnnotations || indexInView >= currentCanvasAnnotations.length) return;
+    const annotationToRemoveFromView = currentCanvasAnnotations[indexInView];
+    const currentJsonData = allImageAnnotations[currentImageInfo.name]?.jsonAnnotations;
+    if (!currentJsonData) { message.error("无法找到当前图片的JSON标注数据进行删除。"); return; }
+    const actualJsonIndex = currentJsonData.findIndex(a => a.id === annotationToRemoveFromView.id);
+    if (actualJsonIndex === -1) { message.warn("试图删除的标注在JSON源中未找到。"); return; }
+    addUndoRecord(currentImageInfo.name, currentJsonData);
+    const updatedJsonAnnotations = [...currentJsonData];
+    updatedJsonAnnotations.splice(actualJsonIndex, 1);
+    setAllImageAnnotations(prev => ({ ...prev, [currentImageInfo.name]: { ...(prev[currentImageInfo.name] || { jsonAnnotations: [], txtAnnotations: [], originalTxtFileContent: undefined }), jsonAnnotations: updatedJsonAnnotations } }));
+    message.success(t.deleteButtonText + " " + t.operationSuccessful);
   };
 
-  const handleExport = () => {
-    if (!hasImages || !currentImage) { message.warn("没有可导出的数据"); return; }
-    const dataToExport = currentBoxes.map(({ color, ...rest }) => rest);
-    const jsonContent = JSON.stringify(dataToExport, null, 2);
-    const blob = new Blob([jsonContent], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${currentImage.name.split(".")[0]}.json`;
-    link.click();
+  // ================================================================
+  // ========== 更新核心历史记录函数，清空 Redo Stack ==========
+  // ================================================================
+  const addUndoRecord = (imageId: string, currentJsonAnnotations: ViewAnnotation[]) => {
+    setUndoStack(prev => [...prev, { imageId: imageId, previousJsonAnnotations: JSON.parse(JSON.stringify(currentJsonAnnotations)) }]);
+    setRedoStack([]); // 任何新操作都会使重做历史无效，因此清空它
   };
 
-  const switchImage = (offset: number) => {
+  // ================================================================
+  // ========== 更新 Undo 函数，以支持 Redo ==========
+  // ================================================================
+  const performUndo = () => {
+    if (undoStack.length === 0) {
+      message.info("没有更多可撤销的操作");
+      return;
+    }
+
+    const lastOperation = undoStack[undoStack.length - 1];
+    const annotationsToPushToRedo = allImageAnnotations[lastOperation.imageId]?.jsonAnnotations || [];
+
+    // 将当前状态推入 redo stack
+    setRedoStack(prev => [...prev, { imageId: lastOperation.imageId, previousJsonAnnotations: annotationsToPushToRedo }]);
+
+    // 恢复上一个状态
+    setAllImageAnnotations(prev => ({ ...prev, [lastOperation.imageId]: { ...(prev[lastOperation.imageId] || { jsonAnnotations: [], txtAnnotations: [] }), jsonAnnotations: lastOperation.previousJsonAnnotations } }));
+
+    // 从 undo stack 中移除已恢复的操作
+    setUndoStack(prev => prev.slice(0, -1));
+
+    message.success("操作已撤销");
+  };
+
+  // ================================================================
+  // ========== 新增 Redo 函数 ==========
+  // ================================================================
+  const performRedo = () => {
+    if (redoStack.length === 0) {
+      message.info("没有更多可重做的操作");
+      return;
+    }
+
+    const lastRedoOperation = redoStack[redoStack.length - 1];
+    const annotationsToPushToUndo = allImageAnnotations[lastRedoOperation.imageId]?.jsonAnnotations || [];
+
+    // 将当前状态推回 undo stack
+    setUndoStack(prev => [...prev, { imageId: lastRedoOperation.imageId, previousJsonAnnotations: annotationsToPushToUndo }]);
+
+    // 恢复被撤销的状态
+    setAllImageAnnotations(prev => ({ ...prev, [lastRedoOperation.imageId]: { ...(prev[lastRedoOperation.imageId] || { jsonAnnotations: [], txtAnnotations: [] }), jsonAnnotations: lastRedoOperation.previousJsonAnnotations } }));
+
+    // 从 redo stack 中移除已恢复的操作
+    setRedoStack(prev => prev.slice(0, -1));
+
+    message.success("操作已重做");
+  };
+
+
+  const navigateImage = (offset: number) => {
     const newIndex = currentImageIndex + offset;
     if (newIndex >= 0 && newIndex < images.length) {
-      setCurrentImageIndex(newIndex); setUndoHistory([]); setExpandedKeys([]);
+      setCurrentImageIndex(newIndex);
+      setSelectedAnnotationId(null);
+      setDraggingState(null);
+      setTempDiagonalPoints([]);
     }
   };
 
+  const handleClearCurrentJsonAnnotations = () => {
+    if (!currentImageInfo) return;
+    const currentAnnosData = allImageAnnotations[currentImageInfo.name];
+    if (!currentAnnosData || !currentAnnosData.jsonAnnotations || currentAnnosData.jsonAnnotations.length === 0) { message.info("当前图片的JSON标注已为空。"); return; }
+    addUndoRecord(currentImageInfo.name, currentAnnosData.jsonAnnotations);
+    setAllImageAnnotations(prev => ({ ...prev, [currentImageInfo.name]: { ...currentAnnosData, jsonAnnotations: [] } }));
+    message.success("当前图片的JSON源标注已清空。");
+  };
+
+  const handleManualClassesUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    message.loading({ content: '正在处理 classes.txt...', key: 'classesProcessing', duration: 0 });
+    try {
+      const classesText = await file.text();
+      const parsedCategories = classesText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      if (parsedCategories.length > 0) {
+        const newColors: { [key: string]: string } = {};
+        const oldCategoryColors = {...categoryColors};
+        parsedCategories.forEach((cat, idx) => {
+          newColors[cat] = oldCategoryColors[cat] || defaultCategoryColors[cat] || Object.values(defaultCategoryColors)[idx % Object.values(defaultCategoryColors).length] || `hsl(${(idx * 360 / parsedCategories.length) % 360}, 70%, 60%)`;
+        });
+        setCategories(parsedCategories);
+        setCategoryColors(newColors);
+        if (parsedCategories.length > 0 && (!currentCategory || !parsedCategories.includes(currentCategory))) { setCurrentCategory(parsedCategories[0]); }
+        else if (parsedCategories.length === 0) { setCurrentCategory(""); }
+        message.success({ content: `classes.txt 已更新: ${parsedCategories.length} 个类别。`, key: 'classesProcessing', duration: 3 });
+      } else { message.warn({ content: `上传的 classes.txt 为空或格式无效。`, key: 'classesProcessing', duration: 3 }); }
+    } catch (e) { message.error({ content: `${t.errorReadFileGeneric} classes.txt: ${(e as Error).message}`, key: 'classesProcessing', duration: 3 }); }
+    if (classesFileInputRef.current) classesFileInputRef.current.value = "";
+  };
+
   return (
-    <div className="mask-operate-app">
-      <div className="canvas-wrapper">
-        <canvas ref={canvasRef} onClick={handleCanvasClick} className={`drawing-canvas ${activeTool === 'delete' ? 'deleting-mode' : ''}`}/>
-      </div>
-
-      <div className="top-toolbar">
-        <div className="tool-group">
-          {/* 关键修复：将隐藏的input元素放在这里，并使用ref来触发点击 */}
-          <Button type="primary" onClick={() => fileInputRef.current?.click()} icon={<FontAwesomeIcon icon={faUpload} />}>{t.uploadFolder}</Button>
-          <input ref={fileInputRef} type="file" webkitdirectory="true" directory="true" multiple onChange={handleFolderUpload} className="file-input-hidden" />
-        </div>
-        <div className="tool-group">
-          <Button onClick={() => switchImage(-1)} disabled={!hasImages || currentImageIndex === 0} icon={<FontAwesomeIcon icon={faChevronLeft} />} />
-          <Button onClick={() => switchImage(1)} disabled={!hasImages || currentImageIndex >= images.length - 1} icon={<FontAwesomeIcon icon={faChevronRight} />} />
-        </div>
-        <div className="tool-group">
-          <Tooltip title={t.selectTool}><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faMousePointer} />} /></Tooltip>
-          <Tooltip title={t.rectTool}><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faPaintBrush} />} /></Tooltip>
-          <Tooltip title={t.diagonalTool}><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faDrawPolygon} />} /></Tooltip>
-          <Tooltip title={t.deleteTool}><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} /></Tooltip>
-        </div>
-        <div className="tool-group">
-          <Button onClick={handleUndo} disabled={undoHistory.length === 0} icon={<FontAwesomeIcon icon={faUndo} />}>{t.undo}</Button>
-          <Button onClick={handleExport} disabled={!hasImages} icon={<FontAwesomeIcon icon={faSave} />}>{t.exportJSON}</Button>
-        </div>
-        <div className="tool-group">
-          <Tooltip title={t.showSettings}><Button onClick={() => setIsLeftPanelVisible(!isLeftPanelVisible)} type={isLeftPanelVisible ? 'default' : 'text'} icon={<FontAwesomeIcon icon={faCog} />} /></Tooltip>
-          <Tooltip title={t.showAnnotations}><Button onClick={() => setIsRightPanelVisible(!isRightPanelVisible)} type={isRightPanelVisible ? 'default' : 'text'} icon={<FontAwesomeIcon icon={faList} />} /></Tooltip>
-        </div>
-      </div>
-
-      <aside className={`left-panel ${isLeftPanelVisible ? 'visible' : ''}`}>
-        <Card title={t.settings}>
-          <Form layout="vertical" className="settings-form">
-            <Form.Item label={t.category}>
-              <Select value={currentCategory} onChange={setCurrentCategory} style={{width: '100%'}} disabled={!hasImages}>
-                {categories.map(cat => <Option key={cat} value={cat}>{cat}</Option>)}
-              </Select>
-            </Form.Item>
-            <Form.Item label={t.lineWidth}>
-              <InputNumber min={1} value={lineWidth} onChange={(val) => setLineWidth(val || 1)} style={{width: '100%'}} disabled={!hasImages}/>
-            </Form.Item>
+    <Layout className="mask-operate-pro-layout">
+      {/* Settings Panel */}
+      <Layout.Sider width={280} collapsedWidth={0} collapsible trigger={null} collapsed={!isLeftPanelVisible} className="settings-sider-pro" theme="light">
+        <Card title={<><FontAwesomeIcon icon={faCog} /> {t.settings}</>} bordered={false} className="panel-card-pro settings-card-pro">
+          <Form layout="vertical">
+            <Form.Item label={t.classesFileSettings}><Button icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => classesFileInputRef.current?.click()} block>{t.uploadClassesFile}</Button><input ref={classesFileInputRef} type="file" accept=".txt" onChange={handleManualClassesUpload} style={{ display: 'none' }} /></Form.Item>
+            <Form.Item label={t.category}><Select value={currentCategory} onChange={setCurrentCategory} disabled={!hasActiveImage || categories.length === 0} placeholder={categories.length === 0 ? t.noCategoriesFound : "选择类别"} showSearch optionFilterProp="children" filterOption={(input, option) => (option?.children as unknown as string ?? '').toLowerCase().includes(input.toLowerCase())}>{categories.map(cat => <Option key={cat} value={cat} title={cat} style={{color: categoryColors[cat]?.replace(/[^,]+(?=\))/, '1') || 'black'}}>{cat}</Option>)}</Select></Form.Item>
+            <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} disabled={!hasActiveImage} /></Form.Item>
+            <Form.Item label={t.annotationDisplaySource}><Radio.Group onChange={(e) => setSelectedAnnotationSource(e.target.value)} value={selectedAnnotationSource} disabled={!hasActiveImage} optionType="button" buttonStyle="solid" style={{width: '100%'}}><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="json">{t.sourceJson}</Radio.Button><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="txt">{t.sourceTxt}</Radio.Button><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="none">{t.sourceNone}</Radio.Button></Radio.Group></Form.Item>
+            <Form.Item label={t.toggleAnnotationsView} valuePropName="checked"><AntSwitch checked={showAnnotationsOnCanvas} onChange={setShowAnnotationsOnCanvas} disabled={!hasActiveImage} checkedChildren={<FontAwesomeIcon icon={faEye} />} unCheckedChildren={<FontAwesomeIcon icon={faEyeSlash} />}/></Form.Item>
+            <Form.Item label={t.toggleCategoryInBox} valuePropName="checked"><AntSwitch checked={showCategoryInBox} onChange={setShowCategoryInBox} disabled={!hasActiveImage} checkedChildren={<FontAwesomeIcon icon={faEye} />} unCheckedChildren={<FontAwesomeIcon icon={faEyeSlash} />}/></Form.Item>
+            <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearCurrentJsonAnnotations} block disabled={!currentImageInfo || !allImageAnnotations[currentImageInfo.name]?.jsonAnnotations?.length}>{t.clearAnnotationsButton}</Button></Form.Item>
           </Form>
         </Card>
-      </aside>
+      </Layout.Sider>
 
-      <aside className={`right-panel ${isRightPanelVisible ? 'visible' : ''}`}>
-        <Card title={t.annotations} bodyStyle={{padding: '1px 0 0 0', height: 'calc(100% - 57px)'}}>
-          <div className="info-panel-content">
-            {hasImages && currentBoxes.length > 0 ? (
-              <Collapse activeKey={expandedKeys} onChange={setExpandedKeys} accordion>
-                {currentBoxes.map((item, index) => (
-                  <Panel
-                    className="annotation-item"
-                    key={index}
-                    header={
-                      <Space align="center">
-                        <div className="color-indicator" style={{backgroundColor: item.color}} />
-                        <Text className="category-name">{item.category}</Text>
-                      </Space>
-                    }
-                  >
-                    <div className="annotation-details">
-                      {'points' in item ? (
-                        <p>{t.diagonalArea}: {item.points.map(p => `(${p.x}, ${p.y})`).join(', ')}</p>
-                      ) : (
-                        <p>{t.positionAndSize}: ({item.x}, {item.y}) - {item.width}×{item.height}</p>
-                      )}
-                    </div>
-                  </Panel>
-                ))}
-              </Collapse>
-            ) : (
-              <Text type="secondary" style={{padding: '16px', display: 'block', textAlign: 'center'}}>{hasImages ? t.noAnnotations : t.noImages}</Text>
-            )}
+      {/* Main Content */}
+      <Layout className="main-content-layout-pro">
+        <Layout.Header className="top-toolbar-pro">
+          <Space wrap size="small">
+            <Button type="primary" icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => folderUploadInputRef.current?.click()}> {t.uploadFolder} </Button>
+            <input ref={folderUploadInputRef} type="file" webkitdirectory="true" directory="true" multiple onChange={(e) => e.target.files && processUploadedFiles(Array.from(e.target.files))} style={{ display: 'none' }}/>
+            <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => navigateImage(-1)} disabled={!hasActiveImage || currentImageIndex === 0} />
+            <Text className="image-info-text-pro" title={currentImageInfo?.name}>{currentImageInfo ? `${t.currentImage} ${currentImageInfo.name} (${currentImageIndex + 1}/${images.length})` : t.noImages}</Text>
+            <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => navigateImage(1)} disabled={!hasActiveImage || currentImageIndex >= images.length - 1} />
+          </Space>
+          <Space wrap size="small" className="tool-selection-group-pro">
+            <Tooltip title={t.selectTool}><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
+            <Tooltip title={t.rectTool}><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
+            <Tooltip title={t.diagonalTool}><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
+            <Tooltip title={t.deleteTool}><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
+          </Space>
+          <Space wrap size="small">
+            {/* ================================================================ */}
+            {/* ========== 更新 Undo/Redo 按钮组 ========== */}
+            {/* ================================================================ */}
+            <Tooltip title="撤销 (Ctrl+Z)"><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={undoStack.length === 0} /></Tooltip>
+            <Tooltip title="重做 (Ctrl+Y)"><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={redoStack.length === 0} /></Tooltip>
+            <Button type="primary" icon={<FontAwesomeIcon icon={faFileArchive} />} onClick={exportAllDataAsZip} disabled={images.length === 0}>{t.exportAll}</Button>
+          </Space>
+        </Layout.Header>
+
+        <Layout.Content className="canvas-content-pro">
+          <div className="canvas-wrapper-pro">
+            <canvas ref={canvasRef}
+                    onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} onClick={handleCanvasClick}
+                    className={`drawing-canvas-pro ${activeTool === 'delete' ? 'delete-cursor-pro' : (activeTool !== 'select' && hasActiveImage ? 'draw-cursor-pro' : '')}`}
+            />
           </div>
-        </Card>
-      </aside>
+        </Layout.Content>
 
-      <div className="bottom-statusbar">
-        <Text ellipsis style={{maxWidth: '50%'}}>{hasImages ? `${t.currentImage} ${currentImage.name}` : t.noImages}</Text>
-        <Space>
-          <Text>{t.imageSize}: {imageDimensions.width} x {imageDimensions.height}</Text>
-          <Text>{t.mouseCoords}: ({mousePosition.x}, {mousePosition.y})</Text>
-        </Space>
-      </div>
-    </div>
+        <Layout.Footer className="bottom-statusbar-pro">
+          <Space><Tooltip title={t.switchTooglePanels}><Button.Group><Button type="text" icon={<FontAwesomeIcon icon={faCog} />} onClick={() => setIsLeftPanelVisible(!isLeftPanelVisible)} /><Button type="text" icon={<FontAwesomeIcon icon={faList} />} onClick={() => setIsRightPanelVisible(!isRightPanelVisible)} /></Button.Group></Tooltip></Space>
+          <Space className="statusbar-info-pro"><Text>{t.imageSize}: {currentImageInfo ? `${currentImageInfo.width}×${currentImageInfo.height}` : 'N/A'}</Text><Text>{t.mouseCoords}: ({canvasMousePosition.x}, {canvasMousePosition.y})</Text></Space>
+        </Layout.Footer>
+      </Layout>
+
+      {/* Annotations Panel */}
+      <Layout.Sider width={320} collapsedWidth={0} collapsible trigger={null} collapsed={!isRightPanelVisible} className="annotations-sider-pro" theme="light">
+        <Card title={<><FontAwesomeIcon icon={faList} /> {t.annotations} {currentCanvasAnnotations.length > 0 ? `(${currentCanvasAnnotations.length})` : ''}</>} bordered={false} className="panel-card-pro annotations-card-pro">
+          {hasActiveImage && currentCanvasAnnotations && currentCanvasAnnotations.length > 0 ? (
+            <Collapse activeKey={annotationListExpandedKeys} onChange={(keys) => setAnnotationListExpandedKeys(keys as string[])} accordion className="annotations-collapse-pro">
+              {currentCanvasAnnotations.map((item, index) => (
+                <Panel key={item.id} className="annotation-panel-item-pro"
+                       header={ <Space align="center" style={{width: '100%', justifyContent: 'space-between'}}> <Space> <div className="color-indicator-pro" style={{ backgroundColor: item.color }} /> <Text className="category-name-text-pro" title={item.category}>{item.category}</Text> </Space> <Tooltip title={t.deleteAnnotationTooltip}> <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e) => { e.stopPropagation(); removeAnnotationFromCurrentImageByIndex(index); }} disabled={selectedAnnotationSource === 'txt'} /> </Tooltip> </Space> }>
+                  <div className="annotation-details-pro">
+                    <Text strong>{t.originalFileNameLabel}:</Text> <Text code title={currentImageInfo?.name}>{currentImageInfo?.name}</Text><br/>
+                    {('points' in item) ? ( <> <Text strong>{t.diagonalArea}</Text><br/> <Text>P1: ({item.points[0].x.toFixed(1)}, {item.points[0].y.toFixed(1)}), P2: ({item.points[1].x.toFixed(1)}, {item.points[1].y.toFixed(1)})</Text><br/> <Text>{t.thicknessLabel}: {item.thickness}px</Text> </> ) : ( <> <Text strong>{t.positionAndSize}</Text><br/> <Text>X: {item.x}, Y: {item.y}</Text><br/> <Text>W: {item.width}, H: {item.height}</Text> </> )}
+                    {!('points' in item) && currentImageInfo && currentImageInfo.width > 0 && currentImageInfo.height > 0 && ( <> <br/><Text strong>{t.yoloFormatLabel}:</Text><br/> <Text code style={{wordBreak: 'break-all'}}>{viewAnnotationToYoloString(item as ViewBoxAnnotation, currentImageInfo.width, currentImageInfo.height, categories) || "N/A"}</Text> </> )}
+                  </div>
+                </Panel>
+              ))}
+            </Collapse>
+          ) : ( <div style={{ padding: '20px', textAlign: 'center' }}> <Text type="secondary">{hasActiveImage ? t.noAnnotations : t.noImages}</Text> </div> )}
+        </Card>
+      </Layout.Sider>
+    </Layout>
   );
 };
 
-export default MaskOperate;
+export default MaskOperatePro;
