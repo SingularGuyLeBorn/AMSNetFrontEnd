@@ -1,67 +1,79 @@
 /* MaskOperate/index.css */
-/* "Aetherium Weave" (Light) Theme by Your Top Programmer */
+/* "Aetherium Weave" Theme - Professional Layout with AI by Your Top Programmer */
 
-/* =================================================================== */
-/* 1. 主题变量与全局设置 (Theme Variables & Global Settings)          */
-/* =================================================================== */
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 
 :root {
-  /* ---> 色彩体系 (Color Palette) <--- */
-  --base-bg: #F0F5FF; /* 基底色: 极浅的天空蓝 */
-  --panel-bg: rgba(255, 255, 255, 0.65); /* 面板背景: 半透明白色，营造"压缩光线"感 */
+  --base-bg: #F0F5FF;
+  --panel-bg: rgba(255, 255, 255, 0.65);
   --panel-bg-solid: #FFFFFF;
-  --text-primary: #0D1A2E; /* 主要文字: 深蓝灰色，保证可读性 */
-  --text-secondary: #5A6A82; /* 次要文字 */
-  --accent-primary: #4A90E2; /* 核心强调色: 柔和的科技蓝 */
-  --accent-primary-glow: rgba(74, 144, 226, 0.4); /* 强调色光晕 */
+  --text-primary: #0D1A2E;
+  --text-secondary: #5A6A82;
+  --accent-primary: #4A90E2;
+  --accent-primary-glow: rgba(74, 144, 226, 0.4);
   --accent-primary-hover: #357ABD;
   --accent-primary-active: #2A6094;
-  --border-color-light: rgba(74, 144, 226, 0.2); /* 边框: 如流动的能量丝线 */
+  --border-color-light: rgba(74, 144, 226, 0.2);
   --border-color-medium: rgba(74, 144, 226, 0.4);
   --danger-color: #E94F4F;
   --danger-glow: rgba(233, 79, 79, 0.4);
-
-  /* ---> 字体与过渡 (Typography & Transitions) <--- */
   --font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --transition-speed: 0.3s;
   --transition-curve: ease-in-out;
 }
 
 /* =================================================================== */
-/* 2. 布局与核心结构 (Layout & Core Structure)                       */
+/* 1. 全局与主布局 (Global & Main Layout)                              */
 /* =================================================================== */
 .mask-operate-pro-layout {
   height: 100vh;
   background-color: var(--base-bg);
   font-family: var(--font-family);
   color: var(--text-primary);
-  overflow: hidden; /* 防止布局抖动 */
-}
-
-/* ---> 侧边栏 (Siders) <--- */
-.settings-sider-pro,
-.annotations-sider-pro {
-  background: var(--panel-bg) !important;
-  backdrop-filter: blur(12px);
-  border-left: 1px solid var(--border-color-light);
-  border-right: 1px solid var(--border-color-light);
-  transition: all var(--transition-speed) var(--transition-curve);
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 30, 80, 0.05);
 }
 
-.settings-sider-pro .ant-layout-sider-children,
-.annotations-sider-pro .ant-layout-sider-children {
-  padding: 8px;
-}
-
-/* ---> 主内容区 (Main Content) <--- */
 .main-content-layout-pro {
   background: transparent;
 }
 
-/* ---> 顶部工具栏 (Top Toolbar) <--- */
+/* =================================================================== */
+/* 2. 左侧垂直工具栏 (Left Vertical Toolbar)                           */
+/* =================================================================== */
+.tool-sider-pro {
+  background: var(--panel-bg) !important;
+  backdrop-filter: blur(12px);
+  border-right: 1px solid var(--border-color-light);
+  box-shadow: 2px 0 10px rgba(0, 30, 80, 0.05);
+  padding-top: 20px;
+  z-index: 20;
+}
+.tool-button-pro.ant-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  margin-bottom: 8px;
+  box-shadow: none;
+}
+.tool-button-pro.ant-btn.ant-btn-text:hover {
+  background-color: var(--accent-primary-glow) !important;
+  color: var(--accent-primary) !important;
+}
+.tool-button-pro.ant-btn.ant-btn-primary {
+  background-color: var(--accent-primary) !important;
+  color: white !important;
+}
+.tool-button-pro.ant-btn.ant-btn-primary:hover {
+  background-color: var(--accent-primary-hover) !important;
+}
+.tool-button-pro.ant-btn-dangerous.ant-btn-primary {
+  background-color: var(--danger-color) !important;
+}
+
+
+/* =================================================================== */
+/* 3. 中心工作区元素 (Center Workspace Elements)                       */
+/* =================================================================== */
 .top-toolbar-pro {
   display: flex;
   justify-content: space-between;
@@ -77,19 +89,41 @@
 .image-info-text-pro {
   color: var(--text-secondary);
   font-weight: 500;
-  max-width: 300px;
+  max-width: 400px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* ---> 画布区域 (Canvas Area) <--- */
 .canvas-content-pro {
   padding: 16px;
   display: flex;
   justify-content: center;
   align-items: center;
+  position: relative; /* 为AI建议条定位 */
 }
+
+/* 新增: AI 建议操作条 */
+.ai-suggestion-bar {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(45, 52, 64, 0.85);
+  backdrop-filter: blur(8px);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.ai-suggestion-bar .ant-btn {
+  border-radius: 16px;
+}
+
 
 .canvas-wrapper-pro {
   width: 100%;
@@ -113,8 +147,6 @@
 .draw-cursor-pro { cursor: crosshair; }
 .delete-cursor-pro { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23E94F4F" stroke="white" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>') 12 12, auto; }
 
-
-/* ---> 底部状态栏 (Bottom Status Bar) <--- */
 .bottom-statusbar-pro {
   height: 40px;
   display: flex;
@@ -128,58 +160,76 @@
   font-size: 12px;
 }
 
-.statusbar-info-pro .ant-typography {
+.bottom-statusbar-pro .ant-typography {
   margin: 0 8px;
   color: var(--text-secondary);
 }
 
-/* =================================================================== */
-/* 3. 组件样式 (Component Styles)                                    */
-/* =================================================================== */
 
-/* ---> 卡片与面板 (Cards & Panels) <--- */
-.panel-card-pro {
-  background: transparent !important;
-  border: none !important;
+/* =================================================================== */
+/* 4. 右侧检查器面板 (Right Inspector Panel)                          */
+/* =================================================================== */
+.inspector-sider-pro {
+  background: var(--panel-bg) !important;
+  backdrop-filter: blur(12px);
+  border-left: 1px solid var(--border-color-light);
+  box-shadow: -2px 0 10px rgba(0, 30, 80, 0.05);
+  transition: all var(--transition-speed) var(--transition-curve);
+  z-index: 15;
+}
+
+.inspector-tabs-pro {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.panel-card-pro .ant-card-head {
-  border-bottom: 1px solid var(--border-color-medium) !important;
-  color: var(--text-primary);
-  font-weight: 500;
+.inspector-tabs-pro .ant-tabs-nav {
+  margin-bottom: 0 !important;
   padding: 0 16px;
-  min-height: 48px;
 }
 
-.panel-card-pro .ant-card-body {
-  padding: 16px;
-  overflow-y: auto;
+.inspector-tabs-pro .ant-tabs-tab {
+  color: var(--text-secondary) !important;
+  font-weight: 500;
+}
+
+.inspector-tabs-pro .ant-tabs-tab .tab-text {
+  margin-left: 8px;
+}
+
+.inspector-tabs-pro .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--accent-primary) !important;
+}
+
+.inspector-tabs-pro .ant-tabs-ink-bar {
+  background: var(--accent-primary) !important;
+}
+
+.inspector-tabs-pro .ant-tabs-content-holder {
   flex-grow: 1;
+  overflow: hidden;
 }
 
-/* ---> 按钮 (Buttons) <--- */
-@keyframes ripple-effect {
-  to {
-    transform: scale(4);
-    opacity: 0;
-  }
+.tab-pane-content {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
 }
 
+/* =================================================================== */
+/* 5. 通用组件样式 (General Component Styles)                          */
+/* =================================================================== */
 .ant-btn {
   border-radius: 6px;
   font-weight: 500;
   transition: all var(--transition-speed) var(--transition-curve);
-  position: relative;
-  overflow: hidden;
 }
-.ant-btn:hover {
+.ant-btn:not(.tool-button-pro):hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
-.ant-btn:active {
+.ant-btn:not(.tool-button-pro):active {
   transform: translateY(0);
 }
 .ant-btn-primary {
@@ -191,46 +241,16 @@
   background: var(--accent-primary-hover);
   border-color: var(--accent-primary-hover);
 }
-.ant-btn-primary:focus-within {
-  box-shadow: 0 0 0 3px var(--accent-primary-glow);
-}
-.ant-btn-dangerous {
-  box-shadow: 0 2px 4px var(--danger-glow);
-}
-.ant-btn-dangerous:focus-within {
-  box-shadow: 0 0 0 3px var(--danger-glow);
-}
-.ant-btn-text:hover {
-  background-color: rgba(74, 144, 226, 0.1) !important;
-}
 
-/* ---> 表单与输入控件 (Forms & Inputs) <--- */
 .ant-form-item-label > label {
   color: var(--text-secondary);
   font-weight: 500;
 }
-.ant-select, .ant-input-number {
-  border-radius: 6px !important;
-}
-.ant-select-selector, .ant-input-number {
+.ant-select-selector, .ant-input-number, .ant-input, .ant-input-password {
   background-color: var(--panel-bg-solid) !important;
   border: 1px solid var(--border-color-medium) !important;
-  transition: all var(--transition-speed) var(--transition-curve);
-}
-.ant-select-selector:hover, .ant-input-number:hover {
-  border-color: var(--accent-primary) !important;
-}
-.ant-select-focused .ant-select-selector,
-.ant-input-number-focused {
-  border-color: var(--accent-primary) !important;
-  box-shadow: 0 0 0 2px var(--accent-primary-glow) !important;
-}
-.ant-radio-button-wrapper-checked:not(.ant-radio-button-wrapper-disabled) {
-  background-color: var(--accent-primary) !important;
-  border-color: var(--accent-primary) !important;
 }
 
-/* ---> 标注列表 (Annotation List) <--- */
 .annotations-collapse-pro {
   background: transparent;
   border: none;
@@ -241,29 +261,10 @@
   border-radius: 6px !important;
   margin-bottom: 8px !important;
   overflow: hidden;
-  transition: all var(--transition-speed) var(--transition-curve);
-}
-.annotation-panel-item-pro:hover {
-  border-color: var(--accent-primary) !important;
-  transform: scale(1.02);
-}
-.annotation-panel-item-pro .ant-collapse-header {
-  padding: 8px 12px !important;
-  align-items: center;
-}
-.annotation-panel-item-pro .ant-collapse-content {
-  background: transparent;
-  border-top: 1px solid var(--border-color-light);
 }
 .annotation-details-pro {
   font-size: 12px;
   line-height: 1.6;
-}
-.annotation-details-pro .ant-typography-code {
-  background: var(--base-bg);
-  border: 1px solid var(--border-color-light);
-  padding: 2px 4px;
-  border-radius: 4px;
 }
 .color-indicator-pro {
   width: 14px;
@@ -280,7 +281,7 @@
 }
 
 /* =================================================================== */
-/* 4. 滚动条美化 (Scrollbar Prettifying)                             */
+/* 6. 滚动条美化 (Scrollbar Prettifying)                             */
 /* =================================================================== */
 ::-webkit-scrollbar {
   width: 6px;

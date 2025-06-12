@@ -1,10 +1,10 @@
 // MaskOperate/index.tsx
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useModel } from 'umi';
-import { Card, Button, Select, InputNumber, Layout, message, Typography, List, Collapse, Space, Tooltip, Form, Radio, Upload, Switch as AntSwitch } from 'antd';
+import { Card, Button, Select, InputNumber, Layout, message, Typography, List, Collapse, Space, Tooltip, Form, Radio, Upload, Switch as AntSwitch, Tabs } from 'antd';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faUpload, faChevronLeft, faChevronRight, faUndo, faRedo, // 新增 faRedo 图标
+  faUpload, faChevronLeft, faChevronRight, faUndo, faRedo,
   faSave, faDrawPolygon, faTrash, faPaintBrush,
   faCog, faList, faMousePointer, faFileArchive, faEraser, faEye, faEyeSlash,
 } from "@fortawesome/free-solid-svg-icons";
@@ -16,7 +16,7 @@ import './index.css';
 const { Title, Text } = Typography;
 const { Panel } = Collapse;
 const { Option } = Select;
-
+const { TabPane } = Tabs;
 
 // ===================================================================
 // 接口与类型定义
@@ -67,11 +67,10 @@ type UndoOperation = {
 type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete';
 type AnnotationSourceType = 'json' | 'txt' | 'none';
 
-// 新增类型：用于拖动和缩放状态
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
 type DraggingState = {
   type: 'move' | 'resize';
-  handle?: ResizeHandle; // Only for resize
+  handle?: ResizeHandle;
   startMousePos: Point;
   startAnnotationState: ViewAnnotation;
 } | null;
@@ -129,12 +128,8 @@ const MaskOperatePro = () => {
   const [currentCategory, setCurrentCategory] = useState<string>(Object.keys(defaultCategoryColors)[0] || "");
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(5);
 
-  const [isLeftPanelVisible, setIsLeftPanelVisible] = useState<boolean>(true);
-  const [isRightPanelVisible, setIsRightPanelVisible] = useState<boolean>(true);
+  const [isInspectorVisible, setIsInspectorVisible] = useState<boolean>(true);
 
-  // ================================================================
-  // ========== 新增 Redo Stack 状态 ==========
-  // ================================================================
   const [undoStack, setUndoStack] = useState<UndoOperation[]>([]);
   const [redoStack, setRedoStack] = useState<UndoOperation[]>([]);
 
@@ -147,7 +142,6 @@ const MaskOperatePro = () => {
 
   const [tempDiagonalPoints, setTempDiagonalPoints] = useState<Point[]>([]);
 
-  // --- 新状态：用于编辑功能 ---
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [draggingState, setDraggingState] = useState<DraggingState>(null);
   const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
@@ -185,7 +179,6 @@ const MaskOperatePro = () => {
   }, [currentImageInfo, currentCanvasAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, tempDiagonalPoints, canvasMousePosition]);
 
   useEffect(() => {
-    // This effect handles changing the cursor style based on mouse position over handles
     const canvas = canvasRef.current;
     if (!canvas || activeTool !== 'select' || !selectedAnnotation || 'points' in selectedAnnotation) {
       if(canvas) canvas.style.cursor = 'default';
@@ -202,7 +195,6 @@ const MaskOperatePro = () => {
           return;
         }
       }
-      // If not over a handle, check if over the main body for move cursor
       if(isPointInRect(mousePos, selectedAnnotation)) {
         canvas.style.cursor = 'move';
       } else {
@@ -212,7 +204,7 @@ const MaskOperatePro = () => {
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (draggingState) return; // Don't change cursor while dragging
+      if (draggingState) return;
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0 || !currentImageInfo) return;
 
@@ -252,10 +244,6 @@ const MaskOperatePro = () => {
     canvasElement.addEventListener('mousemove', handleMouseMoveForCoords);
     return () => canvasElement.removeEventListener('mousemove', handleMouseMoveForCoords);
   }, [currentImageInfo]);
-
-  // ===================================================================
-  // 渲染与绘制逻辑
-  // ===================================================================
 
   const getResizeHandles = (box: ViewBoxAnnotation): {[key in ResizeHandle]: {x: number, y: number, size: number, cursor: string}} => {
     const s = RESIZE_HANDLE_SIZE;
@@ -439,10 +427,6 @@ const MaskOperatePro = () => {
     };
   };
 
-  // ===================================================================
-  // 事件处理
-  // ===================================================================
-
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentImageInfo) return;
     const mousePos = canvasMousePosition;
@@ -581,7 +565,6 @@ const MaskOperatePro = () => {
 
     setDraggingState(null);
   };
-
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentImageInfo || draggingState) return;
@@ -789,7 +772,7 @@ const MaskOperatePro = () => {
     setAllImageAnnotations(prev => ({ ...prev, ...newAnnotationsData }));
     setCurrentImageIndex(newImages.length > 0 ? 0 : -1);
     setUndoStack([]);
-    setRedoStack([]); // 清空历史记录
+    setRedoStack([]);
     let successMsg = `${filesProcessedCount} ${t.filesProcessed} `;
     if (jsonAnnotationsFoundCount > 0) { successMsg += `${jsonAnnotationsFoundCount} JSON ${t.annotations.toLowerCase()} ${t.jsonLoadSuccess.toLowerCase()}. `; }
     successMsg += t.fileProcessingComplete;
@@ -839,17 +822,11 @@ const MaskOperatePro = () => {
     message.success(t.deleteButtonText + " " + t.operationSuccessful);
   };
 
-  // ================================================================
-  // ========== 更新核心历史记录函数，清空 Redo Stack ==========
-  // ================================================================
   const addUndoRecord = (imageId: string, currentJsonAnnotations: ViewAnnotation[]) => {
     setUndoStack(prev => [...prev, { imageId: imageId, previousJsonAnnotations: JSON.parse(JSON.stringify(currentJsonAnnotations)) }]);
-    setRedoStack([]); // 任何新操作都会使重做历史无效，因此清空它
+    setRedoStack([]);
   };
 
-  // ================================================================
-  // ========== 更新 Undo 函数，以支持 Redo ==========
-  // ================================================================
   const performUndo = () => {
     if (undoStack.length === 0) {
       message.info("没有更多可撤销的操作");
@@ -859,21 +836,12 @@ const MaskOperatePro = () => {
     const lastOperation = undoStack[undoStack.length - 1];
     const annotationsToPushToRedo = allImageAnnotations[lastOperation.imageId]?.jsonAnnotations || [];
 
-    // 将当前状态推入 redo stack
     setRedoStack(prev => [...prev, { imageId: lastOperation.imageId, previousJsonAnnotations: annotationsToPushToRedo }]);
-
-    // 恢复上一个状态
     setAllImageAnnotations(prev => ({ ...prev, [lastOperation.imageId]: { ...(prev[lastOperation.imageId] || { jsonAnnotations: [], txtAnnotations: [] }), jsonAnnotations: lastOperation.previousJsonAnnotations } }));
-
-    // 从 undo stack 中移除已恢复的操作
     setUndoStack(prev => prev.slice(0, -1));
-
     message.success("操作已撤销");
   };
 
-  // ================================================================
-  // ========== 新增 Redo 函数 ==========
-  // ================================================================
   const performRedo = () => {
     if (redoStack.length === 0) {
       message.info("没有更多可重做的操作");
@@ -883,15 +851,9 @@ const MaskOperatePro = () => {
     const lastRedoOperation = redoStack[redoStack.length - 1];
     const annotationsToPushToUndo = allImageAnnotations[lastRedoOperation.imageId]?.jsonAnnotations || [];
 
-    // 将当前状态推回 undo stack
     setUndoStack(prev => [...prev, { imageId: lastRedoOperation.imageId, previousJsonAnnotations: annotationsToPushToUndo }]);
-
-    // 恢复被撤销的状态
     setAllImageAnnotations(prev => ({ ...prev, [lastRedoOperation.imageId]: { ...(prev[lastRedoOperation.imageId] || { jsonAnnotations: [], txtAnnotations: [] }), jsonAnnotations: lastRedoOperation.previousJsonAnnotations } }));
-
-    // 从 redo stack 中移除已恢复的操作
     setRedoStack(prev => prev.slice(0, -1));
-
     message.success("操作已重做");
   };
 
@@ -939,42 +901,28 @@ const MaskOperatePro = () => {
   };
 
   return (
-    <Layout className="mask-operate-pro-layout">
-      {/* Settings Panel */}
-      <Layout.Sider width={280} collapsedWidth={0} collapsible trigger={null} collapsed={!isLeftPanelVisible} className="settings-sider-pro" theme="light">
-        <Card title={<><FontAwesomeIcon icon={faCog} /> {t.settings}</>} bordered={false} className="panel-card-pro settings-card-pro">
-          <Form layout="vertical">
-            <Form.Item label={t.classesFileSettings}><Button icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => classesFileInputRef.current?.click()} block>{t.uploadClassesFile}</Button><input ref={classesFileInputRef} type="file" accept=".txt" onChange={handleManualClassesUpload} style={{ display: 'none' }} /></Form.Item>
-            <Form.Item label={t.category}><Select value={currentCategory} onChange={setCurrentCategory} disabled={!hasActiveImage || categories.length === 0} placeholder={categories.length === 0 ? t.noCategoriesFound : "选择类别"} showSearch optionFilterProp="children" filterOption={(input, option) => (option?.children as unknown as string ?? '').toLowerCase().includes(input.toLowerCase())}>{categories.map(cat => <Option key={cat} value={cat} title={cat} style={{color: categoryColors[cat]?.replace(/[^,]+(?=\))/, '1') || 'black'}}>{cat}</Option>)}</Select></Form.Item>
-            <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} disabled={!hasActiveImage} /></Form.Item>
-            <Form.Item label={t.annotationDisplaySource}><Radio.Group onChange={(e) => setSelectedAnnotationSource(e.target.value)} value={selectedAnnotationSource} disabled={!hasActiveImage} optionType="button" buttonStyle="solid" style={{width: '100%'}}><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="json">{t.sourceJson}</Radio.Button><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="txt">{t.sourceTxt}</Radio.Button><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="none">{t.sourceNone}</Radio.Button></Radio.Group></Form.Item>
-            <Form.Item label={t.toggleAnnotationsView} valuePropName="checked"><AntSwitch checked={showAnnotationsOnCanvas} onChange={setShowAnnotationsOnCanvas} disabled={!hasActiveImage} checkedChildren={<FontAwesomeIcon icon={faEye} />} unCheckedChildren={<FontAwesomeIcon icon={faEyeSlash} />}/></Form.Item>
-            <Form.Item label={t.toggleCategoryInBox} valuePropName="checked"><AntSwitch checked={showCategoryInBox} onChange={setShowCategoryInBox} disabled={!hasActiveImage} checkedChildren={<FontAwesomeIcon icon={faEye} />} unCheckedChildren={<FontAwesomeIcon icon={faEyeSlash} />}/></Form.Item>
-            <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearCurrentJsonAnnotations} block disabled={!currentImageInfo || !allImageAnnotations[currentImageInfo.name]?.jsonAnnotations?.length}>{t.clearAnnotationsButton}</Button></Form.Item>
-          </Form>
-        </Card>
+    <Layout className="mask-operate-pro-layout" hasSider>
+      <Layout.Sider width={60} className="tool-sider-pro">
+        <Space direction="vertical" align="center" style={{ width: '100%' }}>
+          <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
+        </Space>
       </Layout.Sider>
 
-      {/* Main Content */}
       <Layout className="main-content-layout-pro">
         <Layout.Header className="top-toolbar-pro">
           <Space wrap size="small">
             <Button type="primary" icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => folderUploadInputRef.current?.click()}> {t.uploadFolder} </Button>
-            <input ref={folderUploadInputRef} type="file" webkitdirectory="true" directory="true" multiple onChange={(e) => e.target.files && processUploadedFiles(Array.from(e.target.files))} style={{ display: 'none' }}/>
+            <input ref={folderUploadInputRef} type="file" {...{webkitdirectory:"true", directory:"true"}} multiple onChange={(e) => e.target.files && processUploadedFiles(Array.from(e.target.files))} style={{ display: 'none' }}/>
+          </Space>
+          <Space wrap size="small">
             <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => navigateImage(-1)} disabled={!hasActiveImage || currentImageIndex === 0} />
             <Text className="image-info-text-pro" title={currentImageInfo?.name}>{currentImageInfo ? `${t.currentImage} ${currentImageInfo.name} (${currentImageIndex + 1}/${images.length})` : t.noImages}</Text>
             <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => navigateImage(1)} disabled={!hasActiveImage || currentImageIndex >= images.length - 1} />
           </Space>
-          <Space wrap size="small" className="tool-selection-group-pro">
-            <Tooltip title={t.selectTool}><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.rectTool}><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.diagonalTool}><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.deleteTool}><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'default'} icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
-          </Space>
           <Space wrap size="small">
-            {/* ================================================================ */}
-            {/* ========== 更新 Undo/Redo 按钮组 ========== */}
-            {/* ================================================================ */}
             <Tooltip title="撤销 (Ctrl+Z)"><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={undoStack.length === 0} /></Tooltip>
             <Tooltip title="重做 (Ctrl+Y)"><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={redoStack.length === 0} /></Tooltip>
             <Button type="primary" icon={<FontAwesomeIcon icon={faFileArchive} />} onClick={exportAllDataAsZip} disabled={images.length === 0}>{t.exportAll}</Button>
@@ -991,29 +939,46 @@ const MaskOperatePro = () => {
         </Layout.Content>
 
         <Layout.Footer className="bottom-statusbar-pro">
-          <Space><Tooltip title={t.switchTooglePanels}><Button.Group><Button type="text" icon={<FontAwesomeIcon icon={faCog} />} onClick={() => setIsLeftPanelVisible(!isLeftPanelVisible)} /><Button type="text" icon={<FontAwesomeIcon icon={faList} />} onClick={() => setIsRightPanelVisible(!isRightPanelVisible)} /></Button.Group></Tooltip></Space>
-          <Space className="statusbar-info-pro"><Text>{t.imageSize}: {currentImageInfo ? `${currentImageInfo.width}×${currentImageInfo.height}` : 'N/A'}</Text><Text>{t.mouseCoords}: ({canvasMousePosition.x}, {canvasMousePosition.y})</Text></Space>
+          <Text>{t.imageSize}: {currentImageInfo ? `${currentImageInfo.width}×${currentImageInfo.height}` : 'N/A'}</Text>
+          <Text>{t.mouseCoords}: ({canvasMousePosition.x}, {canvasMousePosition.y})</Text>
+          <Tooltip title="切换检查器面板"><Button type="text" icon={<FontAwesomeIcon icon={isInspectorVisible ? faChevronRight : faChevronLeft} />} onClick={() => setIsInspectorVisible(!isInspectorVisible)} /></Tooltip>
         </Layout.Footer>
       </Layout>
 
-      {/* Annotations Panel */}
-      <Layout.Sider width={320} collapsedWidth={0} collapsible trigger={null} collapsed={!isRightPanelVisible} className="annotations-sider-pro" theme="light">
-        <Card title={<><FontAwesomeIcon icon={faList} /> {t.annotations} {currentCanvasAnnotations.length > 0 ? `(${currentCanvasAnnotations.length})` : ''}</>} bordered={false} className="panel-card-pro annotations-card-pro">
-          {hasActiveImage && currentCanvasAnnotations && currentCanvasAnnotations.length > 0 ? (
-            <Collapse activeKey={annotationListExpandedKeys} onChange={(keys) => setAnnotationListExpandedKeys(keys as string[])} accordion className="annotations-collapse-pro">
-              {currentCanvasAnnotations.map((item, index) => (
-                <Panel key={item.id} className="annotation-panel-item-pro"
-                       header={ <Space align="center" style={{width: '100%', justifyContent: 'space-between'}}> <Space> <div className="color-indicator-pro" style={{ backgroundColor: item.color }} /> <Text className="category-name-text-pro" title={item.category}>{item.category}</Text> </Space> <Tooltip title={t.deleteAnnotationTooltip}> <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e) => { e.stopPropagation(); removeAnnotationFromCurrentImageByIndex(index); }} disabled={selectedAnnotationSource === 'txt'} /> </Tooltip> </Space> }>
-                  <div className="annotation-details-pro">
-                    <Text strong>{t.originalFileNameLabel}:</Text> <Text code title={currentImageInfo?.name}>{currentImageInfo?.name}</Text><br/>
-                    {('points' in item) ? ( <> <Text strong>{t.diagonalArea}</Text><br/> <Text>P1: ({item.points[0].x.toFixed(1)}, {item.points[0].y.toFixed(1)}), P2: ({item.points[1].x.toFixed(1)}, {item.points[1].y.toFixed(1)})</Text><br/> <Text>{t.thicknessLabel}: {item.thickness}px</Text> </> ) : ( <> <Text strong>{t.positionAndSize}</Text><br/> <Text>X: {item.x}, Y: {item.y}</Text><br/> <Text>W: {item.width}, H: {item.height}</Text> </> )}
-                    {!('points' in item) && currentImageInfo && currentImageInfo.width > 0 && currentImageInfo.height > 0 && ( <> <br/><Text strong>{t.yoloFormatLabel}:</Text><br/> <Text code style={{wordBreak: 'break-all'}}>{viewAnnotationToYoloString(item as ViewBoxAnnotation, currentImageInfo.width, currentImageInfo.height, categories) || "N/A"}</Text> </> )}
-                  </div>
-                </Panel>
-              ))}
-            </Collapse>
-          ) : ( <div style={{ padding: '20px', textAlign: 'center' }}> <Text type="secondary">{hasActiveImage ? t.noAnnotations : t.noImages}</Text> </div> )}
-        </Card>
+      <Layout.Sider width={320} collapsedWidth={0} collapsible trigger={null} collapsed={!isInspectorVisible} className="inspector-sider-pro" theme="light">
+        <Tabs defaultActiveKey="1" className="inspector-tabs-pro">
+          <TabPane tab={<><FontAwesomeIcon icon={faList} /> <span className="tab-text">{t.annotations}</span> {currentCanvasAnnotations.length > 0 ? `(${currentCanvasAnnotations.length})` : ''}</>} key="1">
+            <div className="tab-pane-content">
+              {hasActiveImage && currentCanvasAnnotations && currentCanvasAnnotations.length > 0 ? (
+                <Collapse activeKey={annotationListExpandedKeys} onChange={(keys) => setAnnotationListExpandedKeys(keys as string[])} accordion className="annotations-collapse-pro">
+                  {currentCanvasAnnotations.map((item, index) => (
+                    <Panel key={item.id} className="annotation-panel-item-pro"
+                           header={ <Space align="center" style={{width: '100%', justifyContent: 'space-between'}}> <Space> <div className="color-indicator-pro" style={{ backgroundColor: item.color }} /> <Text className="category-name-text-pro" title={item.category}>{item.category}</Text> </Space> <Tooltip title={t.deleteAnnotationTooltip}> <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e) => { e.stopPropagation(); removeAnnotationFromCurrentImageByIndex(index); }} disabled={selectedAnnotationSource === 'txt'} /> </Tooltip> </Space> }>
+                      <div className="annotation-details-pro">
+                        <Text strong>{t.originalFileNameLabel}:</Text> <Text code title={currentImageInfo?.name}>{currentImageInfo?.name}</Text><br/>
+                        {('points' in item) ? ( <> <Text strong>{t.diagonalArea}</Text><br/> <Text>P1: ({item.points[0].x.toFixed(1)}, {item.points[0].y.toFixed(1)}), P2: ({item.points[1].x.toFixed(1)}, {item.points[1].y.toFixed(1)})</Text><br/> <Text>{t.thicknessLabel}: {item.thickness}px</Text> </> ) : ( <> <Text strong>{t.positionAndSize}</Text><br/> <Text>X: {item.x}, Y: {item.y}</Text><br/> <Text>W: {item.width}, H: {item.height}</Text> </> )}
+                        {!('points' in item) && currentImageInfo && currentImageInfo.width > 0 && currentImageInfo.height > 0 && ( <> <br/><Text strong>{t.yoloFormatLabel}:</Text><br/> <Text code style={{wordBreak: 'break-all'}}>{viewAnnotationToYoloString(item as ViewBoxAnnotation, currentImageInfo.width, currentImageInfo.height, categories) || "N/A"}</Text> </> )}
+                      </div>
+                    </Panel>
+                  ))}
+                </Collapse>
+              ) : ( <div style={{ padding: '20px', textAlign: 'center' }}> <Text type="secondary">{hasActiveImage ? t.noAnnotations : t.noImages}</Text> </div> )}
+            </div>
+          </TabPane>
+          <TabPane tab={<><FontAwesomeIcon icon={faCog} /> <span className="tab-text">{t.settings}</span></>} key="2">
+            <div className="tab-pane-content">
+              <Form layout="vertical">
+                <Form.Item label={t.classesFileSettings}><Button icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => classesFileInputRef.current?.click()} block>{t.uploadClassesFile}</Button><input ref={classesFileInputRef} type="file" accept=".txt" onChange={handleManualClassesUpload} style={{ display: 'none' }} /></Form.Item>
+                <Form.Item label={t.category}><Select value={currentCategory} onChange={setCurrentCategory} disabled={!hasActiveImage || categories.length === 0} placeholder={categories.length === 0 ? t.noCategoriesFound : "选择类别"} showSearch optionFilterProp="children" filterOption={(input, option) => (option?.children as unknown as string ?? '').toLowerCase().includes(input.toLowerCase())}>{categories.map(cat => <Option key={cat} value={cat} title={cat} style={{color: categoryColors[cat]?.replace(/[^,]+(?=\))/, '1') || 'black'}}>{cat}</Option>)}</Select></Form.Item>
+                <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} disabled={!hasActiveImage} /></Form.Item>
+                <Form.Item label={t.annotationDisplaySource}><Radio.Group onChange={(e) => setSelectedAnnotationSource(e.target.value)} value={selectedAnnotationSource} disabled={!hasActiveImage} optionType="button" buttonStyle="solid" style={{width: '100%'}}><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="json">{t.sourceJson}</Radio.Button><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="txt">{t.sourceTxt}</Radio.Button><Radio.Button style={{width: '33.33%', textAlign:'center'}} value="none">{t.sourceNone}</Radio.Button></Radio.Group></Form.Item>
+                <Form.Item label={t.toggleAnnotationsView} valuePropName="checked"><AntSwitch checked={showAnnotationsOnCanvas} onChange={setShowAnnotationsOnCanvas} disabled={!hasActiveImage} checkedChildren={<FontAwesomeIcon icon={faEye} />} unCheckedChildren={<FontAwesomeIcon icon={faEyeSlash} />}/></Form.Item>
+                <Form.Item label={t.toggleCategoryInBox} valuePropName="checked"><AntSwitch checked={showCategoryInBox} onChange={setShowCategoryInBox} disabled={!hasActiveImage} checkedChildren={<FontAwesomeIcon icon={faEye} />} unCheckedChildren={<FontAwesomeIcon icon={faEyeSlash} />}/></Form.Item>
+                <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearCurrentJsonAnnotations} block disabled={!currentImageInfo || !allImageAnnotations[currentImageInfo.name]?.jsonAnnotations?.length}>{t.clearAnnotationsButton}</Button></Form.Item>
+              </Form>
+            </div>
+          </TabPane>
+        </Tabs>
       </Layout.Sider>
     </Layout>
   );
