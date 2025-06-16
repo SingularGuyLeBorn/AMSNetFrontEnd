@@ -1,18 +1,16 @@
 /* MaskOperate/index.css */
-/* "Aetherium Weave" Theme - Professional Layout with AI by Your Top Programmer */
-
+/* "Aetherium Weave" (Professional Layout) Theme by Your Top Programmer */
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 
 :root {
   --base-bg: #F0F5FF;
-  --panel-bg: rgba(255, 255, 255, 0.65);
+  --panel-bg: rgba(255, 255, 255, 0.75);
   --panel-bg-solid: #FFFFFF;
   --text-primary: #0D1A2E;
   --text-secondary: #5A6A82;
   --accent-primary: #4A90E2;
   --accent-primary-glow: rgba(74, 144, 226, 0.4);
   --accent-primary-hover: #357ABD;
-  --accent-primary-active: #2A6094;
   --border-color-light: rgba(74, 144, 226, 0.2);
   --border-color-medium: rgba(74, 144, 226, 0.4);
   --danger-color: #E94F4F;
@@ -23,7 +21,7 @@
 }
 
 /* =================================================================== */
-/* 1. 全局与主布局 (Global & Main Layout)                              */
+/* 1. 全局与新布局结构 (Global & New Layout Structure)                */
 /* =================================================================== */
 .mask-operate-pro-layout {
   height: 100vh;
@@ -33,47 +31,19 @@
   overflow: hidden;
 }
 
-.main-content-layout-pro {
-  background: transparent;
-}
-
-/* =================================================================== */
-/* 2. 左侧垂直工具栏 (Left Vertical Toolbar)                           */
-/* =================================================================== */
 .tool-sider-pro {
-  background: var(--panel-bg) !important;
-  backdrop-filter: blur(12px);
+  background: var(--panel-bg-solid) !important;
   border-right: 1px solid var(--border-color-light);
-  box-shadow: 2px 0 10px rgba(0, 30, 80, 0.05);
-  padding-top: 20px;
+  box-shadow: 2px 0 8px rgba(0, 30, 80, 0.05);
   z-index: 20;
 }
-.tool-button-pro.ant-btn {
-  width: 40px;
-  height: 40px;
-  font-size: 18px;
-  margin-bottom: 8px;
-  box-shadow: none;
-}
-.tool-button-pro.ant-btn.ant-btn-text:hover {
-  background-color: var(--accent-primary-glow) !important;
-  color: var(--accent-primary) !important;
-}
-.tool-button-pro.ant-btn.ant-btn-primary {
-  background-color: var(--accent-primary) !important;
-  color: white !important;
-}
-.tool-button-pro.ant-btn.ant-btn-primary:hover {
-  background-color: var(--accent-primary-hover) !important;
-}
-.tool-button-pro.ant-btn-dangerous.ant-btn-primary {
-  background-color: var(--danger-color) !important;
+
+.main-content-layout-pro {
+  background: transparent;
+  display: flex;
+  flex-direction: column;
 }
 
-
-/* =================================================================== */
-/* 3. 中心工作区元素 (Center Workspace Elements)                       */
-/* =================================================================== */
 .top-toolbar-pro {
   display: flex;
   justify-content: space-between;
@@ -84,46 +54,18 @@
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color-light);
   z-index: 10;
-}
-
-.image-info-text-pro {
-  color: var(--text-secondary);
-  font-weight: 500;
-  max-width: 400px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
 .canvas-content-pro {
+  flex-grow: 1;
   padding: 16px;
   display: flex;
   justify-content: center;
   align-items: center;
-  position: relative; /* 为AI建议条定位 */
+  overflow: hidden; /* 由内部wrapper滚动 */
+  position: relative;
 }
-
-/* 新增: AI 建议操作条 */
-.ai-suggestion-bar {
-  position: absolute;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(45, 52, 64, 0.85);
-  backdrop-filter: blur(8px);
-  color: white;
-  padding: 8px 16px;
-  border-radius: 20px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.ai-suggestion-bar .ant-btn {
-  border-radius: 16px;
-}
-
 
 .canvas-wrapper-pro {
   width: 100%;
@@ -137,152 +79,121 @@
   align-items: center;
 }
 
+.inspector-sider-pro {
+  background: var(--panel-bg) !important;
+  backdrop-filter: blur(12px);
+  border-left: 1px solid var(--border-color-light);
+  box-shadow: -2px 0 8px rgba(0, 30, 80, 0.05);
+  transition: width var(--transition-speed) var(--transition-curve),
+  transform var(--transition-speed) var(--transition-curve);
+  z-index: 20;
+}
+
+.inspector-sider-pro .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* =================================================================== */
+/* 2. 可伸缩分割线 (Resizable Divider)                                 */
+/* =================================================================== */
+.resizer {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 15;
+  transition: background-color var(--transition-speed);
+}
+
+.resizer:hover {
+  background-color: var(--accent-primary-glow);
+}
+
+body.resizing, body.resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+/* =================================================================== */
+/* 3. 组件样式更新 (Component Style Updates)                         */
+/* =================================================================== */
+
+/* ---> 左侧工具栏 (Tool Sidebar) <--- */
+.tool-button-pro {
+  width: 44px;
+  height: 44px;
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+.tool-button-pro.ant-btn-primary {
+  color: #fff;
+}
+.tool-button-pro.ant-btn-text:hover {
+  background: var(--base-bg) !important;
+  color: var(--accent-primary) !important;
+}
+
+/* ---> 顶部工具栏 (Top Toolbar) <--- */
+.image-info-text-pro {
+  color: var(--text-secondary);
+  font-weight: 500;
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---> 画布 (Canvas) <--- */
 .drawing-canvas-pro {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   display: block;
 }
-
 .draw-cursor-pro { cursor: crosshair; }
 .delete-cursor-pro { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23E94F4F" stroke="white" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>') 12 12, auto; }
 
-.bottom-statusbar-pro {
-  height: 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 16px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  border-top: 1px solid var(--border-color-light);
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.bottom-statusbar-pro .ant-typography {
-  margin: 0 8px;
-  color: var(--text-secondary);
-}
-
-
-/* =================================================================== */
-/* 4. 右侧检查器面板 (Right Inspector Panel)                          */
-/* =================================================================== */
-.inspector-sider-pro {
-  background: var(--panel-bg) !important;
-  backdrop-filter: blur(12px);
-  border-left: 1px solid var(--border-color-light);
-  box-shadow: -2px 0 10px rgba(0, 30, 80, 0.05);
-  transition: all var(--transition-speed) var(--transition-curve);
-  z-index: 15;
-}
-
+/* ---> 右侧检查器 (Inspector) <--- */
 .inspector-tabs-pro {
-  height: 100%;
+  flex-grow: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
-
 .inspector-tabs-pro .ant-tabs-nav {
-  margin-bottom: 0 !important;
+  margin-bottom: 0;
   padding: 0 16px;
 }
-
-.inspector-tabs-pro .ant-tabs-tab {
-  color: var(--text-secondary) !important;
-  font-weight: 500;
+.inspector-tabs-pro .ant-tabs-nav-wrap {
+  border-bottom: 1px solid var(--border-color-light);
 }
-
-.inspector-tabs-pro .ant-tabs-tab .tab-text {
+.inspector-tabs-pro .ant-tabs-tab {
+  padding: 12px 0;
+}
+.inspector-tabs-pro .tab-text {
   margin-left: 8px;
 }
-
-.inspector-tabs-pro .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: var(--accent-primary) !important;
-}
-
-.inspector-tabs-pro .ant-tabs-ink-bar {
-  background: var(--accent-primary) !important;
-}
-
 .inspector-tabs-pro .ant-tabs-content-holder {
   flex-grow: 1;
   overflow: hidden;
 }
-
 .tab-pane-content {
+  padding: 16px;
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
 }
 
-/* =================================================================== */
-/* 5. 通用组件样式 (General Component Styles)                          */
-/* =================================================================== */
-.ant-btn {
-  border-radius: 6px;
-  font-weight: 500;
-  transition: all var(--transition-speed) var(--transition-curve);
-}
-.ant-btn:not(.tool-button-pro):hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
-.ant-btn:not(.tool-button-pro):active {
-  transform: translateY(0);
-}
-.ant-btn-primary {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  box-shadow: 0 2px 4px var(--accent-primary-glow);
-}
-.ant-btn-primary:hover {
-  background: var(--accent-primary-hover);
-  border-color: var(--accent-primary-hover);
-}
-
-.ant-form-item-label > label {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-.ant-select-selector, .ant-input-number, .ant-input, .ant-input-password {
-  background-color: var(--panel-bg-solid) !important;
-  border: 1px solid var(--border-color-medium) !important;
-}
-
-.annotations-collapse-pro {
-  background: transparent;
-  border: none;
-}
-.annotation-panel-item-pro {
-  background: var(--panel-bg-solid);
-  border: 1px solid var(--border-color-light) !important;
-  border-radius: 6px !important;
-  margin-bottom: 8px !important;
-  overflow: hidden;
-}
-.annotation-details-pro {
-  font-size: 12px;
-  line-height: 1.6;
-}
-.color-indicator-pro {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  border: 1px solid rgba(0,0,0,0.2);
-  flex-shrink: 0;
+/* ---> 标注列表 (Annotation List) - 样式微调 <--- */
+.annotation-panel-item-pro .ant-collapse-header .ant-space-item:first-child {
+  min-width: 0; /* 关键CSS，允许flex-shrink生效 */
 }
 .category-name-text-pro {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 1; /* 允许文本收缩 */
+  min-width: 0;   /* 配合 ellipsis 生效 */
 }
 
-/* =================================================================== */
-/* 6. 滚动条美化 (Scrollbar Prettifying)                             */
-/* =================================================================== */
+/* ---> 滚动条 (Scrollbar) <--- */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -296,4 +207,35 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent-primary);
+}
+
+/* ---> Sider Footer for Toggle Button <--- */
+.sider-footer {
+  flex-shrink: 0;
+  text-align: right;
+  padding: 4px;
+  border-top: 1px solid var(--border-color-light);
+}
+
+/* ---> 其他通用组件样式 <--- */
+.ant-btn {
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all var(--transition-speed) var(--transition-curve);
+}
+.ant-btn-primary {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.ant-btn-primary:hover {
+  background: var(--accent-primary-hover);
+  border-color: var(--accent-primary-hover);
+}
+.ant-form-item-label > label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.ant-select-selector, .ant-input-number {
+  background-color: var(--panel-bg-solid) !important;
+  border: 1px solid var(--border-color-medium) !important;
 }

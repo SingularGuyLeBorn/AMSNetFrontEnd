@@ -6,11 +6,11 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faUpload, faChevronLeft, faChevronRight, faUndo, faRedo,
   faSave, faDrawPolygon, faTrash, faPaintBrush,
-  faCog, faList, faMousePointer, faFileArchive, faEraser, faEye, faEyeSlash,
+  faCog, faList, faMousePointer, faFileArchive, faEraser, faEye, faEyeSlash, faRobot
 } from "@fortawesome/free-solid-svg-icons";
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { defaultCategoryColors, translations, RESIZE_HANDLE_SIZE } from './constants.js';
+import { defaultCategoryColors, translations, RESIZE_HANDLE_SIZE } from './constants';
 import './index.css';
 
 const { Title, Text } = Typography;
@@ -23,15 +23,6 @@ const { TabPane } = Tabs;
 // ===================================================================
 type Point = { x: number; y: number };
 
-type BaseBoxAnnotation = {
-  x: number; y: number; width: number; height: number;
-  lineWidth?: number;
-};
-type BaseDiagonalAnnotation = {
-  points: [Point, Point];
-  thickness?: number;
-};
-
 type ViewBoxAnnotation = {
   id: string;
   x: number; y: number; width: number; height: number;
@@ -43,7 +34,6 @@ type ViewDiagonalAnnotation = {
   category: string; color: string; thickness: number;
 };
 type ViewAnnotation = ViewBoxAnnotation | ViewDiagonalAnnotation;
-
 
 type ImageFileInfo = {
   name: string;
@@ -129,6 +119,8 @@ const MaskOperatePro = () => {
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(5);
 
   const [isInspectorVisible, setIsInspectorVisible] = useState<boolean>(true);
+  const [inspectorWidth, setInspectorWidth] = useState<number>(320);
+  const [isResizing, setIsResizing] = useState<boolean>(false);
 
   const [undoStack, setUndoStack] = useState<UndoOperation[]>([]);
   const [redoStack, setRedoStack] = useState<UndoOperation[]>([]);
@@ -139,8 +131,6 @@ const MaskOperatePro = () => {
   const [selectedAnnotationSource, setSelectedAnnotationSource] = useState<AnnotationSourceType>('json');
   const [showAnnotationsOnCanvas, setShowAnnotationsOnCanvas] = useState<boolean>(true);
   const [showCategoryInBox, setShowCategoryInBox] = useState<boolean>(true);
-
-  const [tempDiagonalPoints, setTempDiagonalPoints] = useState<Point[]>([]);
 
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [draggingState, setDraggingState] = useState<DraggingState>(null);
@@ -176,7 +166,7 @@ const MaskOperatePro = () => {
 
   useEffect(() => {
     redrawCanvas();
-  }, [currentImageInfo, currentCanvasAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, tempDiagonalPoints, canvasMousePosition]);
+  }, [currentImageInfo, currentCanvasAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, canvasMousePosition]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -245,6 +235,35 @@ const MaskOperatePro = () => {
     return () => canvasElement.removeEventListener('mousemove', handleMouseMoveForCoords);
   }, [currentImageInfo]);
 
+  const handleMouseDownOnResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth > 200 && newWidth < 800) {
+        setInspectorWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
   const getResizeHandles = (box: ViewBoxAnnotation): {[key in ResizeHandle]: {x: number, y: number, size: number, cursor: string}} => {
     const s = RESIZE_HANDLE_SIZE;
     const { x, y, width, height } = box;
@@ -297,22 +316,23 @@ const MaskOperatePro = () => {
           }
         });
 
-        if (draggingState && activeTool === 'rectangle') {
+        if (draggingState) {
           const startPoint = draggingState.startMousePos;
           const endPoint = canvasMousePosition;
-          const previewRect = createRectangleFromPoints(startPoint, endPoint, currentCategory, categoryColors[currentCategory] || 'rgba(0,0,0,0.2)', currentLineWidth);
-          renderRectangle(previewRect, ctx, true);
-        }
 
-        if (tempDiagonalPoints.length === 1 && currentCategory && categoryColors[currentCategory]) {
-          const tempDiag: ViewDiagonalAnnotation = {
-            id: 'temp',
-            points: [tempDiagonalPoints[0], canvasMousePosition],
-            category: currentCategory,
-            color: categoryColors[currentCategory],
-            thickness: currentLineWidth
-          };
-          renderDiagonal(tempDiag, ctx, true, false);
+          if (activeTool === 'rectangle') {
+            const previewRect = createRectangleFromPoints(startPoint, endPoint, currentCategory, categoryColors[currentCategory] || 'rgba(0,0,0,0.2)', currentLineWidth);
+            renderRectangle(previewRect, ctx, true);
+          } else if (activeTool === 'diagonal') {
+            const previewDiag: ViewDiagonalAnnotation = {
+              id: 'temp_diag',
+              points: [startPoint, endPoint],
+              category: currentCategory,
+              color: categoryColors[currentCategory] || 'rgba(0,0,0,0.4)',
+              thickness: currentLineWidth,
+            };
+            renderDiagonal(previewDiag, ctx, true);
+          }
         }
 
         ctx.globalAlpha = 1.0;
@@ -375,21 +395,31 @@ const MaskOperatePro = () => {
   const renderDiagonal = (diag: ViewDiagonalAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points);
     if (length === 0) return;
+
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.rotate(angleRad);
     ctx.beginPath();
     ctx.rect(-length / 2, -diag.thickness / 2, length, diag.thickness);
-    ctx.fillStyle = diag.color;
-    if (isSelected) {
-      ctx.strokeStyle = "#007bff";
-      ctx.lineWidth = 2.5;
+
+    if (isPreview) {
+      ctx.setLineDash([8, 4]);
+      ctx.strokeStyle = "#4A90E2";
+      ctx.lineWidth = 2;
+      ctx.stroke();
     } else {
-      ctx.strokeStyle = "rgba(0,0,0,0.6)";
-      ctx.lineWidth = 1;
+      ctx.fillStyle = diag.color;
+      if (isSelected) {
+        ctx.strokeStyle = "#007bff";
+        ctx.lineWidth = 2.5;
+      } else {
+        ctx.strokeStyle = "rgba(0,0,0,0.6)";
+        ctx.lineWidth = 1;
+      }
+      ctx.fill();
+      ctx.stroke();
     }
-    ctx.fill();
-    ctx.stroke();
+
     ctx.restore();
 
     if (showCategoryInBox && !isPreview) {
@@ -491,9 +521,7 @@ const MaskOperatePro = () => {
         return;
       }
       const startPoint = { x: mousePos.x, y: mousePos.y };
-      if (activeTool === 'rectangle') {
-        setDraggingState({ type: 'move' , startMousePos: startPoint, startAnnotationState: {} as any });
-      }
+      setDraggingState({ type: 'move' , startMousePos: startPoint, startAnnotationState: {} as any });
     }
   };
 
@@ -547,19 +575,30 @@ const MaskOperatePro = () => {
           jsonAnnotations: updatedAnnotations
         }
       }));
-
     }
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!currentImageInfo) return;
+    if (!currentImageInfo || !draggingState) return;
 
-    if (draggingState && activeTool === 'rectangle') {
-      const startPoint = draggingState.startMousePos;
-      const endPoint = canvasMousePosition;
+    const startPoint = draggingState.startMousePos;
+    const endPoint = canvasMousePosition;
+
+    if (activeTool === 'rectangle') {
       const newRect = createRectangleFromPoints(startPoint, endPoint, currentCategory, categoryColors[currentCategory], currentLineWidth);
       if (newRect.width > 2 && newRect.height > 2) {
         addAnnotationToCurrentImage(newRect);
+      }
+    } else if (activeTool === 'diagonal') {
+      const newDiagonal: ViewDiagonalAnnotation = {
+        id: generateUniqueId(),
+        points: [startPoint, endPoint],
+        category: currentCategory,
+        color: categoryColors[currentCategory],
+        thickness: currentLineWidth,
+      };
+      if(getDiagonalParameters(newDiagonal.points).length > 2) {
+        addAnnotationToCurrentImage(newDiagonal);
       }
     }
 
@@ -574,29 +613,6 @@ const MaskOperatePro = () => {
       const annoIndexToRemove = findAnnotationIndexAtPoint(clickPoint, currentCanvasAnnotations);
       if (annoIndexToRemove > -1) {
         removeAnnotationFromCurrentImageByIndex(annoIndexToRemove);
-      }
-    } else if (activeTool === 'diagonal') {
-      const clickPoint = canvasMousePosition;
-      if (!currentCategory || !categoryColors[currentCategory]) {
-        if (!currentCategory) message.warn("请先选择一个类别再进行标注!");
-        else message.error(`类别 "${currentCategory}" 缺少颜色配置，无法标注!`);
-        return;
-      }
-
-      const newPoints = [...tempDiagonalPoints, clickPoint];
-      setTempDiagonalPoints(newPoints);
-      if (newPoints.length === 2) {
-        const newDiagonal: ViewDiagonalAnnotation = {
-          id: generateUniqueId(),
-          points: [newPoints[0], newPoints[1]] as [Point, Point],
-          category: currentCategory,
-          color: categoryColors[currentCategory],
-          thickness: currentLineWidth,
-        };
-        if(getDiagonalParameters(newDiagonal.points).length > 2) {
-          addAnnotationToCurrentImage(newDiagonal);
-        }
-        setTempDiagonalPoints([]);
       }
     }
   };
@@ -637,15 +653,61 @@ const MaskOperatePro = () => {
     if (images.length === 0) return;
     message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
     const zip = new JSZip();
+    const originalFolder = zip.folder("original_data");
+    const annotatedFolder = zip.folder("annotated_data");
+
+    if (!originalFolder || !annotatedFolder) {
+      message.error("创建导出文件夹失败！");
+      return;
+    }
+
+    const offscreenCanvas = document.createElement('canvas');
+    const ctx = offscreenCanvas.getContext('2d');
+
+    if (!ctx) {
+      message.error("无法创建离屏画布！");
+      return;
+    }
+
     for (const imageInfo of images) {
-      const { originalFile, name: imageName } = imageInfo;
+      const { originalFile, name: imageName, width: imgWidth, height: imgHeight } = imageInfo;
+      const baseName = getFileNameWithoutExtension(imageName);
       const annotationsForImage = allImageAnnotations[imageName];
-      if (originalFile) {
-        zip.file(imageName, originalFile);
+
+      // 1. 处理 original_data 文件夹
+      originalFolder.file(imageName, originalFile);
+      originalFolder.file(`${baseName}.json`, "{}"); // 空JSON
+      originalFolder.file(`${baseName}.txt`, "");     // 空TXT
+
+      // 2. 处理 annotated_data 文件夹
+      // 2a. 生成带标注的图片
+      const imageToDraw = new Image();
+      imageToDraw.src = imageInfo.url;
+      await new Promise(resolve => { imageToDraw.onload = resolve; });
+
+      offscreenCanvas.width = imgWidth;
+      offscreenCanvas.height = imgHeight;
+      ctx.clearRect(0, 0, imgWidth, imgHeight);
+      ctx.drawImage(imageToDraw, 0, 0, imgWidth, imgHeight);
+
+      const annotationsToDraw = annotationsForImage?.jsonAnnotations || [];
+      annotationsToDraw.forEach(anno => {
+        if ('points' in anno) {
+          renderDiagonal(anno, ctx);
+        } else {
+          renderRectangle(anno, ctx);
+        }
+      });
+
+      const blob = await new Promise<Blob | null>(resolve => offscreenCanvas.toBlob(resolve, 'image/png'));
+      if (blob) {
+        annotatedFolder.file(`${baseName}.png`, blob);
       }
-      if (annotationsForImage && annotationsForImage.jsonAnnotations.length > 0) {
-        const outputJson: { [category: string]: any[] } = {};
-        annotationsForImage.jsonAnnotations.forEach(anno => {
+
+      // 2b. 生成带标注的JSON文件
+      const outputJson: { [category: string]: any[] } = {};
+      if (annotationsToDraw.length > 0) {
+        annotationsToDraw.forEach(anno => {
           if (!outputJson[anno.category]) outputJson[anno.category] = [];
           if ('points' in anno) {
             outputJson[anno.category].push({
@@ -660,15 +722,26 @@ const MaskOperatePro = () => {
             });
           }
         });
-        const baseName = getFileNameWithoutExtension(imageName);
-        zip.file(`${baseName}.json`, JSON.stringify(outputJson, null, 2));
       }
+      annotatedFolder.file(`${baseName}.json`, JSON.stringify(outputJson, null, 2));
+
+      // 2c. 生成带标注的TXT文件
+      const yoloContent = annotationsToDraw
+        .filter(anno => 'width' in anno)
+        .map(anno => viewAnnotationToYoloString(anno as ViewBoxAnnotation, imgWidth, imgHeight, categories))
+        .filter(str => str !== null)
+        .join('\n');
+      annotatedFolder.file(`${baseName}.txt`, yoloContent);
     }
+
+    // 3. 为两个文件夹都添加 classes.txt
     const classesContent = categories.join('\n');
-    zip.file("classes.txt", classesContent);
+    originalFolder.file("classes.txt", classesContent);
+    annotatedFolder.file("classes.txt", classesContent);
+
     try {
       const content = await zip.generateAsync({ type: "blob" });
-      saveAs(content, "annotated_data.zip");
+      saveAs(content, "structured_annotated_data.zip");
       message.success({ content: t.exportSuccessMessage, key: 'exporting', duration: 3 });
     } catch (error) {
       message.error({ content: `${t.exportFailureMessage} ${(error as Error).message}`, key: 'exporting', duration: 3 });
@@ -832,10 +905,8 @@ const MaskOperatePro = () => {
       message.info("没有更多可撤销的操作");
       return;
     }
-
     const lastOperation = undoStack[undoStack.length - 1];
     const annotationsToPushToRedo = allImageAnnotations[lastOperation.imageId]?.jsonAnnotations || [];
-
     setRedoStack(prev => [...prev, { imageId: lastOperation.imageId, previousJsonAnnotations: annotationsToPushToRedo }]);
     setAllImageAnnotations(prev => ({ ...prev, [lastOperation.imageId]: { ...(prev[lastOperation.imageId] || { jsonAnnotations: [], txtAnnotations: [] }), jsonAnnotations: lastOperation.previousJsonAnnotations } }));
     setUndoStack(prev => prev.slice(0, -1));
@@ -847,16 +918,13 @@ const MaskOperatePro = () => {
       message.info("没有更多可重做的操作");
       return;
     }
-
     const lastRedoOperation = redoStack[redoStack.length - 1];
     const annotationsToPushToUndo = allImageAnnotations[lastRedoOperation.imageId]?.jsonAnnotations || [];
-
     setUndoStack(prev => [...prev, { imageId: lastRedoOperation.imageId, previousJsonAnnotations: annotationsToPushToUndo }]);
     setAllImageAnnotations(prev => ({ ...prev, [lastRedoOperation.imageId]: { ...(prev[lastRedoOperation.imageId] || { jsonAnnotations: [], txtAnnotations: [] }), jsonAnnotations: lastRedoOperation.previousJsonAnnotations } }));
     setRedoStack(prev => prev.slice(0, -1));
     message.success("操作已重做");
   };
-
 
   const navigateImage = (offset: number) => {
     const newIndex = currentImageIndex + offset;
@@ -864,7 +932,6 @@ const MaskOperatePro = () => {
       setCurrentImageIndex(newIndex);
       setSelectedAnnotationId(null);
       setDraggingState(null);
-      setTempDiagonalPoints([]);
     }
   };
 
@@ -903,11 +970,11 @@ const MaskOperatePro = () => {
   return (
     <Layout className="mask-operate-pro-layout" hasSider>
       <Layout.Sider width={60} className="tool-sider-pro">
-        <Space direction="vertical" align="center" style={{ width: '100%' }}>
-          <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
-          <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
-          <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
-          <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
+        <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
+          <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faMousePointer} size="lg" />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faPaintBrush} size="lg" />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faDrawPolygon} size="lg" />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button-pro" icon={<FontAwesomeIcon icon={faTrash} size="lg" />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
         </Space>
       </Layout.Sider>
 
@@ -937,23 +1004,23 @@ const MaskOperatePro = () => {
             />
           </div>
         </Layout.Content>
-
-        <Layout.Footer className="bottom-statusbar-pro">
-          <Text>{t.imageSize}: {currentImageInfo ? `${currentImageInfo.width}×${currentImageInfo.height}` : 'N/A'}</Text>
-          <Text>{t.mouseCoords}: ({canvasMousePosition.x}, {canvasMousePosition.y})</Text>
-          <Tooltip title="切换检查器面板"><Button type="text" icon={<FontAwesomeIcon icon={isInspectorVisible ? faChevronRight : faChevronLeft} />} onClick={() => setIsInspectorVisible(!isInspectorVisible)} /></Tooltip>
-        </Layout.Footer>
       </Layout>
 
-      <Layout.Sider width={320} collapsedWidth={0} collapsible trigger={null} collapsed={!isInspectorVisible} className="inspector-sider-pro" theme="light">
-        <Tabs defaultActiveKey="1" className="inspector-tabs-pro">
+      <div className="resizer" onMouseDown={handleMouseDownOnResize} style={{ display: isInspectorVisible ? 'block' : 'none' }} />
+
+      <Layout.Sider width={inspectorWidth} collapsedWidth={0} collapsible trigger={null} collapsed={!isInspectorVisible} className="inspector-sider-pro" theme="light">
+        <Tabs defaultActiveKey="1" className="inspector-tabs-pro" tabBarExtraContent={
+          <Tooltip title={isInspectorVisible ? "隐藏检查器" : "显示检查器"}>
+            <Button type="text" icon={<FontAwesomeIcon icon={isInspectorVisible ? faChevronRight : faChevronLeft} />} onClick={() => setIsInspectorVisible(!isInspectorVisible)} />
+          </Tooltip>
+        }>
           <TabPane tab={<><FontAwesomeIcon icon={faList} /> <span className="tab-text">{t.annotations}</span> {currentCanvasAnnotations.length > 0 ? `(${currentCanvasAnnotations.length})` : ''}</>} key="1">
             <div className="tab-pane-content">
               {hasActiveImage && currentCanvasAnnotations && currentCanvasAnnotations.length > 0 ? (
                 <Collapse activeKey={annotationListExpandedKeys} onChange={(keys) => setAnnotationListExpandedKeys(keys as string[])} accordion className="annotations-collapse-pro">
                   {currentCanvasAnnotations.map((item, index) => (
                     <Panel key={item.id} className="annotation-panel-item-pro"
-                           header={ <Space align="center" style={{width: '100%', justifyContent: 'space-between'}}> <Space> <div className="color-indicator-pro" style={{ backgroundColor: item.color }} /> <Text className="category-name-text-pro" title={item.category}>{item.category}</Text> </Space> <Tooltip title={t.deleteAnnotationTooltip}> <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e) => { e.stopPropagation(); removeAnnotationFromCurrentImageByIndex(index); }} disabled={selectedAnnotationSource === 'txt'} /> </Tooltip> </Space> }>
+                           header={ <Space align="center" style={{width: '100%', justifyContent: 'space-between'}}> <Space style={{minWidth: 0}}> <div className="color-indicator-pro" style={{ backgroundColor: item.color }} /> <Text className="category-name-text-pro" title={item.category} ellipsis style={{ color: item.color.replace(/[^,]+(?=\))/, '1') }}>{item.category}</Text> </Space> <Tooltip title={t.deleteAnnotationTooltip}> <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e) => { e.stopPropagation(); removeAnnotationFromCurrentImageByIndex(index); }} disabled={selectedAnnotationSource === 'txt'} /> </Tooltip> </Space> }>
                       <div className="annotation-details-pro">
                         <Text strong>{t.originalFileNameLabel}:</Text> <Text code title={currentImageInfo?.name}>{currentImageInfo?.name}</Text><br/>
                         {('points' in item) ? ( <> <Text strong>{t.diagonalArea}</Text><br/> <Text>P1: ({item.points[0].x.toFixed(1)}, {item.points[0].y.toFixed(1)}), P2: ({item.points[1].x.toFixed(1)}, {item.points[1].y.toFixed(1)})</Text><br/> <Text>{t.thicknessLabel}: {item.thickness}px</Text> </> ) : ( <> <Text strong>{t.positionAndSize}</Text><br/> <Text>X: {item.x}, Y: {item.y}</Text><br/> <Text>W: {item.width}, H: {item.height}</Text> </> )}
