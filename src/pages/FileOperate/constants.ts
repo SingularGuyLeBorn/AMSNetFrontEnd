@@ -9,10 +9,11 @@ export interface ClassInfo {
 }
 
 /**
- * @description 标注类别索引与其颜色、标签的映射关系。
+ * @description 初始的标注类别索引与其颜色、标签的映射关系。
  * 这是手动标注（画框）时，用户选择的类别列表及其在画布上显示的颜色。
+ * 应用启动时会使用此作为默认值，但它可以在运行时被用户修改。
  */
-export const indexClassColorMap: { [key: number]: ClassInfo } = {
+export const initialIndexClassColorMap: { [key: number]: ClassInfo } = {
   0: { label: 'capacitor', color: '#ff0000' }, 1: { label: 'pmos', color: '#00ff00' },
   2: { label: 'nmos', color: '#0000ff' }, 3: { label: 'vdd', color: '#ffff00' },
   4: { label: 'gnd', color: '#ff00ff' }, 5: { label: 'nmos-cross', color: '#00ffff' },
@@ -84,8 +85,8 @@ export const translations: { [key: string]: TranslationSet } = {
     chooseJsonType: '选择组件类型 (染色用)',
     noFile: '没有可操作的文件',
     noDeletedBoxes: '没有可恢复的删除框',
-    fileManagement: '文件',
-    annotationTools: '工具',
+    fileManagement: '文件管理',
+    toolsAndActions: '工具与操作',
     actions: '操作',
     dataExplorer: '数据浏览',
     settings: '设置',
@@ -100,6 +101,23 @@ export const translations: { [key: string]: TranslationSet } = {
     operationSuccessful: "操作成功",
     noUndoOperations: "没有可撤销的操作",
     noRedoOperations: "没有可重做的操作",
+    aiAnnotation: 'AI 自动标注',
+    aiAnnotating: 'AI 标注中...',
+    apiMode: 'API 模式',
+    apiModeAuto: '自动',
+    apiModeManual: '手动',
+    manualApiEndpoint: '手动选择 API',
+    apiForNew: '新图标注 API',
+    apiForIncremental: '增量标注 API',
+    classManagement: '类别管理',
+    addClass: '新增类别',
+    importClasses: '导入类别',
+    exportClasses: '导出类别',
+    className: '类别名称',
+    classColor: '颜色',
+    hidePanel: '隐藏面板',
+    showPanel: '显示面板',
+    annotationTools: '标注工具'
   },
   en: {
     uploadFolder: 'Upload Folder',
@@ -127,8 +145,8 @@ export const translations: { [key: string]: TranslationSet } = {
     chooseJsonType: 'Choose Type (for coloring)',
     noFile: 'No files to operate on',
     noDeletedBoxes: 'No deleted boxes to restore',
-    fileManagement: 'Files',
-    annotationTools: 'Tools',
+    fileManagement: 'File Management',
+    toolsAndActions: 'Tools & Actions',
     actions: 'Actions',
     dataExplorer: 'Data Explorer',
     settings: 'Settings',
@@ -143,5 +161,22 @@ export const translations: { [key: string]: TranslationSet } = {
     operationSuccessful: "Operation successful",
     noUndoOperations: "No operations to undo",
     noRedoOperations: "No operations to redo",
+    aiAnnotation: 'AI Auto-Annotation',
+    aiAnnotating: 'AI Annotating...',
+    apiMode: 'API Mode',
+    apiModeAuto: 'Auto',
+    apiModeManual: 'Manual',
+    manualApiEndpoint: 'Manual API Selection',
+    apiForNew: 'API for New Image',
+    apiForIncremental: 'API for Incremental',
+    classManagement: 'Class Management',
+    addClass: 'Add Class',
+    importClasses: 'Import Classes',
+    exportClasses: 'Export Classes',
+    className: 'Class Name',
+    classColor: 'Color',
+    hidePanel: 'Hide Panel',
+    showPanel: 'Show Panel',
+    annotationTools: 'Annotation Tools'
   }
 };
