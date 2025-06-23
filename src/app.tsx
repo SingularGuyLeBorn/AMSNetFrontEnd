@@ -1,3 +1,4 @@
+// src/app.tsx
 import Footer from '@/components/Footer';
 import { getLoginUserUsingGet } from '@/services/backend/userController';
 import type { RunTimeLayoutConfig } from '@umijs/max';
@@ -5,10 +6,10 @@ import { history, useModel } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import { AvatarDropdown } from './components/RightContent/AvatarDropdown';
 import { requestConfig } from './requestConfig';
-import FloatWindow from "@/pages/FloatWindow";
-import { Button } from 'antd';
-import { GlobalOutlined } from '@ant-design/icons';
+import { Button, Upload, message } from 'antd';
+import { GlobalOutlined, UploadOutlined } from '@ant-design/icons';
 import React from 'react';
+import type { DeviceLabelingState, NetLabelingState, ImageFileInfo, ImageAnnotationData } from '@/models/fileModel';
 
 const loginPath = '/user/login';
 
@@ -18,9 +19,90 @@ export interface InitialState {
   language?: string;
 }
 
-/**
- * @see  https://umijs.org/zh-CN/plugins/plugin-initial-state
- * */
+// 辅助函数：从文件名中移除扩展名
+const getFileNameWithoutExtension = (fileName: string): string => {
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex === -1) return fileName;
+  return fileName.substring(0, lastDotIndex);
+};
+
+
+/** 全局文件上传组件 */
+const GlobalUploader: React.FC = () => {
+    const { setDeviceLabelingState, setNetLabelingState } = useModel('fileModel');
+
+    const handleGlobalUpload = async (files: File[]) => {
+        message.loading({ content: "Processing folder...", key: 'global-upload' });
+
+        // 1. 为 DeviceLabeling (FileOperate) 准备数据
+        const pngList: File[] = files.filter(f => f.type.startsWith('image/')).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+        const yoloList: File[] = files.filter(f => f.name.endsWith('.txt')).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+        const jsonList: File[] = files.filter(f => f.name.endsWith('.json')).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+        
+        setDeviceLabelingState({
+            pngList,
+            yoloList,
+            jsonList,
+            currentIndex: 0,
+        });
+
+        // 2. 为 NetLabeling (MaskOperate) 准备数据 (与 MaskOperate 页面逻辑保持一致)
+        const imageInputFiles = files.filter(f => f.type.match(/image\/(jpeg|png|jpg)/i));
+        const newImages: ImageFileInfo[] = [];
+        const newAnnotationsData: { [imageName: string]: ImageAnnotationData } = {};
+
+        for (const imgFile of imageInputFiles.sort((a,b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+            const imageUrl = URL.createObjectURL(imgFile);
+            try {
+                const imageInfo = await new Promise<ImageFileInfo>((resolve, reject) => {
+                    const imageElement = new Image();
+                    imageElement.onload = () => resolve({ name: imgFile.name, url: imageUrl, originalFile: imgFile, width: imageElement.naturalWidth, height: imageElement.naturalHeight });
+                    imageElement.onerror = () => reject(new Error(`Cannot load image: ${imgFile.name}`));
+                    imageElement.src = imageUrl;
+                });
+                newImages.push(imageInfo);
+                newAnnotationsData[imageInfo.name] = { jsonAnnotations: [], txtAnnotations: [] };
+            } catch (imgError) {
+                message.error((imgError as Error).message);
+            }
+        }
+
+        setNetLabelingState({
+            images: newImages,
+            currentImageIndex: newImages.length > 0 ? 0 : -1,
+            allImageAnnotations: newAnnotationsData,
+        });
+
+        message.success({ content: 'Folder uploaded and processed successfully!', key: 'global-upload', duration: 3 });
+    };
+
+    return (
+        <Upload
+            directory
+            multiple
+            showUploadList={false}
+            beforeUpload={() => false} // 阻止自动上传
+            onChange={({ fileList }) => handleGlobalUpload(fileList.map(f => f.originFileObj as File))}
+        >
+            <Button
+                icon={<UploadOutlined />}
+                type="primary"
+                ghost
+                style={{
+                  position: 'fixed',
+                  top: '12px',
+                  right: '220px',
+                  zIndex: 1000,
+                }}
+            >
+                Upload Folder
+            </Button>
+        </Upload>
+    );
+};
+
+
+/** @see  https://umijs.org/zh-CN/plugins/plugin-initial-state */
 export async function getInitialState(): Promise<InitialState> {
   // Get saved language from localStorage or default to 'en'
   const savedLanguage = localStorage.getItem('language') || 'en';
@@ -97,20 +179,13 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     },
     footerRender: () => <Footer />,
     menuHeaderRender: undefined,
-    // 自定义 403 页面
-    // unAccessible: <div>unAccessible</div>,
     ...defaultSettings,
-
-    // 核心修改点：通过 childrenRender 注入悬浮窗和语言切换按钮
     childrenRender: (children) => (
         <>
-          {/* 主内容区域 */}
           {children}
-
-          {/*/!* 全局悬浮窗（固定在右下角） *!/*/}
-          {/*<FloatWindow />*/}
-
-          {/* 语言切换按钮（固定在右上角） */}
+          {/* 全局上传按钮 */}
+          {initialState?.currentUser && <GlobalUploader />}
+          {/* 语言切换按钮 */}
           <LanguageSwitcher />
         </>
     )
@@ -133,7 +208,7 @@ window.appLanguage = {
 
   // 订阅语言变化
   subscribeToLanguageChange: (callback) => {
-    const handler = (event) => {
+    const handler = (event: any) => {
       callback(event.detail.language);
     };
     window.addEventListener('languageChange', handler);
