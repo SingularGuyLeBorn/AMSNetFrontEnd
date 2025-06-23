@@ -9,7 +9,7 @@ import { requestConfig } from './requestConfig';
 import { Button, Upload, message } from 'antd';
 import { GlobalOutlined, UploadOutlined } from '@ant-design/icons';
 import React from 'react';
-import type { DeviceLabelingState, NetLabelingState, ImageFileInfo, ImageAnnotationData } from '@/models/fileModel';
+import type { DeviceLabelingState, NetLabelingState, ImageFileInfo, ImageAnnotationData } from '@/models/workSpace';
 
 const loginPath = '/user/login';
 

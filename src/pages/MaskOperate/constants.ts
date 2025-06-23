@@ -1,7 +1,10 @@
+// MaskOperate/constants.ts
+
 // 定义了调整大小手柄的像素尺寸
 export const RESIZE_HANDLE_SIZE = 8;
 
 // 定义默认的类别颜色映射，为常见的电路元器件预设了颜色
+// 这些颜色将在类别首次创建或未指定颜色时作为后备选项
 export const defaultCategoryColors: { [key: string]: string } = {
   'capacitor': 'rgba(255, 159, 64, 0.4)',  // 橙色
   'pmos': 'rgba(255, 99, 132, 0.4)',     // 粉色
@@ -18,10 +21,11 @@ export const defaultCategoryColors: { [key: string]: string } = {
 export const translations: { [key: string]: { [key: string]: string } } = {
   zh: {
     // 通用
+    appName: '基石标注器',
     uploadFolder: '上传文件夹',
-    exportAll: '导出全部',
+    exportAll: '导出全部 (ZIP)',
     settings: '设置',
-    annotations: '标注',
+    annotations: '标注列表',
     operationSuccessful: '操作成功',
     noImages: "请先上传文件夹",
     currentImage: "当前:",
@@ -30,17 +34,18 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     rectTool: '矩形工具',
     diagonalTool: '对角线工具',
     deleteTool: '删除工具',
-    aiAnnotate: 'AI 标注',
     // 设置面板
     classesFileSettings: '类别文件 (classes.txt)',
-    uploadClassesFile: '上传类别文件',
+    uploadClassesFile: '上传',
+    exportClassesFile: '导出',
+    importExportTooltip: "导入/导出类别文件",
     category: '当前类别',
     lineWidth: '线宽/厚度',
     annotationDisplaySource: '标注显示来源',
     sourceJson: 'JSON',
     sourceTxt: 'TXT',
     sourceNone: '不显示',
-    toggleAnnotationsView: '显示/隐藏标注',
+    toggleAnnotationsView: '画布上显示/隐藏标注',
     toggleCategoryInBox: '框内显示类别名',
     clearAnnotationsButton: '清空当前JSON标注',
     deleteAnnotationTooltip: "删除此标注",
@@ -52,7 +57,7 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     thicknessLabel: "厚度",
     // 消息
     noAnnotations: "当前图片无标注",
-    noCategoriesFound: "未找到类别，请先上传",
+    noCategoriesFound: "未找到类别，请先上传或添加",
     errorReadFileGeneric: "读取文件失败:",
     errorParseJsonFile: "解析JSON文件失败:",
     errorParseTxtFile: "解析TXT文件失败:",
@@ -65,15 +70,27 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     exportSuccessMessage: "数据导出成功！",
     exportFailureMessage: "导出失败: ",
     // AI功能
+    aiAnnotate: 'AI 标注',
+    aiAnnotating: 'AI 标注中...',
     aiModelMode: "AI模型模式",
     initialDetection: "初始检测",
     optimization: "优化识别",
-    aiFailed: "AI标注失败"
+    aiFailed: "AI标注失败",
+    aiModeAuto: '自动',
+    aiModeManual: '手动',
+    // 类别管理
+    classManagement: "类别管理",
+    addClass: "新增类别",
+    className: "类别名称",
+    classColor: "颜色",
+    hidePanel: '隐藏面板',
+    showPanel: '显示面板',
   },
   en: {
     // General
+    appName: 'Bedrock Annotator',
     uploadFolder: 'Upload Folder',
-    exportAll: 'Export All',
+    exportAll: 'Export All (ZIP)',
     settings: 'Settings',
     annotations: 'Annotations',
     operationSuccessful: 'Operation successful',
@@ -84,17 +101,18 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     rectTool: 'Rectangle Tool',
     diagonalTool: 'Diagonal Tool',
     deleteTool: 'Delete Tool',
-    aiAnnotate: 'AI Annotate',
     // Settings Panel
     classesFileSettings: 'Classes File (classes.txt)',
-    uploadClassesFile: 'Upload Classes File',
+    uploadClassesFile: 'Upload',
+    exportClassesFile: 'Export',
+    importExportTooltip: "Import/Export Classes File",
     category: 'Current Category',
     lineWidth: 'Line Width/Thickness',
     annotationDisplaySource: 'Annotation Source',
     sourceJson: 'JSON',
     sourceTxt: 'TXT',
     sourceNone: 'None',
-    toggleAnnotationsView: 'Show/Hide Annotations',
+    toggleAnnotationsView: 'Show/Hide Annotations on Canvas',
     toggleCategoryInBox: 'Show Category in Box',
     clearAnnotationsButton: 'Clear Current JSON Annotations',
     deleteAnnotationTooltip: "Delete this annotation",
@@ -106,7 +124,7 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     thicknessLabel: "Thickness",
     // Messages
     noAnnotations: "No annotations for this image",
-    noCategoriesFound: "No categories found, please upload first",
+    noCategoriesFound: "No categories found, please upload or add one",
     errorReadFileGeneric: "Failed to read file:",
     errorParseJsonFile: "Failed to parse JSON file:",
     errorParseTxtFile: "Failed to parse TXT file:",
@@ -119,9 +137,20 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     exportSuccessMessage: "Data exported successfully!",
     exportFailureMessage: "Export failed: ",
     // AI Features
+    aiAnnotate: 'AI Annotate',
+    aiAnnotating: 'AI Annotating...',
     aiModelMode: "AI Model Mode",
     initialDetection: "Initial Detection",
     optimization: "Optimization",
-    aiFailed: "AI annotation failed"
+    aiFailed: "AI annotation failed",
+    aiModeAuto: 'Auto',
+    aiModeManual: 'Manual',
+    // Class Management
+    classManagement: "Class Management",
+    addClass: "Add Class",
+    className: "Class Name",
+    classColor: "Color",
+    hidePanel: 'Hide Panel',
+    showPanel: 'Show Panel',
   },
 };

@@ -1,5 +1,5 @@
 /* MaskOperate/index.css */
-/* "Aetherium Weave" (Professional Layout) Theme by Your Top Programmer */
+/* "Aetherium Weave" (Professional Layout) Theme by Bedrock */
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 
 :root {
@@ -18,6 +18,7 @@
   --font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --transition-speed: 0.3s;
   --transition-curve: ease-in-out;
+  --header-height: 64px;
 }
 
 /* =================================================================== */
@@ -31,6 +32,35 @@
   overflow: hidden;
 }
 
+.top-header-pro {
+  height: var(--header-height);
+  padding: 0 24px;
+  background: var(--panel-bg-solid);
+  border-bottom: 1px solid var(--border-color-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0, 30, 80, 0.05);
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.header-left-controls,
+.header-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.current-file-text-pro {
+  color: var(--text-secondary);
+  font-weight: 500;
+  max-width: 400px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tool-sider-pro {
   background: var(--panel-bg-solid) !important;
   border-right: 1px solid var(--border-color-light);
@@ -38,23 +68,11 @@
   z-index: 20;
 }
 
-.main-content-layout-pro {
-  background: transparent;
+.main-content-wrapper-pro {
+  position: relative;
   display: flex;
   flex-direction: column;
-}
-
-.top-toolbar-pro {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 16px;
-  height: 56px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-color-light);
-  z-index: 10;
-  flex-shrink: 0;
+  flex-grow: 1;
 }
 
 .canvas-content-pro {
@@ -63,8 +81,8 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden; /* 由内部wrapper滚动 */
-  position: relative;
+  overflow: hidden;
+  background-color: var(--base-bg);
 }
 
 .canvas-wrapper-pro {
@@ -80,162 +98,220 @@
 }
 
 .inspector-sider-pro {
-  background: var(--panel-bg) !important;
-  backdrop-filter: blur(12px);
+  background: var(--panel-bg-solid) !important;
   border-left: 1px solid var(--border-color-light);
   box-shadow: -2px 0 8px rgba(0, 30, 80, 0.05);
-  transition: width var(--transition-speed) var(--transition-curve),
-  transform var(--transition-speed) var(--transition-curve);
+  transition: width var(--transition-speed) var(--transition-curve);
   z-index: 20;
-}
-
-.inspector-sider-pro .ant-layout-sider-children {
   display: flex;
   flex-direction: column;
-  height: 100%;
 }
 
 /* =================================================================== */
-/* 2. 可伸缩分割线 (Resizable Divider)                                 */
+/* 2. 可伸缩分割线与显隐手柄 (Resizable Divider & Toggle Handle)          */
 /* =================================================================== */
-.resizer {
+.resizer-pro {
   width: 5px;
   cursor: col-resize;
   background: transparent;
   z-index: 15;
+  flex-shrink: 0;
   transition: background-color var(--transition-speed);
 }
 
-.resizer:hover {
+.resizer-pro:hover {
   background-color: var(--accent-primary-glow);
 }
 
-body.resizing, body.resizing * {
-  cursor: col-resize !important;
-  user-select: none;
+.show-inspector-handle-pro {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 25;
+  border-radius: 6px 0 0 6px !important;
+  width: 24px;
+  height: 48px;
+  padding: 0;
+  border-right: none !important;
 }
 
 /* =================================================================== */
 /* 3. 组件样式更新 (Component Style Updates)                         */
 /* =================================================================== */
-
-/* ---> 左侧工具栏 (Tool Sidebar) <--- */
 .tool-button-pro {
   width: 44px;
   height: 44px;
   font-size: 16px;
   color: var(--text-secondary);
 }
+
 .tool-button-pro.ant-btn-primary {
   color: #fff;
 }
-.tool-button-pro.ant-btn-text:hover {
+
+.tool-button-pro.ant-btn-text:hover,
+.tool-button-pro.ant-btn-text:focus {
   background: var(--base-bg) !important;
   color: var(--accent-primary) !important;
 }
 
-/* ---> 顶部工具栏 (Top Toolbar) <--- */
-.image-info-text-pro {
-  color: var(--text-secondary);
-  font-weight: 500;
-  max-width: 300px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* ---> 画布 (Canvas) <--- */
 .drawing-canvas-pro {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   display: block;
 }
-.draw-cursor-pro { cursor: crosshair; }
-.delete-cursor-pro { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23E94F4F" stroke="white" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>') 12 12, auto; }
 
-/* ---> 右侧检查器 (Inspector) <--- */
+.draw-cursor-pro {
+  cursor: crosshair;
+}
+
+.delete-cursor-pro {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23E94F4F" stroke="white" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>') 12 12, auto;
+}
+
 .inspector-tabs-pro {
   flex-grow: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+
 .inspector-tabs-pro .ant-tabs-nav {
   margin-bottom: 0;
   padding: 0 16px;
+  flex-shrink: 0;
 }
+
 .inspector-tabs-pro .ant-tabs-nav-wrap {
   border-bottom: 1px solid var(--border-color-light);
 }
+
 .inspector-tabs-pro .ant-tabs-tab {
   padding: 12px 0;
 }
+
 .inspector-tabs-pro .tab-text {
   margin-left: 8px;
 }
+
 .inspector-tabs-pro .ant-tabs-content-holder {
   flex-grow: 1;
   overflow: hidden;
 }
+
 .tab-pane-content {
   padding: 16px;
   height: 100%;
   overflow-y: auto;
 }
 
-/* ---> 标注列表 (Annotation List) - 样式微调 <--- */
 .annotation-panel-item-pro .ant-collapse-header .ant-space-item:first-child {
-  min-width: 0; /* 关键CSS，允许flex-shrink生效 */
-}
-.category-name-text-pro {
-  flex-shrink: 1; /* 允许文本收缩 */
-  min-width: 0;   /* 配合 ellipsis 生效 */
+  min-width: 0;
 }
 
-/* ---> 滚动条 (Scrollbar) <--- */
+.category-name-text-pro {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.color-indicator-pro {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.class-list-container {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-right: 8px;
+  margin-right: -8px;
+}
+
+.class-management-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.color-picker-input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  background-color: transparent;
+  border: 1px solid var(--border-color-medium);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.color-picker-input::-webkit-color-swatch {
+  border-radius: 5px;
+  border: none;
+}
+
+.color-picker-input::-moz-color-swatch {
+  border-radius: 5px;
+  border: none;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--border-color-medium);
   border-radius: 3px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent-primary);
 }
 
-/* ---> Sider Footer for Toggle Button <--- */
-.sider-footer {
-  flex-shrink: 0;
-  text-align: right;
-  padding: 4px;
-  border-top: 1px solid var(--border-color-light);
-}
-
-/* ---> 其他通用组件样式 <--- */
 .ant-btn {
   border-radius: 6px;
   font-weight: 500;
   transition: all var(--transition-speed) var(--transition-curve);
 }
+
 .ant-btn-primary {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
 }
-.ant-btn-primary:hover {
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
   background: var(--accent-primary-hover);
   border-color: var(--accent-primary-hover);
 }
-.ant-form-item-label > label {
+
+.ant-form-item-label>label {
   color: var(--text-secondary);
   font-weight: 500;
 }
-.ant-select-selector, .ant-input-number {
+
+.ant-select-selector,
+.ant-input-number,
+.ant-input {
   background-color: var(--panel-bg-solid) !important;
   border: 1px solid var(--border-color-medium) !important;
+}
+
+.ant-select-focused .ant-select-selector,
+.ant-input-number-focused,
+.ant-input:focus,
+.ant-input-focused {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 2px var(--accent-primary-glow) !important;
 }
