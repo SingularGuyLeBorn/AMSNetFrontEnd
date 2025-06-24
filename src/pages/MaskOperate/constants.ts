@@ -3,6 +3,52 @@
 // 定义了调整大小手柄的像素尺寸
 export const RESIZE_HANDLE_SIZE = 8;
 
+// ===================================================================
+// 接口与类型定义 (Interfaces & Types)
+// ===================================================================
+export type Point = { x: number; y: number };
+
+export interface BaseAnnotation {
+  id: string;
+  category: string;
+  color: string;
+}
+
+export interface ViewBoxAnnotation extends BaseAnnotation {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  sourceLineWidth: number;
+}
+
+export interface ViewDiagonalAnnotation extends BaseAnnotation {
+  points: [Point, Point];
+  thickness: number;
+}
+
+export type ViewAnnotation = ViewBoxAnnotation | ViewDiagonalAnnotation;
+
+export type ImageFileInfo = {
+  name: string;
+  url: string;
+  originalFile: File;
+  width: number;
+  height: number;
+};
+
+export type ImageAnnotationData = {
+  jsonAnnotations: ViewAnnotation[];
+  txtAnnotations: ViewAnnotation[];
+  originalTxtFileContent?: string;
+};
+
+export type UndoOperation = {
+  imageId: string;
+  previousJsonAnnotations: ViewAnnotation[];
+};
+
+
 // 定义默认的类别颜色映射，为常见的电路元器件预设了颜色
 // 这些颜色将在类别首次创建或未指定颜色时作为后备选项
 export const defaultCategoryColors: { [key: string]: string } = {

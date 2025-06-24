@@ -9,6 +9,16 @@ export interface ClassInfo {
 }
 
 /**
+ * @description 操作历史记录的类型定义
+ */
+export type Operation =
+  | { type: 'draw'; yoloData: string[]; previousYoloContent: string | null }
+  | { type: 'ai_annotate'; yoloData: string[]; previousYoloContent: string | null }
+  | { type: 'stain'; boxName: string; jsonType: 'buildingBlocks' | 'constants'; jsonName: string; previousJsonContent: string | null }
+  | { type: 'delete'; deletedLines: { index: number; content: string }[]; previousYoloContent: string | null }
+  | { type: 'json_change'; previousJsonContent: string | null; currentJsonContent: string | null };
+
+/**
  * @description 初始的标注类别索引与其颜色、标签的映射关系。
  * 这是手动标注（画框）时，用户选择的类别列表及其在画布上显示的颜色。
  * 应用启动时会使用此作为默认值，但它可以在运行时被用户修改。

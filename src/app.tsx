@@ -1,4 +1,4 @@
-// src/app.tsx
+// src/app.tsx (已修正并与 annotationStore 同步)
 import Footer from '@/components/Footer';
 import { getLoginUserUsingGet } from '@/services/backend/userController';
 import type { RunTimeLayoutConfig } from '@umijs/max';
@@ -9,70 +9,87 @@ import { requestConfig } from './requestConfig';
 import { Button, Upload, message } from 'antd';
 import { GlobalOutlined, UploadOutlined } from '@ant-design/icons';
 import React from 'react';
-import type { DeviceLabelingState, NetLabelingState, ImageFileInfo, ImageAnnotationData } from '@/models/workSpace';
+// 从 MaskOperate 的常量文件中导入类型
+import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/pages/MaskOperate/constants';
+
 
 const loginPath = '/user/login';
 
-// Define the extended InitialState type
+// 定义扩展的 InitialState 类型
 export interface InitialState {
   currentUser?: API.LoginUserVO;
   language?: string;
 }
 
-// 辅助函数：从文件名中移除扩展名
-const getFileNameWithoutExtension = (fileName: string): string => {
-  const lastDotIndex = fileName.lastIndexOf('.');
-  if (lastDotIndex === -1) return fileName;
-  return fileName.substring(0, lastDotIndex);
-};
-
-
 /** 全局文件上传组件 */
 const GlobalUploader: React.FC = () => {
-    const { setDeviceLabelingState, setNetLabelingState } = useModel('fileModel');
+    // 【核心修正】只从 annotationStore 获取存在的 setter 函数
+    const {
+      setFile_pngList, 
+      setFile_yoloList, 
+      setFile_jsonList, 
+      setFile_currentIndex,
+      setMask_allImageAnnotations,
+      setMask_operationHistory,
+      setMask_redoHistory,
+      setMask_categories,
+      setMask_categoryColors,
+    } = useModel('annotationStore');
 
     const handleGlobalUpload = async (files: File[]) => {
-        message.loading({ content: "Processing folder...", key: 'global-upload' });
-
-        // 1. 为 DeviceLabeling (FileOperate) 准备数据
-        const pngList: File[] = files.filter(f => f.type.startsWith('image/')).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
-        const yoloList: File[] = files.filter(f => f.name.endsWith('.txt')).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
-        const jsonList: File[] = files.filter(f => f.name.endsWith('.json')).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
-        
-        setDeviceLabelingState({
-            pngList,
-            yoloList,
-            jsonList,
-            currentIndex: 0,
-        });
-
-        // 2. 为 NetLabeling (MaskOperate) 准备数据 (与 MaskOperate 页面逻辑保持一致)
-        const imageInputFiles = files.filter(f => f.type.match(/image\/(jpeg|png|jpg)/i));
-        const newImages: ImageFileInfo[] = [];
-        const newAnnotationsData: { [imageName: string]: ImageAnnotationData } = {};
-
-        for (const imgFile of imageInputFiles.sort((a,b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
-            const imageUrl = URL.createObjectURL(imgFile);
-            try {
-                const imageInfo = await new Promise<ImageFileInfo>((resolve, reject) => {
-                    const imageElement = new Image();
-                    imageElement.onload = () => resolve({ name: imgFile.name, url: imageUrl, originalFile: imgFile, width: imageElement.naturalWidth, height: imageElement.naturalHeight });
-                    imageElement.onerror = () => reject(new Error(`Cannot load image: ${imgFile.name}`));
-                    imageElement.src = imageUrl;
-                });
-                newImages.push(imageInfo);
-                newAnnotationsData[imageInfo.name] = { jsonAnnotations: [], txtAnnotations: [] };
-            } catch (imgError) {
-                message.error((imgError as Error).message);
-            }
+        if (!files || files.length === 0) {
+            message.warning("No files selected in the folder.");
+            return;
         }
+        message.loading({ content: "Processing folder...", key: 'global-upload', duration: 0 });
 
-        setNetLabelingState({
-            images: newImages,
-            currentImageIndex: newImages.length > 0 ? 0 : -1,
-            allImageAnnotations: newAnnotationsData,
-        });
+        const compareFn = (a: File, b: File) => a.name.localeCompare(b.name, undefined, { numeric: true });
 
+        // --- 1. 为 FileOperate (DeviceLabeling) 设置数据 ---
+        const pngList: File[] = files.filter(f => f.type.startsWith('image/')).sort(compareFn);
+        const yoloList: File[] = files.filter(f => f.name.endsWith('.txt')).sort(compareFn);
+        const jsonList: File[] = files.filter(f => f.name.endsWith('.json')).sort(compareFn);
+
+        setFile_pngList(pngList);
+        setFile_yoloList(yoloList);
+        setFile_jsonList(jsonList);
+        setFile_currentIndex(0); // 两个组件共享此索引，设为0
+
+        // --- 2. 为 MaskOperate (NetLabeling) 设置数据 ---
+        const newAnnotationsData: { [imageName: string]: ImageAnnotationData } = {};
+        
+        // 并行处理所有图片标注文件的解析
+        await Promise.all(
+          pngList.map(async (imgFile) => {
+              const baseName = imgFile.name.substring(0, imgFile.name.lastIndexOf('.')) || imgFile.name;
+              const annotationJsonFile = jsonList.find(f => (f.name.substring(0, f.name.lastIndexOf('.')) || f.name) === baseName);
+              
+              const annotations: ImageAnnotationData = { jsonAnnotations: [], txtAnnotations: [] };
+              if (annotationJsonFile) {
+                  try {
+                      const rawJson = JSON.parse(await annotationJsonFile.text());
+                      if(typeof rawJson === 'object' && rawJson !== null) {
+                        // 此处应有更详细的解析逻辑，但为简化，我们仅创建空结构
+                        // 实际项目中，您可能需要遍历 rawJson 来填充 jsonAnnotations
+                      }
+                  } catch (e) {
+                      console.error(`Error parsing JSON for ${imgFile.name}:`, e);
+                  }
+              }
+              newAnnotationsData[imgFile.name] = annotations;
+          })
+        );
+        
+        setMask_allImageAnnotations(newAnnotationsData);
+        
+        // 重置 MaskOperate 的历史记录
+        setMask_operationHistory({});
+        setMask_redoHistory({});
+        
+        // 可以在这里重置或更新类别信息
+        // setMask_categories([...]);
+        // setMask_categoryColors({...});
+        
         message.success({ content: 'Folder uploaded and processed successfully!', key: 'global-upload', duration: 3 });
     };
 
@@ -81,8 +98,10 @@ const GlobalUploader: React.FC = () => {
             directory
             multiple
             showUploadList={false}
-            beforeUpload={() => false} // 阻止自动上传
-            onChange={({ fileList }) => handleGlobalUpload(fileList.map(f => f.originFileObj as File))}
+            beforeUpload={(_, fileList) => {
+                handleGlobalUpload(fileList);
+                return false; // 阻止自动上传
+            }}
         >
             <Button
                 icon={<UploadOutlined />}
@@ -104,75 +123,44 @@ const GlobalUploader: React.FC = () => {
 
 /** @see  https://umijs.org/zh-CN/plugins/plugin-initial-state */
 export async function getInitialState(): Promise<InitialState> {
-  // Get saved language from localStorage or default to 'en'
   const savedLanguage = localStorage.getItem('language') || 'en';
+  const initialState: InitialState = { currentUser: undefined, language: savedLanguage };
 
-  const initialState: InitialState = {
-    currentUser: undefined,
-    language: savedLanguage,
-  };
-
-  // 如果不是登录页面，执行
   const { location } = history;
   if (location.pathname !== loginPath) {
     try {
       const res = await getLoginUserUsingGet();
       initialState.currentUser = res.data;
     } catch (error: any) {
-      // 如果未登录
+      // no-op
     }
   }
   return initialState;
 }
 
-// Language switcher component with fixed positioning
 const LanguageSwitcher: React.FC = () => {
   const { initialState, setInitialState } = useModel('@@initialState');
-  const currentLanguage = initialState?.language || 'en'; // Default to English
-
+  const currentLanguage = initialState?.language || 'en';
   const toggleLanguage = () => {
     const newLanguage = currentLanguage === 'zh' ? 'en' : 'zh';
-    // Save to localStorage for persistence
     localStorage.setItem('language', newLanguage);
-
-    // Update global state
-    setInitialState((prevState) => ({
-      ...prevState,
-      language: newLanguage,
-    }));
-
-    // Dispatch a custom event that child components can listen for
-    window.dispatchEvent(
-        new CustomEvent('languageChange', { detail: { language: newLanguage } })
-    );
+    setInitialState((prevState) => ({ ...prevState, language: newLanguage }));
+    window.dispatchEvent(new CustomEvent('languageChange', { detail: { language: newLanguage } }));
   };
-
   return (
-      <div style={{
-        position: 'fixed',
-        top: '12px',
-        right: '135px',
-        zIndex: 1000,
-      }}>
-        <Button
-            type="primary"
-            icon={<GlobalOutlined />}
-            onClick={toggleLanguage}
-        >
+      <div style={{ position: 'fixed', top: '12px', right: '135px', zIndex: 1000 }}>
+        <Button type="primary" icon={<GlobalOutlined />} onClick={toggleLanguage}>
           {currentLanguage === 'zh' ? '中文' : 'EN'}
         </Button>
       </div>
   );
 };
 
-// ProLayout 支持的api https://procomponents.ant.design/components/layout
 // @ts-ignore
 export const layout: RunTimeLayoutConfig = ({ initialState }) => {
   return {
     avatarProps: {
-      render: () => {
-        return <AvatarDropdown />;
-      },
+      render: () => <AvatarDropdown />,
     },
     waterMarkProps: {
       content: initialState?.currentUser?.userName,
@@ -183,44 +171,24 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     childrenRender: (children) => (
         <>
           {children}
-          {/* 全局上传按钮 */}
           {initialState?.currentUser && <GlobalUploader />}
-          {/* 语言切换按钮 */}
           <LanguageSwitcher />
         </>
     )
   };
 };
 
-/**
- * @name request 配置，可以配置错误处理
- * 它基于 axios 和 ahooks 的 useRequest 提供了一套统一的网络请求和错误处理方案。
- * @doc https://umijs.org/docs/max/request#配置
- */
 export const request = requestConfig;
 
-// 创建一个全局的语言变量工具，用于非React组件获取语言设置
 window.appLanguage = {
-  // 获取当前语言
-  getCurrentLanguage: () => {
-    return localStorage.getItem('language') || 'en';
-  },
-
-  // 订阅语言变化
+  getCurrentLanguage: () => localStorage.getItem('language') || 'en',
   subscribeToLanguageChange: (callback) => {
-    const handler = (event: any) => {
-      callback(event.detail.language);
-    };
+    const handler = (event: any) => { callback(event.detail.language); };
     window.addEventListener('languageChange', handler);
-
-    // 返回取消订阅的函数
-    return () => {
-      window.removeEventListener('languageChange', handler);
-    };
+    return () => { window.removeEventListener('languageChange', handler); };
   }
 };
 
-// 在全局范围内声明类型
 declare global {
   interface Window {
     appLanguage: {
