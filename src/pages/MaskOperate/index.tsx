@@ -1,13 +1,12 @@
-// src/pages/MaskOperate/index.tsx (最终修正版)
 import React, { useState, useRef, useEffect, useCallback, ChangeEvent } from "react";
 import { useModel } from '@umijs/max';
-import { Layout, Button, Select, InputNumber, message, Typography, List, Collapse, Space, Tooltip, Form, Radio, Tabs, Flex, Divider, Input, Switch } from 'antd';
+import { Layout, Button, Select, InputNumber, message, Typography, List, Collapse, Space, Tooltip, Form, Radio, Tabs, Flex, Divider, Input, Switch, Modal, Descriptions } from 'antd';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faUpload, faChevronLeft, faChevronRight, faUndo, faRedo,
   faDrawPolygon, faTrash, faPaintBrush,
   faCog, faList, faMousePointer, faFileArchive, faEraser, faEye, faEyeSlash, faRobot,
-  faFileImport, faFileExport, faPlus, faMinusCircle
+  faFileImport, faFileExport, faPlus, faMinusCircle, faTags
 } from "@fortawesome/free-solid-svg-icons";
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -32,6 +31,15 @@ type ImageDetails = { name: string; url: string; width: number; height: number; 
 // 辅助函数
 const getFileNameWithoutExtension = (fileName: string): string => fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
 const generateUniqueId = (): string => `anno_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const rgbaToHex = (rgba: string): string => {
+  if (rgba.startsWith('#')) return rgba; // Already hex
+  const parts = rgba.match(/(\d+)/g);
+  if (!parts || parts.length < 3) return '#000000'; // Fallback for invalid format
+  const r = parseInt(parts[0], 10);
+  const g = parseInt(parts[1], 10);
+  const b = parseInt(parts[2], 10);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
+};
 
 const MaskOperate = () => {
   const { initialState } = useModel('@@initialState');
@@ -79,6 +87,11 @@ const MaskOperate = () => {
   const currentRedoStackSize = (mask_redoHistory[currentImageIndex] || []).length;
 
   // Effects
+  // 【关键修复】添加此useEffect来监听全局语言变化
+  useEffect(() => {
+    setCurrentLang(initialState?.language || 'zh');
+  }, [initialState?.language]);
+
   useEffect(() => {
     if (!hasActiveImage) {
       setCurrentImageDetails(null);
@@ -100,7 +113,7 @@ const MaskOperate = () => {
     }
   }, [categories, currentCategory]);
   
-  useEffect(() => { redrawCanvas(); }, [currentImageDetails, activeViewAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, canvasMousePos]);
+  useEffect(() => { redrawCanvas(); }, [currentImageDetails, activeViewAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, canvasMousePos, t]); // 添加 t 到依赖项，确保语言切换后画布文本也更新
 
   useEffect(() => {
     const canvasEl = canvasRef.current;
@@ -163,13 +176,17 @@ const MaskOperate = () => {
         if(img.complete) img.onload(new Event('load'));
     } else {
         const { offsetWidth, offsetHeight } = canvas;
-        canvas.width = offsetWidth > 0 ? offsetWidth : 800; canvas.height = offsetHeight > 0 ? offsetHeight : 600;
+        canvas.width = offsetWidth > 0 ? offsetWidth : 800;
+        canvas.height = offsetHeight > 0 ? offsetHeight : 600;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#e0e8f0"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0050b3"; ctx.textAlign = "center";
+        ctx.fillStyle = "#F0F5FF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.font = "bold 20px Arial";
+        ctx.fillStyle = "#0D1A2E";
+        ctx.textAlign = "center";
         ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
-  }, [currentImageDetails, activeViewAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, canvasMousePos]);
+  }, [currentImageDetails, activeViewAnnotations, selectedAnnotationId, showCategoryInBox, activeTool, draggingState, canvasMousePos, t.noImages]);
   
   const renderRectangle = (box: ViewBoxAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     if (isPreview) {
@@ -179,17 +196,18 @@ const MaskOperate = () => {
       ctx.restore();
       return;
     }
-    ctx.fillStyle = box.color; ctx.strokeStyle = isSelected ? "#007bff" : "rgba(0,0,0,0.8)";
-    ctx.lineWidth = isSelected ? 2.5 : 1.5;
+    const color = isSelected ? '#4A90E2' : box.color;
+    ctx.fillStyle = color; ctx.strokeStyle = isSelected ? "#357ABD" : "rgba(0,0,0,0.8)";
+    ctx.lineWidth = isSelected ? 3 : 1.5;
     ctx.fillRect(box.x, box.y, box.width, box.height);
     ctx.strokeRect(box.x, box.y, box.width, box.height);
     if (showCategoryInBox) {
       ctx.fillStyle = "black"; ctx.font = "bold 12px Arial"; ctx.textBaseline = "top";
-      ctx.fillText(box.category, box.x + 3, box.y + 3, box.width - 6);
+      ctx.fillText(box.category, box.x + 4, box.y + 4, box.width - 8);
     }
     if (isSelected) {
       const handles = getResizeHandles(box);
-      ctx.fillStyle = '#007bff';
+      ctx.fillStyle = '#357ABD';
       Object.values(handles).forEach(handle => ctx.fillRect(handle.x, handle.y, handle.size, handle.size));
     }
   };
@@ -204,8 +222,9 @@ const MaskOperate = () => {
       ctx.setLineDash([8, 4]); ctx.strokeStyle = "#4A90E2"; ctx.lineWidth = 2;
       ctx.stroke();
     } else {
-      ctx.fillStyle = diag.color; ctx.strokeStyle = isSelected ? "#007bff" : "rgba(0,0,0,0.6)";
-      ctx.lineWidth = isSelected ? 2.5 : 1;
+      const color = isSelected ? '#4A90E2' : diag.color;
+      ctx.fillStyle = color; ctx.strokeStyle = isSelected ? "#357ABD" : "rgba(0,0,0,0.6)";
+      ctx.lineWidth = isSelected ? 3 : 1;
       ctx.fill(); ctx.stroke();
     }
     ctx.restore();
@@ -258,14 +277,16 @@ const MaskOperate = () => {
     });
   }, [currentImageDetails, addUndoRecord, setAllImageAnnotations]);
 
-  const removeAnnotationByIndex = useCallback((index: number) => {
-    if (!currentImageDetails || index < 0 || index >= currentJsonAnnotations.length) return;
+  const removeAnnotationById = useCallback((idToRemove: string) => {
+    if (!currentImageDetails) return;
     addUndoRecord();
-    const updatedAnnotations = [...currentJsonAnnotations];
-    updatedAnnotations.splice(index, 1);
+    const updatedAnnotations = currentJsonAnnotations.filter(a => a.id !== idToRemove);
     setAllImageAnnotations(prev => ({ ...prev, [currentImageDetails.name]: { ...prev[currentImageDetails.name], jsonAnnotations: updatedAnnotations } }));
+    if (selectedAnnotationId === idToRemove) {
+      setSelectedAnnotationId(null);
+    }
     message.success(`${t.deleteAnnotationTooltip} ${t.operationSuccessful}`);
-  }, [currentImageDetails, currentJsonAnnotations, addUndoRecord, setAllImageAnnotations, t]);
+  }, [currentImageDetails, currentJsonAnnotations, addUndoRecord, setAllImageAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
 
   const performUndo = useCallback(() => {
     const history = mask_operationHistory[currentImageIndex] || [];
@@ -317,8 +338,9 @@ const MaskOperate = () => {
         } else return isPointInRect(mousePos, anno);
       });
       if (clickedAnnotation) {
-        setSelectedAnnotationId(clickedAnnotation.id);
-        if (selectedAnnotationId === clickedAnnotation.id) {
+        if (selectedAnnotationId !== clickedAnnotation.id) {
+          setSelectedAnnotationId(clickedAnnotation.id);
+        } else {
           addUndoRecord();
           setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(clickedAnnotation)) });
         }
@@ -380,7 +402,7 @@ const MaskOperate = () => {
   const handleCanvasClick = () => {
     if (!currentImageDetails || draggingState) return;
     if (activeTool === 'delete') {
-      const idxToDelete = [...activeViewAnnotations].reverse().findIndex((anno: ViewAnnotation) => {
+      const annoToDelete = [...activeViewAnnotations].reverse().find((anno: ViewAnnotation) => {
         if ('points' in anno) {
           const { angleRad, length, centerX, centerY } = getDiagonalParameters(anno.points);
           const t_mousePos = {x: canvasMousePos.x - centerX, y: canvasMousePos.y - centerY};
@@ -388,7 +410,7 @@ const MaskOperate = () => {
           return Math.abs(r_mousePos.x) <= length/2 && Math.abs(r_mousePos.y) <= anno.thickness/2;
         } else return isPointInRect(canvasMousePos, anno);
       });
-      if(idxToDelete !== -1) removeAnnotationByIndex(activeViewAnnotations.length - 1 - idxToDelete);
+      if(annoToDelete) removeAnnotationById(annoToDelete.id);
     }
   };
 
@@ -416,7 +438,7 @@ const MaskOperate = () => {
     }
     
     const imageFiles = filesArray.filter(f => f.type.startsWith('image/'));
-    const jsonFiles = filesArray.filter(f => f.name.endsWith('.json')); // 确保是数组
+    const jsonFiles = filesArray.filter(f => f.name.endsWith('.json'));
     const sortedImageFiles = imageFiles.sort((a: File, b: File) => a.name.localeCompare(b.name, undefined, {numeric: true}));
     
     const newAnnotations: {[imageName: string]: ImageAnnotationData} = {};
@@ -455,6 +477,40 @@ const MaskOperate = () => {
     if(folderUploadRef.current) folderUploadRef.current.value = "";
   };
   const navigateImage = (offset: number) => { const newIndex = currentImageIndex + offset; if (newIndex >= 0 && newIndex < images.length) { setCurrentImageIndex(newIndex); setSelectedAnnotationId(null); setDraggingState(null); } };
+  const handleExportAll = async () => {
+    if(images.length === 0) return;
+    message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
+    try {
+        const zip = new JSZip();
+        zip.file("classes.txt", categories.join('\n'));
+
+        for (const imageFile of images) {
+            zip.file(imageFile.name, imageFile);
+
+            const imageName = imageFile.name;
+            const annotations = allImageAnnotations[imageName]?.jsonAnnotations || [];
+            const annotationsByCategory: { [key: string]: any[] } = {};
+            
+            annotations.forEach(anno => {
+                if (!annotationsByCategory[anno.category]) {
+                    annotationsByCategory[anno.category] = [];
+                }
+                const { id, color, category, ...rest } = anno;
+                annotationsByCategory[category].push(rest);
+            });
+
+            const jsonContent = JSON.stringify(annotationsByCategory, null, 2);
+            const baseName = getFileNameWithoutExtension(imageName);
+            zip.file(`${baseName}.json`, jsonContent);
+        }
+        const content = await zip.generateAsync({ type: "blob" });
+        saveAs(content, "annotations_export.zip");
+        message.success({ content: t.exportSuccessMessage, key: 'exporting', duration: 3 });
+    } catch (error: any) {
+        console.error("Export failed:", error);
+        message.error({ content: `${t.exportFailureMessage} ${error.message}`, key: 'exporting', duration: 3 });
+    }
+  };
   
   // AI 与类别管理
   const mockAiApiCall = (apiType: AiApiType): Promise<ViewAnnotation[]> => {
@@ -507,10 +563,11 @@ const MaskOperate = () => {
   };
   const handleUpdateClass = (oldName: string, newName: string) => {
     if(newName === oldName || newName.trim() === '' || categories.includes(newName)) return;
-    setCategories(prev => prev.map(c => c === oldName ? newName : c));
+    const newNameTrimmed = newName.trim();
+    setCategories(prev => prev.map(c => c === oldName ? newNameTrimmed : c));
     setCategoryColors(prev => {
       const newColors = {...prev};
-      newColors[newName] = newColors[oldName];
+      newColors[newNameTrimmed] = newColors[oldName];
       delete newColors[oldName];
       return newColors;
     });
@@ -518,10 +575,13 @@ const MaskOperate = () => {
       const newAllAnnos = {...prev};
       Object.keys(newAllAnnos).forEach(imgName => {
         const annos = newAllAnnos[imgName]?.jsonAnnotations || [];
-        annos.forEach((anno: ViewAnnotation) => { if(anno.category === oldName) anno.category = newName; });
+        annos.forEach((anno: ViewAnnotation) => { if(anno.category === oldName) anno.category = newNameTrimmed; });
       });
       return newAllAnnos;
     });
+    if (currentCategory === oldName) {
+      setCurrentCategory(newNameTrimmed);
+    }
   };
   const handleUpdateColor = (catName: string, newColor: string) => {
     setCategoryColors(prev => ({...prev, [catName]: newColor}));
@@ -534,7 +594,35 @@ const MaskOperate = () => {
       return newAllAnnos;
     });
   };
-  const handleDeleteClass = (className: string) => { setCategories(prev => prev.filter(c => c !== className)); };
+  const handleDeleteClass = (className: string) => {
+    Modal.confirm({
+        title: t.deleteClassConfirmTitle.replace('%s', className),
+        content: t.deleteClassConfirmContent,
+        okText: t.confirmDelete,
+        okType: 'danger',
+        cancelText: t.cancel,
+        onOk: () => {
+            const newCategories = categories.filter(c => c !== className);
+            const newCategoryColors = { ...categoryColors };
+            delete newCategoryColors[className];
+
+            const newAllAnnotations = { ...allImageAnnotations };
+            Object.keys(newAllAnnotations).forEach(imgName => {
+                const currentAnnos = newAllAnnotations[imgName]?.jsonAnnotations || [];
+                newAllAnnotations[imgName].jsonAnnotations = currentAnnos.filter(anno => anno.category !== className);
+            });
+
+            setCategories(newCategories);
+            setCategoryColors(newCategoryColors);
+            setAllImageAnnotations(newAllAnnotations);
+
+            if (currentCategory === className) {
+                setCurrentCategory(newCategories.length > 0 ? newCategories[0] : "");
+            }
+            message.success(t.classDeleted.replace('%s', className));
+        }
+    });
+  };
   const handleExportClasses = () => saveAs(new Blob([categories.join('\n')], {type: "text/plain;charset=utf-8"}), "classes.txt");
   const handleImportClasses = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if(!file) return;
@@ -547,6 +635,13 @@ const MaskOperate = () => {
     message.success(`${newCats.length} ${t.category.toLowerCase()}(s) imported.`);
     if(classesFileRef.current) classesFileRef.current.value = "";
   };
+  const handleClearAnnotations = () => {
+    if (!currentImageDetails || currentJsonAnnotations.length === 0) return;
+    addUndoRecord();
+    setAllImageAnnotations(prev => ({ ...prev, [currentImageDetails.name]: { ...prev[currentImageDetails.name], jsonAnnotations: [] }}));
+    setSelectedAnnotationId(null);
+    message.success(t.clearAnnotationsButton + ' ' + t.operationSuccessful);
+  };
 
   return (
     <Layout className="mask-operate-pro-layout">
@@ -556,19 +651,17 @@ const MaskOperate = () => {
                 <Button type="primary" icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => folderUploadRef.current?.click()}>{t.uploadFolder}</Button>
                 <input ref={folderUploadRef} type="file" {...{webkitdirectory:"true", directory:"true"} as any} multiple onChange={(e: ChangeEvent<HTMLInputElement>) => processUploadedFiles(e.target.files)} style={{ display: 'none' }}/>
             </div>
-            <div className="header-center-controls">
-                <Space.Compact>
-                    <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => navigateImage(-1)} disabled={!hasActiveImage || currentImageIndex === 0} />
-                    <span style={{ padding: '0 12px', minWidth: '200px', textAlign: 'center' }}>
-                    <Text className="current-file-text-pro" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage} ${currentImageDetails.name} (${currentImageIndex + 1}/${images.length})` : t.noImages}</Text>
-                    </span>
-                    <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => navigateImage(1)} disabled={!hasActiveImage || currentImageIndex >= images.length - 1} />
-                </Space.Compact>
-            </div>
+            <Space className="header-center-controls">
+                <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => navigateImage(-1)} disabled={!hasActiveImage || currentImageIndex === 0} />
+                <span style={{ padding: '0 12px', minWidth: '200px', textAlign: 'center' }}>
+                <Text className="current-file-text-pro" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage} ${currentImageDetails.name} (${currentImageIndex + 1}/${images.length})` : t.noImages}</Text>
+                </span>
+                <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => navigateImage(1)} disabled={!hasActiveImage || currentImageIndex >= images.length - 1} />
+            </Space>
             <div className="header-right-controls">
-                <Tooltip title="撤销 (Ctrl+Z)"><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={currentUndoStackSize === 0} /></Tooltip>
-                <Tooltip title="重做 (Ctrl+Y)"><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={currentRedoStackSize === 0} /></Tooltip>
-                <Button type="primary" icon={<FontAwesomeIcon icon={faFileArchive} />} onClick={() => {}} disabled={images.length === 0}>{t.exportAll}</Button>
+                <Tooltip title={t.undo}><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={currentUndoStackSize === 0} /></Tooltip>
+                <Tooltip title={t.redo}><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={currentRedoStackSize === 0} /></Tooltip>
+                <Button type="primary" icon={<FontAwesomeIcon icon={faFileArchive} />} onClick={handleExportAll} disabled={images.length === 0}>{t.exportAll}</Button>
             </div>
         </Header>
         
@@ -600,35 +693,53 @@ const MaskOperate = () => {
 
             <Sider width={isInspectorVisible ? inspectorWidth : 0} className="inspector-sider-pro" theme="light" collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
                 <Tabs defaultActiveKey="1" className="inspector-tabs-pro" tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}>
-                    <TabPane tab={<><FontAwesomeIcon icon={faList} /> <span className="tab-text">{t.annotations} {activeViewAnnotations.length > 0 ? `(${activeViewAnnotations.length})` : ''}</span></>} key="1">
+                    <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
                         <div className="tab-pane-content">
                         {hasActiveImage && activeViewAnnotations.length > 0 ? (
-                            <Collapse accordion>
-                            {activeViewAnnotations.map((item, index) => (
+                            <Collapse accordion activeKey={selectedAnnotationId || undefined} onChange={(key) => setSelectedAnnotationId(Array.isArray(key) ? key[0] : key)}>
+                            {activeViewAnnotations.map((item) => (
                                 <Panel key={item.id} className="annotation-panel-item-pro" header={
-                                <Flex justify="space-between" align="center">
-                                    <Space>
-                                    <div className="color-indicator-pro" style={{ backgroundColor: item.color }} />
-                                    <Text className="category-name-text-pro" title={item.category} ellipsis style={{ color: item.color.replace(/[^,]+(?=\))/, '1') }}>{item.category}</Text>
+                                  <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+                                    <Space onClick={(e) => e.stopPropagation()}>
+                                      <div className="color-indicator-pro" style={{ backgroundColor: item.color }} />
+                                      <Text className="category-name-text-pro" title={item.category} ellipsis style={{ color: item.color.replace(/[^,]+(?=\))/, '1') }}>{item.category}</Text>
                                     </Space>
                                     <Tooltip title={t.deleteAnnotationTooltip}>
-                                    <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e: React.MouseEvent) => { e.stopPropagation(); removeAnnotationByIndex(index); }} />
+                                      <Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash}/>} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} />
                                     </Tooltip>
-                                </Flex>}>
+                                  </Flex>}>
+                                  <Descriptions bordered size="small" column={1} className="annotation-details-pro">
+                                    {'width' in item ? (
+                                      <>
+                                        <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
+                                        <Descriptions.Item label="X">{item.x.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="Y">{item.y.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="Width">{item.width.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="Height">{item.height.toFixed(1)}</Descriptions.Item>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
+                                        <Descriptions.Item label="Point 1">{`(${item.points[0].x.toFixed(1)}, ${item.points[0].y.toFixed(1)})`}</Descriptions.Item>
+                                        <Descriptions.Item label="Point 2">{`(${item.points[1].x.toFixed(1)}, ${item.points[1].y.toFixed(1)})`}</Descriptions.Item>
+                                        <Descriptions.Item label={t.thicknessLabel}>{item.thickness}</Descriptions.Item>
+                                      </>
+                                    )}
+                                  </Descriptions>
                                 </Panel>
                             ))}
                             </Collapse>
                         ) : <Text type="secondary" style={{textAlign: 'center', display: 'block', paddingTop: '20px'}}>{hasActiveImage ? t.noAnnotations : t.noImages}</Text>}
                         </div>
                     </TabPane>
-                    <TabPane tab={<><FontAwesomeIcon icon={faCog} /> <span className="tab-text">{t.settings}</span></>} key="2">
+                    <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
                         <div className="tab-pane-content">
                             <Form layout="vertical">
                                 <Title level={5}>{t.classManagement}</Title>
                                 <Flex justify="space-between" align="center" style={{marginBottom: 16}}>
                                 <Tooltip title={t.importExportTooltip}><Space.Compact>
                                     <Button icon={<FontAwesomeIcon icon={faFileImport}/>} onClick={() => classesFileRef.current?.click()}>{t.uploadClassesFile}</Button>
-                                    <Button icon={<FontAwesomeIcon icon={faFileExport}/>} onClick={handleExportClasses}>{t.exportClassesFile}</Button>
+                                    <Button icon={<FontAwesomeIcon icon={faFileExport}/>} onClick={handleExportClasses} disabled={categories.length === 0}>{t.exportClassesFile}</Button>
                                 </Space.Compact></Tooltip>
                                 <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{display:'none'}}/>
                                 </Flex>
@@ -636,24 +747,29 @@ const MaskOperate = () => {
                                 <List size="small" dataSource={categories} renderItem={(cat: string) => (
                                     <List.Item>
                                     <Flex gap="small" align="center" style={{width: '100%'}}>
-                                        <input type="color" value={categoryColors[cat]?.replace(/, \d\.\d\)/,')') || '#ffffff'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value + '66')} className="color-picker-input"/>
+                                        <input type="color" value={rgbaToHex(categoryColors[cat] || '#ffffff')} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value + '66')} className="color-picker-input"/>
                                         <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)}/>
-                                        <Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle}/>} onClick={() => handleDeleteClass(cat)} danger/></Tooltip>
+                                        <Tooltip title={t.deleteAnnotationTooltip}><Button icon={<FontAwesomeIcon icon={faMinusCircle}/>} onClick={() => handleDeleteClass(cat)} danger/></Tooltip>
                                     </Flex>
                                     </List.Item>
                                 )} />
                                 </div>
                                 <Button icon={<FontAwesomeIcon icon={faPlus}/>} onClick={handleAddClass} block style={{marginTop: 16}}>{t.addClass}</Button>
-                                <Divider/>
+                            </Form>
+                        </div>
+                    </TabPane>
+                    <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCog} /></Tooltip>} key="3">
+                        <div className="tab-pane-content">
+                            <Form layout="vertical">
                                 <Title level={5}>{t.aiModelMode}</Title>
-                                <Form.Item label={t.aiModelMode}>
-                                <Radio.Group onChange={(e) => setAiMode(e.target.value)} value={aiMode} optionType="button" buttonStyle="solid">
-                                    <Radio.Button value="auto">{t.aiModeAuto}</Radio.Button>
-                                    <Radio.Button value="manual">{t.aiModeManual}</Radio.Button>
-                                </Radio.Group>
+                                <Form.Item>
+                                  <Radio.Group onChange={(e) => setAiMode(e.target.value)} value={aiMode} optionType="button" buttonStyle="solid">
+                                      <Radio.Button value="auto">{t.aiModeAuto}</Radio.Button>
+                                      <Radio.Button value="manual">{t.aiModeManual}</Radio.Button>
+                                  </Radio.Group>
                                 </Form.Item>
                                 {aiMode === 'manual' && (
-                                <Form.Item label="Manual API Selection">
+                                <Form.Item>
                                     <Radio.Group onChange={(e) => setManualAiEndpoint(e.target.value)} value={manualAiEndpoint}>
                                     <Radio value="initialDetection">{t.initialDetection}</Radio>
                                     <Radio value="optimization">{t.optimization}</Radio>
@@ -661,12 +777,12 @@ const MaskOperate = () => {
                                 </Form.Item>
                                 )}
                                 <Divider/>
-                                <Title level={5}>视图设置</Title>
+                                <Title level={5}>视图与标注设置</Title>
                                 <Form.Item label={t.category}><Select value={currentCategory} onChange={(value: string) => setCurrentCategory(value)} disabled={!hasActiveImage || categories.length === 0} placeholder={t.noCategoriesFound}>{categories.map(cat => <Option key={cat} value={cat}>{cat}</Option>)}</Select></Form.Item>
-                                <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} /></Form.Item>
+                                <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} disabled={!hasActiveImage} /></Form.Item>
                                 <Form.Item label={t.toggleAnnotationsView} valuePropName="checked"><Switch checked={showAnnotations} onChange={setShowAnnotations} /></Form.Item>
                                 <Form.Item label={t.toggleCategoryInBox} valuePropName="checked"><Switch checked={showCategoryInBox} onChange={setShowCategoryInBox} /></Form.Item>
-                                <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={() => {}} block disabled={!hasActiveImage || currentJsonAnnotations.length === 0}>{t.clearAnnotationsButton}</Button></Form.Item>
+                                <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearAnnotations} block disabled={!hasActiveImage || currentJsonAnnotations.length === 0}>{t.clearAnnotationsButton}</Button></Form.Item>
                             </Form>
                         </div>
                     </TabPane>

@@ -94,6 +94,7 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     toggleAnnotationsView: '画布上显示/隐藏标注',
     toggleCategoryInBox: '框内显示类别名',
     clearAnnotationsButton: '清空当前JSON标注',
+    clearAnnotationsConfirm: '确定要删除当前图片上的所有标注吗？此操作可以撤销。',
     deleteAnnotationTooltip: "删除此标注",
     // 标注列表
     originalFileNameLabel: "源文件名",
@@ -101,6 +102,8 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     yoloFormatLabel: "YOLO 格式",
     diagonalArea: "对角线区域",
     thicknessLabel: "厚度",
+    point1Label: "点 1",
+    point2Label: "点 2",
     // 消息
     noAnnotations: "当前图片无标注",
     noCategoriesFound: "未找到类别，请先上传或添加",
@@ -131,6 +134,7 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     classColor: "颜色",
     hidePanel: '隐藏面板',
     showPanel: '显示面板',
+    viewSettings: '视图设置',
   },
   en: {
     // General
@@ -161,6 +165,7 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     toggleAnnotationsView: 'Show/Hide Annotations on Canvas',
     toggleCategoryInBox: 'Show Category in Box',
     clearAnnotationsButton: 'Clear Current JSON Annotations',
+    clearAnnotationsConfirm: 'Are you sure you want to delete all annotations for the current image? This action can be undone.',
     deleteAnnotationTooltip: "Delete this annotation",
     // Annotation List
     originalFileNameLabel: "Source File Name",
@@ -168,6 +173,8 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     yoloFormatLabel: "YOLO Format",
     diagonalArea: "Diagonal Area",
     thicknessLabel: "Thickness",
+    point1Label: "Point 1",
+    point2Label: "Point 2",
     // Messages
     noAnnotations: "No annotations for this image",
     noCategoriesFound: "No categories found, please upload or add one",
@@ -198,5 +205,6 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     classColor: "Color",
     hidePanel: 'Hide Panel',
     showPanel: 'Show Panel',
+    viewSettings: 'View Settings',
   },
 };
