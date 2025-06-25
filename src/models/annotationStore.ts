@@ -1,9 +1,30 @@
-// src/models/annotationStore.ts
 import { useState } from 'react';
 import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
 import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
 import type { ClassInfo, Operation } from '@/pages/FileOperate/constants';
 import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/pages/MaskOperate/constants';
+
+// 新增：RGBA转HEX的辅助函数，确保颜色选择器能正确显示
+const rgbaToHex = (rgba: string): string => {
+  if (!rgba) return '#000000';
+  if (rgba.startsWith('#')) return rgba;
+  const parts = rgba.match(/(\d+(\.\d+)?)/g);
+  if (!parts || parts.length < 3) return '#000000';
+  const r = parseInt(parts[0], 10);
+  const g = parseInt(parts[1], 10);
+  const b = parseInt(parts[2], 10);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
+};
+
+// 修改：在这里将初始的RGBA颜色对象转换为HEX格式的对象
+const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduce(
+  (acc, [key, value]) => {
+    acc[key] = rgbaToHex(value);
+    return acc;
+  },
+  {} as { [key: string]: string }
+);
+
 
 /**
  * @description
@@ -50,10 +71,13 @@ export default function useAnnotationStore() {
 
   // MaskOperate 页面的所有图片标注数据集合，以图片名为 key
   const [mask_allImageAnnotations, setMask_allImageAnnotations] = useState<{ [imageName: string]: ImageAnnotationData }>({});
-  // MaskOperate 页面的类别列表
+  
+  // MaskOperate 页面的类别列表 (保持不变)
   const [mask_categories, setMask_categories] = useState<string[]>(Object.keys(defaultCategoryColors));
-  // MaskOperate 页面的类别颜色映射
-  const [mask_categoryColors, setMask_categoryColors] = useState<{ [key: string]: string }>({ ...defaultCategoryColors });
+  
+  // 修改：使用预处理过的HEX颜色对象进行初始化
+  const [mask_categoryColors, setMask_categoryColors] = useState<{ [key: string]: string }>(initialMaskCategoryHexColors);
+  
   // MaskOperate 页面当前选中的标注ID
   const [mask_selectedAnnotationId, setMask_selectedAnnotationId] = useState<string | null>(null);
   // MaskOperate 页面的操作历史，用于撤销

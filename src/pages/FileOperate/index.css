@@ -1,54 +1,54 @@
-/* FileOperate/index.css */
-/* Consistent Aetherium Weave Theme */
-
+/* START OF FILE src/pages/FileOperate/index.css  */
+/* --- Unified Color Palette --- */
 :root {
-  --base-bg: #F0F5FF;
-  --panel-bg: rgba(255, 255, 255, 0.75);
-  --panel-bg-solid: #FFFFFF;
-  --text-primary: #0D1A2E;
-  --text-secondary: #5A6A82;
-  --accent-primary: #4A90E2;
-  --accent-primary-glow: rgba(74, 144, 226, 0.4);
-  --accent-primary-hover: #357ABD;
-  --border-color-light: #E8E8E8;
-  --border-color-medium: #D9D9D9;
-  --danger-color: #E94F4F;
-  --danger-glow: rgba(233, 79, 79, 0.4);
-  --font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  --transition-speed: 0.3s;
-  --transition-curve: ease-in-out;
-  --header-height: 64px;
+  --primary-color: #4096ff;
+  --primary-color-light: #e6f4ff;
+  --primary-color-dark: #0958d9;
+  --background-color: #ffffff;
+  --layout-background-color: #f5f7fa;
+  --sider-background-color: #fafcff;
+  --border-color: #f0f0f0;
+  --text-color-primary: #262626;
+  --text-color-secondary: #595959;
+  --text-color-placeholder: #bfbfbf;
+  --danger-color: #ff4d4f;
+  --success-color: #52c41a;
 }
 
-.file-operate-layout {
+/* --- Base Layout --- */
+.unified-layout {
   height: 100vh;
-  background-color: var(--base-bg);
-  font-family: var(--font-family);
-  color: var(--text-primary);
   overflow: hidden;
+  background-color: var(--layout-background-color);
 }
 
-.file-operate-top-header {
-  height: var(--header-height);
-  padding: 0 24px;
-  background: var(--panel-bg-solid);
-  border-bottom: 1px solid var(--border-color-light);
+/* --- Top Header --- */
+.unified-top-header {
+  background-color: var(--background-color) !important;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 24px !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 60px;
+  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+}
+
+.header-left-controls,
+.header-right-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  box-shadow: 0 2px 8px rgba(0, 30, 80, 0.05);
-  z-index: 100;
+  gap: 12px;
 }
 
-.file-operate-top-header .header-left-controls,
-.file-operate-top-header .header-right-controls {
+.header-center-controls {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.file-operate-top-header .current-file-text {
-  color: var(--text-secondary);
+.current-file-text {
+  color: var(--text-color-secondary);
   font-weight: 500;
   max-width: 400px;
   white-space: nowrap;
@@ -56,184 +56,129 @@
   text-overflow: ellipsis;
 }
 
-
-/* Left Tool Sider */
-.file-operate-tool-sider {
-  background: var(--panel-bg-solid) !important;
-  border-right: 1px solid var(--border-color-light);
-  box-shadow: 2px 0 8px rgba(0, 30, 80, 0.05);
-  z-index: 20;
+/* --- Tool Sider (Left) --- */
+.unified-tool-sider {
+  background-color: var(--sider-background-color) !important;
+  border-right: 1px solid var(--border-color);
+  box-shadow: 1px 0 4px rgba(0, 21, 41, 0.05);
 }
 
-.file-operate-tool-sider .ant-tabs-nav {
-  margin-bottom: 0;
+.tool-button {
+  width: 44px !important;
+  height: 44px !important;
+  font-size: 18px !important;
+  border-radius: 8px !important;
 }
 
-.file-operate-tool-sider .tab-pane-content {
-  padding: 16px;
+.tool-button.ant-btn-primary {
+  background-color: var(--primary-color-light) !important;
+  color: var(--primary-color-dark) !important;
+  border-color: var(--primary-color-light) !important;
 }
 
-/* Main Content Area (Center) */
-.file-operate-main-content-wrapper {
+/* --- Main Content & Canvas --- */
+.main-content-wrapper {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
+  padding: 0;
+  background: var(--layout-background-color);
 }
 
-.file-operate-canvas-content {
-  flex-grow: 1;
-  padding: 16px;
+.canvas-content {
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
-  background-color: var(--base-bg);
-}
-
-.file-operate-canvas-wrapper {
-  width: 100%;
-  height: 100%;
   overflow: auto;
-  background: var(--panel-bg-solid);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 40, 100, 0.1);
+  height: calc(100vh - 60px);
+  padding: 16px;
+}
+
+.canvas-wrapper {
   display: flex;
   justify-content: center;
   align-items: center;
-}
-
-.file-operate-canvas-wrapper canvas {
   max-width: 100%;
   max-height: 100%;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+  background-color: var(--background-color);
+}
+
+.canvas-wrapper canvas {
+  max-width: 100%;
+  max-height: calc(100vh - 92px);
+  /* 60px header + 32px padding */
+  display: block;
   object-fit: contain;
-  cursor: crosshair;
-  /* Default drawing cursor */
+  background-color: var(--background-color);
 }
 
-.file-operate-canvas-wrapper.coloring-mode canvas {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%234A90E2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>') 12 12, auto !important;
+/* --- Cursors --- */
+.draw-cursor { cursor: crosshair; }
+.delete-cursor { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ff4d4f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'), auto; }
+.canvas-wrapper canvas.resize-nwse { cursor: nwse-resize; }
+.canvas-wrapper canvas.resize-nesw { cursor: nesw-resize; }
+.canvas-wrapper canvas.resize-ns { cursor: ns-resize; }
+.canvas-wrapper canvas.resize-ew { cursor: ew-resize; }
+.canvas-wrapper canvas.move { cursor: move; }
+
+
+/* --- Inspector Sider (Right) --- */
+.resizer-horizontal {
+  width: 5px;
+  height: 100%;
+  background: transparent;
+  cursor: ew-resize;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-
-/* Right Inspector Sider */
-.file-operate-inspector-sider {
-  background: var(--panel-bg-solid) !important;
-  border-left: 1px solid var(--border-color-light);
-  box-shadow: -2px 0 8px rgba(0, 30, 80, 0.05);
-  transition: width var(--transition-speed) var(--transition-curve),
-    transform var(--transition-speed) var(--transition-curve);
-  z-index: 20;
+.unified-inspector-sider {
+  background-color: var(--background-color) !important;
+  border-left: 1px solid var(--border-color);
+  box-shadow: -1px 0 4px rgba(0, 21, 41, 0.05);
   display: flex;
   flex-direction: column;
 }
 
-/* Handle to show the inspector panel when it's hidden */
 .show-inspector-handle {
   position: absolute;
+  right: 0;
   top: 50%;
-  right: 0px;
   transform: translateY(-50%);
-  z-index: 25;
-  border-radius: 6px 0 0 6px !important;
+  border-radius: 8px 0 0 8px !important;
+  z-index: 10;
   width: 24px;
   height: 48px;
   padding: 0;
-  border-right: none !important;
 }
 
-.resizer-horizontal {
-  width: 5px;
-  cursor: col-resize;
-  background: transparent;
-  z-index: 15;
-  flex-shrink: 0;
-  transition: background-color var(--transition-speed);
+.inspector-tabs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-.resizer-horizontal:hover {
-  background-color: var(--accent-primary-glow);
+.inspector-tabs .ant-tabs-nav {
+  margin-bottom: 0 !important;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color);
 }
 
-
-/* General Ant Design Component Overrides */
-.ant-btn {
-  border-radius: 6px;
-  font-weight: 500;
-}
-
-.ant-btn-primary {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-}
-
-.ant-btn-primary:hover,
-.ant-btn-primary:focus {
-  background: var(--accent-primary-hover);
-  border-color: var(--accent-primary-hover);
-}
-
-.ant-form-item {
-  margin-bottom: 16px;
-}
-
-.ant-form-item-label>label {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.ant-select-selector,
-.ant-input-number,
-.ant-input {
-  border-radius: 6px !important;
-  border-color: var(--border-color-medium) !important;
-}
-
-.ant-select-selector:hover,
-.ant-input-number:hover,
-.ant-input:hover {
-  border-color: var(--accent-primary) !important;
-}
-
-.ant-select-focused .ant-select-selector,
-.ant-input-number-focused,
-.ant-input:focus,
-.ant-input-focused {
-  border-color: var(--accent-primary) !important;
-  box-shadow: 0 0 0 2px var(--accent-primary-glow) !important;
-}
-
-/* Custom Textarea for YOLO content */
-.yolo-content-textarea {
-  width: 100%;
-  /* height is now controlled by flexbox, removing fixed/calc height */
-  min-height: 100px;
-  /* A sensible minimum height */
-  font-family: monospace;
-  font-size: 12px;
-  border: 1px solid var(--border-color-medium);
-  border-radius: 6px;
-  padding: 8px;
-  resize: vertical;
-  overflow-y: auto !important;
-  /* Ensure scrollbar is always available when needed */
-}
-
-.yolo-content-textarea:focus {
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px var(--accent-primary-glow);
-  outline: none;
-}
-
-/* Styles for new Class Management UI */
-.class-list-container {
-  max-height: 45vh;
-  /* Responsive height */
+.inspector-tabs .ant-tabs-content-holder {
+  flex-grow: 1;
   overflow-y: auto;
-  padding-right: 8px;
-  /* Space for scrollbar */
-  margin-right: -8px;
-  /* Compensate for padding */
+}
+
+.tab-pane-content {
+  padding: 16px;
+}
+
+.class-list-container {
+  max-height: calc(100vh - 350px);
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
 }
 
 .class-management-item {
@@ -243,49 +188,71 @@
   width: 100%;
 }
 
-.class-management-item .ant-form-item {
-  flex-grow: 1;
-  margin-bottom: 0 !important;
-}
-
 .color-picker-input {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  width: 32px;
-  height: 32px;
-  background-color: transparent;
-  border: 1px solid var(--border-color-medium);
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
   cursor: pointer;
+  background-color: var(--background-color);
+}
+
+/* --- Data Textareas (FileOperate) --- */
+.data-content-textarea {
+  width: 100%;
+  flex-grow: 1;
+  min-height: 150px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  color: var(--text-color-primary);
+  background-color: var(--sider-background-color);
+  resize: vertical;
+}
+
+/* --- Annotation List (MaskOperate & FileOperate) --- */
+.annotation-panel-item .ant-collapse-header {
+  padding: 8px 12px !important;
+}
+
+.color-indicator {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.category-name-text {
+  font-weight: 500;
+}
+
+.annotation-details .ant-descriptions-item-label {
+  width: 80px;
+}
+
+.annotation-details-input {
+    width: 100%;
+}
+
+/* --- Ant Design Overrides & Helpers --- */
+.ant-btn-primary[disabled] {
+  background-color: #f5f5f5 !important;
+  border-color: #d9d9d9 !important;
+  color: rgba(0, 0, 0, 0.25) !important;
+}
+
+.ant-list-item {
+  padding: 8px 12px !important;
+}
+
+.ant-list-item:hover {
+  background-color: var(--primary-color-light);
+}
+
+.ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
-}
-
-.color-picker-input::-webkit-color-swatch {
-  border-radius: 5px;
-  border: none;
-}
-
-.color-picker-input::-moz-color-swatch {
-  border-radius: 5px;
-  border: none;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border-color-medium);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-primary);
 }
