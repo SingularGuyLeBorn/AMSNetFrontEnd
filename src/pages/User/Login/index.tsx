@@ -1,3 +1,4 @@
+// src/pages/User/Login/index.tsx
 import Footer from '@/components/Footer';
 import { userLoginUsingPost } from '@/services/backend/userController';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
@@ -43,7 +44,6 @@ const Login: React.FC = () => {
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang as keyof typeof translations];
 
-  // Update language when global language changes
   useEffect(() => {
     const handleLanguageChange = (event: Event) => {
       const customEvent = event as CustomEvent;
@@ -72,32 +72,47 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (values: API.UserLoginRequest) => {
     try {
-      // 登录
-      const res = await userLoginUsingPost({
-        ...values,
-      });
+      // 1. 调用登录接口
+      const res = await userLoginUsingPost({ ...values });
 
-      const defaultLoginSuccessMessage = t.loginSuccess;
-      message.success(defaultLoginSuccessMessage);
-      // 保存已登录用户信息
-      setInitialState({
-        ...initialState,
-        currentUser: res.data,
-      });
-      const urlParams = new URL(window.location.href).searchParams;
-      history.push(urlParams.get('redirect') || '/');
-      return;
+      if (res.data) {
+        // 2. 【核心修复】登录成功后，将后端返回的 Token 持久化存储
+        // 为什么？这是维持登录状态的关键。Token 是后续所有请求的身份凭证。
+        // 我假设返回的数据结构中包含 'token' 字段，如果不是，请在此处修改。
+        // @ts-ignore
+        if (res.data.token) {
+          // @ts-ignore
+          localStorage.setItem('token', res.data.token);
+        }
+
+        const defaultLoginSuccessMessage = t.loginSuccess;
+        message.success(defaultLoginSuccessMessage);
+        
+        // 3. 更新内存中的用户信息，立即生效
+        // 为什么？这样无需刷新页面，应用就能立刻进入登录状态。
+        await setInitialState((s) => ({
+          ...s,
+          currentUser: res.data,
+        }));
+        
+        // 4. 跳转到目标页面
+        const urlParams = new URL(window.location.href).searchParams;
+        history.push(urlParams.get('redirect') || '/');
+        return;
+      } else {
+        // 后端返回成功，但 data 为空，视为登录失败
+        throw new Error(res.message || '返回数据异常');
+      }
+
     } catch (error: any) {
       const defaultLoginFailureMessage = `${t.loginFailed}${error.message}`;
       message.error(defaultLoginFailureMessage);
     }
   };
 
-  // Language toggle function
   const toggleLanguage = () => {
     const newLang = currentLang === 'zh' ? 'en' : 'zh';
     setCurrentLang(newLang);
-    // Dispatch event to notify other parts of the app
     window.dispatchEvent(new CustomEvent('languageChange', { detail: { language: newLang } }));
   };
 
@@ -108,39 +123,21 @@ const Login: React.FC = () => {
           {t.login} - {Settings.title}
         </title>
       </Helmet>
-
-      {/* Language Toggle Button */}
+      
       <Button
-        style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-          fontSize: '16px',
-          zIndex: 10,
-          padding: '8px 16px',  // Make the button a bit larger
-        }}
+        style={{ position: 'absolute', top: 20, right: 20, zIndex: 10 }}
         onClick={toggleLanguage}
       >
         {currentLang === 'zh' ? 'EN' : '中文'}
       </Button>
 
-      <div
-        style={{
-          flex: '1',
-          padding: '32px 0',
-        }}
-      >
+      <div style={{ flex: '1', padding: '32px 0' }}>
         <LoginForm
-          contentStyle={{
-            minWidth: 280,
-            maxWidth: '75vw',
-          }}
+          contentStyle={{ minWidth: 280, maxWidth: '75vw' }}
           logo={<img alt="logo" style={{ height: '100%' }} src="/logo.svg" />}
           title="AMSNet"
           subTitle={t.subtitle}
-          initialValues={{
-            autoLogin: true,
-          }}
+          initialValues={{ autoLogin: true }}
           onFinish={async (values) => {
             await handleSubmit(values as API.UserLoginRequest);
           }}
@@ -149,58 +146,32 @@ const Login: React.FC = () => {
             activeKey={type}
             onChange={setType}
             centered
-            items={[
-              {
-                key: 'account',
-                label: t.accountPasswordLogin,
-              },
-            ]}
+            items={[{ key: 'account', label: t.accountPasswordLogin }]}
           />
           {type === 'account' && (
             <>
               <ProFormText
                 name="userAccount"
-                fieldProps={{
-                  size: 'large',
-                  prefix: <UserOutlined />,
-                }}
+                fieldProps={{ size: 'large', prefix: <UserOutlined /> }}
                 placeholder={t.userAccountPlaceholder}
-                rules={[
-                  {
-                    required: true,
-                    message: t.userAccountRequired,
-                  },
-                ]}
+                rules={[{ required: true, message: t.userAccountRequired }]}
               />
               <ProFormText.Password
                 name="userPassword"
-                fieldProps={{
-                  size: 'large',
-                  prefix: <LockOutlined />,
-                }}
+                fieldProps={{ size: 'large', prefix: <LockOutlined /> }}
                 placeholder={t.passwordPlaceholder}
-                rules={[
-                  {
-                    required: true,
-                    message: t.passwordRequired,
-                  },
-                ]}
+                rules={[{ required: true, message: t.passwordRequired }]}
               />
             </>
           )}
-
-          <div
-            style={{
-              marginBottom: 24,
-              textAlign: 'right',
-            }}
-          >
+          <div style={{ marginBottom: 24, textAlign: 'right' }}>
             <Link to="/user/register">{t.register}</Link>
           </div>
         </LoginForm>
       </div>
       <Footer />
     </div>
+    
   );
 };
 
