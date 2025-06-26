@@ -1,4 +1,4 @@
-/* START OF FILE src/pages/FileOperate/index.css  */
+/* START OF FILE src/pages/FileOperate/index.css */
 /* --- Unified Color Palette --- */
 :root {
   --primary-color: #4096ff;
@@ -181,6 +181,15 @@
   border-radius: 6px;
 }
 
+/* --- 新增: 为标注列表提供滚动容器 --- */
+.annotation-collapse-container {
+  max-height: calc(100vh - 340px);
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+
 .class-management-item {
   display: flex;
   align-items: center;
@@ -256,3 +265,4 @@
 .ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
 }
+/* END OF FILE src/pages/FileOperate/index.css */
