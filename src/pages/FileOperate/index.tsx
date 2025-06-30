@@ -704,7 +704,7 @@ const FileOperate: React.FC = () => {
             const formData = new FormData();
             formData.append('file', currentPng, currentPng.name);
             
-            const response = await fetch('http://127.0.0.1:8100/process-image/', {
+            const response = await fetch('http://127.0.0.1:8100/process/', {
                 method: 'POST',
                 body: formData,
             });
