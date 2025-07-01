@@ -72,9 +72,12 @@ const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: strin
 
 
 /**
- * 将前端的ViewAnnotation格式转换为API的kpt/segment格式 (用于导出)。
+ * @description 将前端的ViewAnnotation格式转换为API的kpt/segment格式 (用于导出)。
+ * @why This utility is now exported so it can be used in `app.tsx` for the global export functionality, ensuring data is in the correct format.
+ * @param viewAnnotations An array of annotations in the client-side view format.
+ * @returns An ApiResponse object suitable for backend or file storage.
  */
-const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
+export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
     const key_points: ApiKeyPoint[] = [];
     const segments: ApiSegment[] = [];
     const pointMap = new Map<string, number>();
@@ -584,10 +587,19 @@ const MaskOperate = () => {
     if(folderUploadRef.current) folderUploadRef.current.value = "";
   };
   
+  /**
+   * @description Navigates to a new image, ensuring the current image's state is saved first.
+   * @param offset The offset to navigate by (e.g., 1 for next, -1 for previous).
+   * @why This function is modified to ensure data consistency. Before changing the image index,
+   *      it explicitly calls `updateGlobalAnnotations` to save any pending changes from the
+   *      `localAnnotations` state into the global `allImageAnnotations` store. This prevents
+   *      data loss when navigating and is crucial for the global export functionality to work correctly.
+   */
   const navigateImage = (offset: number) => { 
       const newIndex = currentImageIndex + offset; 
       if (newIndex >= 0 && newIndex < images.length) { 
-        // Commit any pending changes for the current image before navigating
+        // [FIX]: Commit any pending local changes for the current image to the global store before navigating.
+        // This is the key to ensuring the global exporter has the latest data.
         if(currentImageDetails) {
             updateGlobalAnnotations(localAnnotations);
         }
@@ -644,7 +656,7 @@ const MaskOperate = () => {
         const formData = new FormData();
         formData.append('file', currentImageDetails.originalFile, currentImageDetails.originalFile.name);
 
-        const response = await fetch('http://127.0.0.1:8100/process/', {
+        const response = await fetch('http://10.0.33.143:8100/process/', {
             method: 'POST',
             body: formData
         });

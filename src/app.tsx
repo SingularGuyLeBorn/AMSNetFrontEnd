@@ -9,9 +9,12 @@ import { requestConfig } from './requestConfig';
 import { Button, Upload, message, Space, Tooltip } from 'antd';
 import { GlobalOutlined, UploadOutlined, FileZipOutlined } from '@ant-design/icons';
 import React from 'react';
-import type { ImageAnnotationData } from '@/pages/MaskOperate/constants';
+import type { ImageAnnotationData as MaskImageAnnotationData, ApiResponse as MaskApiResponse, ViewAnnotation } from '@/pages/MaskOperate/constants';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+// [FIX]: Import helper functions with named imports from their respective modules.
+import { parseJsonContent, stringifyJsonContent } from "@/pages/FileOperate/index";
+import { convertViewToApi } from "@/pages/MaskOperate/index";
 
 const loginPath = '/user/login';
 
@@ -29,6 +32,8 @@ const GlobalUploader: React.FC = () => {
       setFile_yoloList,
       setFile_jsonList,
       setFile_currentIndex,
+      setFile_currentYoloContent,
+      setFile_currentJsonContent,
       setMask_allImageAnnotations,
       setMask_operationHistory,
       setMask_redoHistory,
@@ -51,24 +56,31 @@ const GlobalUploader: React.FC = () => {
         setFile_pngList(pngList);
         setFile_yoloList(yoloList);
         setFile_jsonList(jsonList);
+        
+        // Reset FileOperate state
         setFile_currentIndex(0);
+        const firstYoloFile = yoloList.find(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(pngList[0]?.name));
+        const firstJsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(pngList[0]?.name));
+        setFile_currentYoloContent(firstYoloFile ? await firstYoloFile.text() : '');
+        setFile_currentJsonContent(firstJsonFile ? await firstJsonFile.text() : '{}');
 
-        const newAnnotationsData: { [imageName: string]: ImageAnnotationData } = {};
-        await Promise.all(
-          pngList.map(async (imgFile) => {
-              const baseName = getFileNameWithoutExtension(imgFile.name);
-              const annotationJsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-              const annotations: ImageAnnotationData = { jsonAnnotations: [], txtAnnotations: [] };
-              if (annotationJsonFile) {
-                  try {
-                      JSON.parse(await annotationJsonFile.text());
-                  } catch (e) {
-                      console.error(`解析JSON文件失败 ${imgFile.name}:`, e);
-                  }
+
+        // Reset MaskOperate state
+        const newAnnotationsData: { [imageName: string]: MaskImageAnnotationData } = {};
+        for (const imgFile of pngList) {
+          const baseName = getFileNameWithoutExtension(imgFile.name);
+          // Bedrock: Assume JSON from `wire` folder is for MaskOperate
+          const annotationJsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
+          let apiJson: MaskApiResponse = {};
+          if (annotationJsonFile) {
+              try {
+                  apiJson = JSON.parse(await annotationJsonFile.text());
+              } catch (e) {
+                  console.error(`解析MaskOperate的JSON文件失败 ${imgFile.name}:`, e);
               }
-              newAnnotationsData[imgFile.name] = annotations;
-          })
-        );
+          }
+          newAnnotationsData[imgFile.name] = { viewAnnotations: [], apiJson };
+        }
         setMask_allImageAnnotations(newAnnotationsData);
         setMask_operationHistory({});
         setMask_redoHistory({});
@@ -93,12 +105,20 @@ const GlobalUploader: React.FC = () => {
 };
 
 /**
- * 全局导出组件
- * @description 负责将两个标注页面的数据从 annotationStore 中聚合，并打包成一个 zip 文件导出。
- * 【核心逻辑】始终以图片列表为准，确保为每张图片都生成对应的标注文件，如果不存在则生成空文件。
+ * @description 全局导出组件，现在能够智能处理当前页面的实时编辑数据。
+ * @why 这是解决核心问题的关键。此组件现在直接从 `annotationStore` 读取当前激活的索引和对应的内存中的（可能未保存的）内容。
+ *      这确保了即使用户没有通过切换图片等操作触发保存，"全局导出"也能获取到最新的工作成果。
  */
 const GlobalExporter: React.FC = () => {
-    const { file_pngList, file_yoloList, mask_allImageAnnotations } = useModel('annotationStore');
+    const { 
+        file_pngList, 
+        file_yoloList, 
+        file_jsonList, 
+        file_currentIndex,
+        file_currentYoloContent,
+        file_currentJsonContent,
+        mask_allImageAnnotations,
+    } = useModel('annotationStore');
 
     const handleGlobalExport = async () => {
         if (file_pngList.length === 0) {
@@ -110,41 +130,60 @@ const GlobalExporter: React.FC = () => {
         try {
             const zip = new JSZip();
             const imagesFolder = zip.folder('images');
-            const cpntFolder = zip.folder('cpnt'); // For FileOperate's YOLO .txt
+            const cpntFolder = zip.folder('yolo'); // For FileOperate's YOLO .txt
+            const jsonFolder = zip.folder('json'); // For FileOperate's JSON
             const wireFolder = zip.folder('wire'); // For MaskOperate's .json
 
-            if (!imagesFolder || !cpntFolder || !wireFolder) {
+            if (!imagesFolder || !cpntFolder || !jsonFolder || !wireFolder) {
                  throw new Error("创建ZIP文件夹失败。");
             }
 
-            // 为什么？以图片列表为权威数据源进行遍历，这是确保文件完整性的基石。
-            for (const imageFile of file_pngList) {
+            for (let i = 0; i < file_pngList.length; i++) {
+                const imageFile = file_pngList[i];
                 const baseName = getFileNameWithoutExtension(imageFile.name);
 
-                // 1. 添加图片文件
+                // 1. Add image file
                 imagesFolder.file(imageFile.name, imageFile);
 
-                // 2. 添加或补全 FileOperate (cpnt) 的 YOLO 文件
-                const yoloFile = file_yoloList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-                const yoloContent = yoloFile ? await yoloFile.text() : ""; // 如果找不到，则内容为空字符串
-                cpntFolder.file(`${baseName}.txt`, yoloContent);
+                // 2. Add or supplement FileOperate's YOLO (.txt) and JSON (.json) files
+                let yoloContentToExport: string = '';
+                let jsonContentToExport: string = '{}';
 
-                // 3. 添加或补全 MaskOperate (wire) 的 JSON 文件
-                const annotationData = mask_allImageAnnotations[imageFile.name];
-                const annotations = annotationData?.jsonAnnotations || [];
-                
-                const annotationsByCategory: { [key: string]: any[] } = {};
-                annotations.forEach(anno => {
-                    if (!annotationsByCategory[anno.category]) {
-                        annotationsByCategory[anno.category] = [];
+                if (i === file_currentIndex) {
+                    // If it's the currently active file in FileOperate, use the live data from the store.
+                    yoloContentToExport = file_currentYoloContent || '';
+                    jsonContentToExport = stringifyJsonContent(parseJsonContent(file_currentJsonContent));
+                } else {
+                    // Otherwise, find the corresponding file in the list.
+                    const yoloFile = file_yoloList.find(f => getFileNameWithoutExtension(f.name) === baseName);
+                    if (yoloFile) {
+                        yoloContentToExport = await yoloFile.text();
                     }
-                    const { id, color, category, ...rest } = anno as any; // 去除内部状态
-                    annotationsByCategory[category].push(rest);
-                });
+                    
+                    const jsonFile = file_jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
+                    if (jsonFile) {
+                        jsonContentToExport = stringifyJsonContent(parseJsonContent(await jsonFile.text()));
+                    }
+                }
+
+                // Convert internal YOLO format to standard YOLOv5 format for export
+                const standardYoloContent = (yoloContentToExport || "").split('\n').map(line => {
+                    if (!line.trim()) return '';
+                    const parts = line.split(' ');
+                    // Standard format is `class_idx x_center y_center width height`
+                    return parts.length >= 6 ? parts.slice(1).join(' ') : (parts.length === 5 ? line : '');
+                }).filter(Boolean).join('\n');
                 
-                // 为什么？即使 annotationsByCategory 为空对象，JSON.stringify 也会生成 "{}"，确保了空文件的正确性。
-                const jsonContent = JSON.stringify(annotationsByCategory, null, 2);
-                wireFolder.file(`${baseName}.json`, jsonContent);
+                cpntFolder.file(`${baseName}.txt`, standardYoloContent);
+                jsonFolder.file(`${baseName}.json`, jsonContentToExport);
+
+                // 3. Add or supplement MaskOperate's (wire) JSON file
+                // The store `mask_allImageAnnotations` is assumed to be the single source of truth,
+                // updated by the MaskOperate component upon user actions (e.g., mouse-up, navigation).
+                const annotationData = mask_allImageAnnotations[imageFile.name];
+                const finalApiJson = annotationData?.apiJson || convertViewToApi(annotationData?.viewAnnotations || []);
+                const wireJsonContent = JSON.stringify(finalApiJson, null, 2);
+                wireFolder.file(`${baseName}.json`, wireJsonContent);
             }
 
             const zipContent = await zip.generateAsync({ type: 'blob' });
@@ -243,3 +282,4 @@ declare global {
     };
   }
 }
+// END OF FILE src/app.tsx

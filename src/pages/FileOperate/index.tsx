@@ -73,6 +73,41 @@ const getFileNameWithoutExtension = (fileName: string): string => {
 
 const generateRandomColor = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
+/**
+ * @description Parses a JSON string into a structured JsonData object.
+ * @why This utility is moved outside the component to be reusable across the application, for example in `app.tsx` for global export.
+ * @param jsonContent The JSON string to parse.
+ * @returns A structured JsonData object, or a default empty structure if parsing fails.
+ */
+export const parseJsonContent = (jsonContent: string | null): JsonData => {
+    try {
+        if (!jsonContent || jsonContent.trim() === "" || jsonContent.trim() === "{}") {
+            return { local: { buildingBlocks: {}, constants: {} }, global: {} };
+        }
+        const parsed = JSON.parse(jsonContent);
+        parsed.local = parsed.local || { buildingBlocks: {}, constants: {} };
+        parsed.local.buildingBlocks = parsed.local.buildingBlocks || {};
+        parsed.local.constants = parsed.local.constants || {};
+        parsed.global = parsed.global || {};
+        return parsed;
+    } catch (e) {
+        console.error("JSON parsing failed, returning default object.", e);
+        return { local: { buildingBlocks: {}, constants: {} }, global: {} };
+    }
+};
+
+/**
+ * @description Stringifies a JsonData object into a formatted JSON string.
+ * @why This utility is moved outside the component to be reusable across the application, for example in `app.tsx` for global export.
+ * @param jsonObj The JsonData object to stringify.
+ * @returns A formatted JSON string.
+ */
+export const stringifyJsonContent = (jsonObj: JsonData | null): string => {
+    if (!jsonObj) return "{}";
+    return JSON.stringify(jsonObj, null, 2);
+};
+
+
 const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeight: number, classMap: { [key: number]: ClassInfo }): string => {
     if (!Array.isArray(cpnts) || imageWidth === 0 || imageHeight === 0) {
         return "";
@@ -168,28 +203,6 @@ const FileOperate: React.FC = () => {
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
     }, [initialState?.language]);
-
-    const stringifyJsonContent = useCallback((jsonObj: JsonData | null): string => {
-        if (!jsonObj) return "{}";
-        return JSON.stringify(jsonObj, null, 2);
-    }, []);
-
-    const parseJsonContent = useCallback((jsonContent: string | null): JsonData => {
-        try {
-            if (!jsonContent || jsonContent.trim() === "" || jsonContent.trim() === "{}") {
-                return { local: { buildingBlocks: {}, constants: {} }, global: {} };
-            }
-            const parsed = JSON.parse(jsonContent);
-            parsed.local = parsed.local || { buildingBlocks: {}, constants: {} };
-            parsed.local.buildingBlocks = parsed.local.buildingBlocks || {};
-            parsed.local.constants = parsed.local.constants || {};
-            parsed.global = parsed.global || {};
-            return parsed;
-        } catch (e) {
-            console.error("JSON parsing failed, returning default object.", e);
-            return { local: { buildingBlocks: {}, constants: {} }, global: {} };
-        }
-    }, []);
 
     const parsedYoloData = useMemo(() => {
         return (currentYoloContent || '').split('\n').filter(Boolean).map(line => {
@@ -296,7 +309,7 @@ const FileOperate: React.FC = () => {
             ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
-    }, [currentPng, parsedYoloData, currentJsonContent, classMap, parseJsonContent, t.noImages, selectedBoxName]);
+    }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName]);
 
 
     const convertStandardYoloToInternal = useCallback((standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
@@ -348,7 +361,7 @@ const FileOperate: React.FC = () => {
         } else {
             setCurrentJsonContent(stringifyJsonContent(parseJsonContent(null)));
         }
-    }, [pngList, classMap, convertStandardYoloToInternal, parseJsonContent, stringifyJsonContent]);
+    }, [pngList, classMap, convertStandardYoloToInternal]);
 
     useEffect(() => {
         loadDataForIndex(currentIndex, yoloList, jsonList);
@@ -457,7 +470,7 @@ const FileOperate: React.FC = () => {
 
         message.success(`标注'${boxNameToDelete}' 已删除`);
         setRedrawTrigger(p => p + 1);
-    }, [currentYoloContent, currentJsonContent, currentIndex, selectedBoxName, parseJsonContent, stringifyJsonContent, setOperationHistory, setRedoHistory]);
+    }, [currentYoloContent, currentJsonContent, currentIndex, selectedBoxName, setOperationHistory, setRedoHistory]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
@@ -863,7 +876,7 @@ const FileOperate: React.FC = () => {
             const formData = new FormData();
             formData.append('file', currentPng, currentPng.name);
 
-            const response = await fetch('http://127.0.0.1:8100/process/', {
+            const response = await fetch('http://10.0.33.143:8100/process/', {
                 method: 'POST',
                 body: formData,
             });
