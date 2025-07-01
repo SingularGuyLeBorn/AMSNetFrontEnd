@@ -46,10 +46,10 @@ type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomL
 
 type DraggingState = {
     type: 'move' | 'resize';
-    boxName: string; 
+    boxName: string;
     handle?: ResizeHandle;
     startMousePos: Point;
-    startYoloData?: { relX: number; relY: number; }; 
+    startYoloData?: { relX: number; relY: number; };
     startAbsBox?: { x: number; y: number; w: number; h: number; };
     startFullYoloLine?: string;
 } | null;
@@ -99,7 +99,6 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
         }
         if (classIndex === -1) {
             console.warn(`Class type "${type}" not found in classMap.`);
-            // Optionally, we can add it dynamically, but for now we skip.
             return;
         }
 
@@ -196,7 +195,7 @@ const FileOperate: React.FC = () => {
         const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
         return { topLeft: { x: x - s/2, y: y - s/2, size: s }, top: { x: x + width/2 - s/2, y: y - s/2, size: s }, topRight: { x: x + width - s/2, y: y - s/2, size: s }, left: { x: x - s/2, y: y + height/2 - s/2, size: s }, right: { x: x + width - s/2, y: y + height/2 - s/2, size: s }, bottomLeft: { x: x - s/2, y: y + height - s/2, size: s }, bottom: { x: x + width/2 - s/2, y: y + height - s/2, size: s }, bottomRight:{ x: x + width - s/2, y: y + height - s/2, size: s }, };
       };
-    
+
     const getCursorForHandle = (handle: ResizeHandle | null): string => {
         if (!handle) return 'default';
         if (handle === 'topLeft' || handle === 'bottomRight') return 'resize-nwse';
@@ -234,7 +233,7 @@ const FileOperate: React.FC = () => {
                     const absH = relH * canvas.height;
                     const absLeft = (relX - relW / 2) * canvas.width;
                     const absTop = (relY - relH / 2) * canvas.height;
-                    
+
                     const isSelected = selectedBoxName === name;
                     const color = classMap[classIndex]?.color || '#808080';
                     ctx.beginPath();
@@ -301,6 +300,56 @@ const FileOperate: React.FC = () => {
     useEffect(() => { saveOnUnmountRef.current = () => saveCurrentFileState(currentIndex); });
     useEffect(() => { return () => { if (saveOnUnmountRef.current) { saveOnUnmountRef.current(); } }; }, []);
 
+    /**
+     * @description 将标准的5列YOLO格式转换为内部使用的6列格式
+     * @param {string} standardYoloContent - 从.txt文件读取的标准YOLO内容
+     * @param {object} classMap - 类别索引到类别信息的映射
+     * @returns {string} - 转换后的内部YOLO格式内容
+     * @why
+     * - **核心原因**: 应用程序内部通过一个唯一的`name`字段来识别和操作每一个标注框（例如，用于选中、移动、删除、染色等）。
+     * - **外部标准**: 标准的YOLO `.txt` 文件只有5列 (`class_index center_x center_y width height`)，缺少这个`name`字段。
+     * - **解决方案**: 此函数在加载时，为每一行标准YOLO数据动态生成一个唯一的`name`（如 `capacitor_0`），并将其添加到行首，
+     * 从而将外部数据无缝转换为内部兼容的6列格式 (`name class_index ...`)。这使得所有后续的编辑和处理逻辑可以统一运行，无需修改。
+     */
+    const convertStandardYoloToInternal = useCallback((standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
+        const lines = standardYoloContent.split('\n').filter(line => line.trim() !== '');
+        if (lines.length === 0) {
+            return '';
+        }
+
+        // 格式嗅探：检查第一行是否为5列格式
+        const firstLineParts = lines[0].split(' ');
+        if (firstLineParts.length !== 5 || isNaN(parseFloat(firstLineParts[0]))) {
+            // 如果不是5列或者第一列不是数字，则假定它已经是内部格式
+            return standardYoloContent;
+        }
+
+        const nameCounters: { [key: string]: number } = {};
+
+        const internalYoloLines = lines.map(line => {
+            const parts = line.split(' ');
+            if (parts.length !== 5) {
+                // 如果文件内格式不一致，则保留原样
+                return line;
+            }
+
+            const classIndex = parseInt(parts[0], 10);
+            if (isNaN(classIndex)) {
+                return line; // 无效的类别索引，保留原样
+            }
+
+            const classLabel = classMap[classIndex]?.label || `class_${classIndex}`;
+            const counter = nameCounters[classLabel] || 0;
+            nameCounters[classLabel] = counter + 1;
+            const uniqueName = `${classLabel}_${counter}`;
+
+            return `${uniqueName} ${line}`;
+        });
+
+        return internalYoloLines.join('\n');
+    }, []);
+
+
     useEffect(() => {
         if (pngList.length > 0 && currentIndex < pngList.length) {
             setCurrentPng(pngList[currentIndex]);
@@ -308,25 +357,45 @@ const FileOperate: React.FC = () => {
             setCurrentPng(null); setCurrentYoloContent(null); setCurrentJsonContent(null); return;
         }
 
-        const readFileContent = async (fileList: File[], index: number, setter: (content: string | null) => void) => {
+        const readFileContent = async (
+            fileList: File[],
+            index: number,
+            setter: (content: string | null) => void,
+            isYolo: boolean = false
+        ) => {
             const baseName = getFileNameWithoutExtension(pngList[index].name);
             const targetFile = fileList.find(f => getFileNameWithoutExtension(f.name) === baseName);
             if (targetFile) {
                 try {
-                    const text = await targetFile.text(); setter(text);
-                } catch (e) { console.error("Error reading file:", e); setter(null); }
-            } else { setter(null); }
+                    const text = await targetFile.text();
+                    if (isYolo) {
+                        // 如果是YOLO文件，则进行格式转换
+                        const internalFormatContent = convertStandardYoloToInternal(text, classMap);
+                        setter(internalFormatContent.split('\n').filter(line => line.trim() !== '').join('\n'));
+                    } else {
+                        setter(text);
+                    }
+                } catch (e) {
+                    console.error("Error reading file:", e);
+                    setter(null);
+                }
+            } else {
+                setter(null);
+            }
         };
 
-        readFileContent(yoloList, currentIndex, (content) => setCurrentYoloContent(content ? content.split('\n').filter(line => line.trim() !== '').join('\n') : ''));
+        // 修改此处调用，传入 isYolo 标志位
+        readFileContent(yoloList, currentIndex, (content) => setCurrentYoloContent(content), true);
         readFileContent(jsonList, currentIndex, (content) => setCurrentJsonContent(stringifyJsonContent(parseJsonContent(content))));
-    }, [currentIndex, pngList, yoloList, jsonList, parseJsonContent, stringifyJsonContent]);
+
+    }, [currentIndex, pngList, yoloList, jsonList, parseJsonContent, stringifyJsonContent, convertStandardYoloToInternal, classMap]);
+
 
     useEffect(() => { if (currentPng) { setRedrawTrigger(prev => prev + 1); } }, [currentPng]);
     useEffect(() => { redrawCanvas(); }, [redrawTrigger, redrawCanvas]);
     useEffect(() => { const handleResize = () => setRedrawTrigger(p => p + 1); window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize); }, []);
     useEffect(() => { const handleMouseMove = (e: globalThis.MouseEvent) => { if (!isResizingInspector) return; const newWidth = window.innerWidth - e.clientX; if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth); }; const handleMouseUp = () => setIsResizingInspector(false); if (isResizingInspector) { document.body.style.userSelect = 'none'; window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); } return () => { document.body.style.userSelect = ''; window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); }; }, [isResizingInspector]);
-    
+
     const getScaledCoords = useCallback((e: MouseEvent<HTMLCanvasElement>): Point => {
         const canvas = canvasRef.current;
         if (!canvas) return { x: 0, y: 0 };
@@ -343,9 +412,10 @@ const FileOperate: React.FC = () => {
         const files = event.target.files; if (!files) return;
         const newPngList: File[] = [], newYoloList: File[] = [], newJsonList: File[] = [];
         Array.from(files).forEach(file => {
-            if (file.type === 'image/png' || file.type === 'image/jpeg') newPngList.push(file);
-            else if (file.name.endsWith('.txt')) newYoloList.push(file);
-            else if (file.name.endsWith('.json')) newJsonList.push(file);
+            const lowerCaseName = file.name.toLowerCase();
+            if (lowerCaseName.endsWith('.png') || lowerCaseName.endsWith('.jpg') || lowerCaseName.endsWith('.jpeg')) newPngList.push(file);
+            else if (lowerCaseName.endsWith('.txt')) newYoloList.push(file);
+            else if (lowerCaseName.endsWith('.json')) newJsonList.push(file);
         });
         const compareFn = (a: File, b: File) => a.name.localeCompare(b.name, undefined, { numeric: true });
         setPngList(newPngList.sort(compareFn));
@@ -358,7 +428,7 @@ const FileOperate: React.FC = () => {
     const handleCanvasClick = (e: MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current; if (!canvas || !currentYoloContent) return;
         const { x: mouseX, y: mouseY } = getScaledCoords(e);
-        
+
         const yoloLines = currentYoloContent.split('\n').filter(Boolean);
 
         if (activeTool === 'stain') {
@@ -409,7 +479,7 @@ const FileOperate: React.FC = () => {
                     lineToDelete = line;
                     lineIndexToDelete = i;
                     deletedSomething = true;
-                    break; 
+                    break;
                 }
             }
 
@@ -469,7 +539,7 @@ const FileOperate: React.FC = () => {
                 const absW = relW * canvas.width, absH = relH * canvas.height;
                 const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
                 const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
-                
+
                 for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
                     const handle = handles[handleKey];
                     if (x >= handle.x && x <= handle.x + handle.size && y >= handle.y && y <= handle.y + handle.size) {
@@ -491,7 +561,7 @@ const FileOperate: React.FC = () => {
 
             let clickedBox: string | null = null;
             let clickedYoloData: { relX: number; relY: number } | null = null;
-            
+
             for (let i = yoloLines.length - 1; i >= 0; i--) {
                 const line = yoloLines[i];
                 const parts = line.split(' ');
@@ -546,7 +616,7 @@ const FileOperate: React.FC = () => {
                 const dy = (currentY - draggingState.startMousePos.y) / canvas.height;
                 const newRelX = draggingState.startYoloData.relX + dx;
                 const newRelY = draggingState.startYoloData.relY + dy;
-    
+
                 const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
                     const parts = line.split(' ');
                     if (parts[0] === draggingState.boxName) {
@@ -560,7 +630,7 @@ const FileOperate: React.FC = () => {
                 const dx = currentX - draggingState.startMousePos.x;
                 const dy = currentY - draggingState.startMousePos.y;
                 let { x: newX, y: newY, w: newW, h: newH } = draggingState.startAbsBox;
-                
+
                 if (draggingState.handle.includes('right')) newW = Math.max(1, draggingState.startAbsBox.w + dx);
                 if (draggingState.handle.includes('left')) { newX = draggingState.startAbsBox.x + dx; newW = Math.max(1, draggingState.startAbsBox.w - dx); }
                 if (draggingState.handle.includes('bottom')) newH = Math.max(1, draggingState.startAbsBox.h + dy);
@@ -571,8 +641,8 @@ const FileOperate: React.FC = () => {
 
                 const lineParts = draggingState.startFullYoloLine.split(' ');
                 const newLine = `${lineParts[0]} ${lineParts[1]} ${newRelX.toFixed(6)} ${newRelY.toFixed(6)} ${newRelW.toFixed(6)} ${newRelH.toFixed(6)}`;
-                
-                const newYoloContent = (currentYoloContent || '').split('\n').map(line => 
+
+                const newYoloContent = (currentYoloContent || '').split('\n').map(line =>
                     line.startsWith(draggingState.boxName + ' ') ? newLine : line
                 ).join('\n');
                 setCurrentYoloContent(newYoloContent);
@@ -599,7 +669,7 @@ const FileOperate: React.FC = () => {
             if (hoveredHandle !== null) setHoveredHandle(null);
         }
     };
-    
+
     const handleMouseUp = (e: MouseEvent<HTMLCanvasElement>) => {
         if (isDrawing && activeTool === 'draw') {
             setIsDrawing(false);
@@ -610,7 +680,7 @@ const FileOperate: React.FC = () => {
 
             if (width > 2 && height > 2) {
                 const classLabel = classMap[currentClassIndex]?.label || `class_${currentClassIndex}`;
-                const yoloLines = currentYoloContent?.split('\n') || [];
+                const yoloLines = currentYoloContent?.split('\n').filter(l => l.trim() !== '') || [];
 
                 const existingCounters = yoloLines
                     .map(line => line.split(' ')[0])
@@ -643,20 +713,20 @@ const FileOperate: React.FC = () => {
         setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
         setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
       }, [currentYoloContent, currentIndex, setOperationHistory, setRedoHistory]);
-    
+
       const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
           addUndoRecord();
           setIsCurrentlyEditingId(boxName);
         }
       }, [isCurrentlyEditingId, addUndoRecord]);
-    
+
       const handleAnnotationPropertyUpdate = useCallback((boxName: string, propIndex: number, value: number | null) => {
         if (value === null) return;
         const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
           const parts = line.split(' ');
           if (parts[0] === boxName) {
-            parts[propIndex + 1] = (value as number).toFixed(6); 
+            parts[propIndex + 1] = (value as number).toFixed(6);
             return parts.join(' ');
           }
           return line;
@@ -692,23 +762,23 @@ const FileOperate: React.FC = () => {
     const handleNextIndex = useCallback(() => { if (currentIndex < pngList.length - 1) { saveCurrentFileState(currentIndex); setCurrentIndex(p => p + 1); } }, [currentIndex, pngList.length, saveCurrentFileState, setCurrentIndex]);
     const handlePrevIndex = useCallback(() => { if (currentIndex > 0) { saveCurrentFileState(currentIndex); setCurrentIndex(p => p - 1); } }, [currentIndex, saveCurrentFileState, setCurrentIndex]);
 
-    const handleSaveAllToZip = async () => { if (pngList.length === 0) { message.warning(t.noFile); return; } await saveCurrentFileState(currentIndex); message.loading({ content: "正在准备数据并打包...", key: "exporting", duration: 0 }); const zip = new JSZip(); try { const upToDateYoloList = yoloList.map((file, i) => { if (i === currentIndex && currentYoloContent !== null) { return new File([currentYoloContent], file.name, { type: 'text/plain' }); } return file; }); const upToDateJsonList = jsonList.map((file, i) => { if (i === currentIndex && currentJsonContent !== null) { return new File([currentJsonContent], file.name, { type: 'application/json' }); } return file; }); for (let i = 0; i < pngList.length; i++) { const pngFile = pngList[i]; const baseName = getFileNameWithoutExtension(pngFile.name); zip.file(`images/${pngFile.name}`, pngFile); const yoloFile = upToDateYoloList.find(f => getFileNameWithoutExtension(f.name) === baseName); const yoloContentForFile = yoloFile ? await yoloFile.text() : ""; const finalYoloContent = yoloContentForFile.split('\n').map(line => { if (!line.trim()) return ''; const parts = line.split(' '); return parts.length >= 2 ? parts.slice(1).join(' ') : ''; }).filter(Boolean).join('\n'); zip.file(`yolo/${baseName}.txt`, finalYoloContent); const jsonFile = upToDateJsonList.find(f => getFileNameWithoutExtension(f.name) === baseName); const rawJsonContent = jsonFile ? await jsonFile.text() : null; const jsonContentForFile = stringifyJsonContent(parseJsonContent(rawJsonContent)); zip.file(`json/${baseName}.json`, jsonContentForFile); } const content = await zip.generateAsync({ type: 'blob' }); saveAs(content, 'fileoperate_annotations.zip'); message.success({ content: "所有文件已打包下载", key: "exporting", duration: 2 }); } catch (err: any) { message.error({ content: `导出失败: ${err.message}`, key: "exporting", duration: 2 }); } };
+    const handleSaveAllToZip = async () => { if (pngList.length === 0) { message.warning(t.noFile); return; } await saveCurrentFileState(currentIndex); message.loading({ content: "正在准备数据并打包...", key: "exporting", duration: 0 }); const zip = new JSZip(); try { const upToDateYoloList = yoloList.map((file, i) => { if (i === currentIndex && currentYoloContent !== null) { return new File([currentYoloContent], file.name, { type: 'text/plain' }); } return file; }); const upToDateJsonList = jsonList.map((file, i) => { if (i === currentIndex && currentJsonContent !== null) { return new File([currentJsonContent], file.name, { type: 'application/json' }); } return file; }); for (let i = 0; i < pngList.length; i++) { const pngFile = pngList[i]; const baseName = getFileNameWithoutExtension(pngFile.name); zip.file(`images/${pngFile.name}`, pngFile); const yoloFile = upToDateYoloList.find(f => getFileNameWithoutExtension(f.name) === baseName); const rawYoloContent = yoloFile ? await yoloFile.text() : (i === currentIndex ? currentYoloContent : ""); const finalYoloContent = (rawYoloContent || "").split('\n').map(line => { if (!line.trim()) return ''; const parts = line.split(' '); return parts.length >= 6 ? parts.slice(1).join(' ') : (parts.length === 5 ? line : ''); }).filter(Boolean).join('\n'); zip.file(`yolo/${baseName}.txt`, finalYoloContent); const jsonFile = upToDateJsonList.find(f => getFileNameWithoutExtension(f.name) === baseName); const rawJsonContent = jsonFile ? await jsonFile.text() : (i === currentIndex ? currentJsonContent : null); const jsonContentForFile = stringifyJsonContent(parseJsonContent(rawJsonContent)); zip.file(`json/${baseName}.json`, jsonContentForFile); } const content = await zip.generateAsync({ type: 'blob' }); saveAs(content, 'fileoperate_annotations.zip'); message.success({ content: "所有文件已打包下载", key: "exporting", duration: 2 }); } catch (err: any) { message.error({ content: `导出失败: ${err.message}`, key: "exporting", duration: 2 }); } };
 
     const handleAiAnnotation = async () => {
         if (!currentPng || !canvasRef.current) { message.warning(t.noFile); return; }
-    
+
         setIsAiAnnotating(true);
         message.loading({ content: t.aiAnnotating, key: 'ai-annotation', duration: 0 });
-    
+
         try {
             const formData = new FormData();
             formData.append('file', currentPng, currentPng.name);
-            
+
             const response = await fetch('http://127.0.0.1:8100/process/', {
                 method: 'POST',
                 body: formData,
             });
-    
+
             if (!response.ok) {
                 const errorText = await response.text();
                 let errorDetail = `HTTP error! status: ${response.status}`;
@@ -720,9 +790,9 @@ const FileOperate: React.FC = () => {
                 }
                 throw new Error(errorDetail);
             }
-    
+
             const resultData: ApiResponse = await response.json();
-            
+
             if (!resultData || !resultData.cpnts || resultData.cpnts.length === 0) {
                  message.info({ content: "AI 未返回任何有效标注。", key: 'ai-annotation', duration: 3 });
                  setIsAiAnnotating(false);
@@ -730,14 +800,15 @@ const FileOperate: React.FC = () => {
             }
 
             const previousYolo = currentYoloContent;
-            
+
             const { width, height } = canvasRef.current;
 
             // Check for new classes and add them
             const newLabels = [...new Set(resultData.cpnts.map(c => c.type))];
             const existingLabels = Object.values(classMap).map(c => c.label);
             const newlyDiscovered = newLabels.filter(l => !existingLabels.includes(l));
-            
+
+            let currentClassMap = classMap;
             if(newlyDiscovered.length > 0) {
                 let newClassMap = {...classMap};
                 let lastIndex = Object.keys(classMap).length > 0 ? Math.max(...Object.keys(classMap).map(Number)) : -1;
@@ -746,27 +817,28 @@ const FileOperate: React.FC = () => {
                     newClassMap[lastIndex] = { label, color: generateRandomColor() };
                 });
                 setClassMap(newClassMap);
+                currentClassMap = newClassMap; // Use the updated map for conversion
             }
 
             // Convert to YOLO format
-            const newYoloContent = convertCpntsToYolo(resultData.cpnts, width, height, classMap);
-            
+            const newYoloContent = convertCpntsToYolo(resultData.cpnts, width, height, currentClassMap);
+
             if (!newYoloContent) {
                  message.info({ content: "AI 未返回可解析的标注。", key: 'ai-annotation', duration: 3 });
                  setIsAiAnnotating(false);
                  return;
             }
-            
+
             setCurrentYoloContent(newYoloContent);
             // Also update the JSON content for consistency
             setCurrentJsonContent(JSON.stringify(parseJsonContent(JSON.stringify(resultData, null, 2)), null, 2));
-    
+
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
             setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
             setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
             setRedrawTrigger(p => p + 1);
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
-    
+
         } catch (error: any) {
             console.error("AI Annotation failed:", error);
             message.error({ content: `${t.aiFailed}: ${error.message}`, key: 'ai-annotation', duration: 5 });
@@ -774,7 +846,7 @@ const FileOperate: React.FC = () => {
             setIsAiAnnotating(false);
         }
     };
-    
+
     const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomColor() } })); };
     const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setClassMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
     const handleDeleteClass = (indexToDelete: number) => { const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${classMap[indexToDelete]?.label}`) : `确认删除类别 [${indexToDelete}] ${classMap[indexToDelete]?.label}?`; Modal.confirm({ title: title, content: t.deleteClassConfirmContent, okText: t.confirmDelete, cancelText: t.cancel, okType: 'danger', onOk: () => { const newClassMap = { ...classMap }; delete newClassMap[indexToDelete]; setClassMap(newClassMap); if (currentClassIndex === indexToDelete) { const firstKey = Object.keys(newClassMap)[0]; setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0); } message.success(t.classDeleted.replace('%s', classMap[indexToDelete]?.label || '')); } }); };
@@ -788,7 +860,7 @@ const FileOperate: React.FC = () => {
             return { name, classIdx: parseInt(classIdx), x: parseFloat(x), y: parseFloat(y), w: parseFloat(w), h: parseFloat(h) };
         }).filter((item): item is { name: string; classIdx: number; x: number; y: number; w: number; h: number; } => item !== null && !isNaN(item.classIdx));
     }, [currentYoloContent]);
-    
+
     const isSelectedForEdit = (item: {name: string}) => activeTool === 'select' && item.name === selectedBoxName;
 
     return (

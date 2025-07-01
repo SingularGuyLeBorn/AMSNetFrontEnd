@@ -1,6 +1,6 @@
 // src/pages/User/Login/index.tsx
 import Footer from '@/components/Footer';
-import { userLoginUsingPost } from '@/services/backend/userController';
+// import { userLoginUsingPost } from '@/services/backend/userController'; // 导入的登录接口可以注释掉或移除
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { LoginForm, ProFormText } from '@ant-design/pro-components';
 import { useEmotionCss } from '@ant-design/use-emotion-css';
@@ -71,14 +71,46 @@ const Login: React.FC = () => {
   });
 
   const handleSubmit = async (values: API.UserLoginRequest) => {
+    // --- 修改开始 ---
+    // 绕过实际的登录接口调用，直接模拟登录成功
+    const mockLoginSuccess = async () => {
+      // 这里可以定义一个模拟的用户信息，或者使用用户输入的值
+      // 为了简单起见，我们直接创建一个模拟用户对象
+      const mockCurrentUser = {
+        userAccount: values.userAccount || 'mockUser', // 使用用户输入的账号，如果为空则使用默认值
+        userName: 'Mock User',
+        userRole: 'user', // 或者 'admin'，取决于你希望模拟的角色
+        // ... 其他你可能需要的模拟用户信息字段
+      };
+      
+      // 模拟设置 Token
+      const mockToken = 'mock-login-token-12345';
+      localStorage.setItem('token', mockToken);
+
+      // 模拟登录成功消息
+      const defaultLoginSuccessMessage = t.loginSuccess;
+      message.success(defaultLoginSuccessMessage);
+
+      // 更新内存中的用户信息
+      await setInitialState((s) => ({
+        ...s,
+        currentUser: mockCurrentUser,
+      }));
+
+      // 跳转到目标页面
+      const urlParams = new URL(window.location.href).searchParams;
+      history.push(urlParams.get('redirect') || '/');
+    };
+
+    await mockLoginSuccess();
+    // --- 修改结束 ---
+
+    /*
+    // 原来的登录逻辑，已被注释掉：
     try {
-      // 1. 调用登录接口
       const res = await userLoginUsingPost({ ...values });
 
       if (res.data) {
-        // 2. 【核心修复】登录成功后，将后端返回的 Token 持久化存储
-        // 为什么？这是维持登录状态的关键。Token 是后续所有请求的身份凭证。
-        // 我假设返回的数据结构中包含 'token' 字段，如果不是，请在此处修改。
         // @ts-ignore
         if (res.data.token) {
           // @ts-ignore
@@ -88,19 +120,15 @@ const Login: React.FC = () => {
         const defaultLoginSuccessMessage = t.loginSuccess;
         message.success(defaultLoginSuccessMessage);
         
-        // 3. 更新内存中的用户信息，立即生效
-        // 为什么？这样无需刷新页面，应用就能立刻进入登录状态。
         await setInitialState((s) => ({
           ...s,
           currentUser: res.data,
         }));
         
-        // 4. 跳转到目标页面
         const urlParams = new URL(window.location.href).searchParams;
         history.push(urlParams.get('redirect') || '/');
         return;
       } else {
-        // 后端返回成功，但 data 为空，视为登录失败
         throw new Error(res.message || '返回数据异常');
       }
 
@@ -108,6 +136,7 @@ const Login: React.FC = () => {
       const defaultLoginFailureMessage = `${t.loginFailed}${error.message}`;
       message.error(defaultLoginFailureMessage);
     }
+    */
   };
 
   const toggleLanguage = () => {
@@ -171,7 +200,6 @@ const Login: React.FC = () => {
       </div>
       <Footer />
     </div>
-    
   );
 };
 
