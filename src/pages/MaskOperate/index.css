@@ -179,6 +179,13 @@
   border-radius: 6px;
 }
 
+.annotation-collapse-container {
+  max-height: calc(100vh - 200px); /* Adjusted for better default view */
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
 .class-management-item {
   display: flex;
   align-items: center;
@@ -196,7 +203,8 @@
   background-color: var(--background-color);
 }
 
-/* --- Data Textareas (FileOperate) --- */
+/* --- Data Textareas (Shared) --- */
+/* This class is used by both FileOperate and MaskOperate */
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
@@ -211,7 +219,7 @@
   resize: vertical;
 }
 
-/* --- Annotation List (MaskOperate) --- */
+/* --- Annotation List (Shared) --- */
 .annotation-panel-item .ant-collapse-header {
   padding: 8px 12px !important;
 }

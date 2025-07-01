@@ -138,6 +138,11 @@ const MaskOperate = () => {
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang];
   const [currentImageDetails, setCurrentImageDetails] = useState<ImageDetails | null>(null);
+  
+  // PERFORMANCE FIX: Local state for annotations of the current image.
+  // This avoids updating the global zustand store on every mouse move, which is slow.
+  const [localAnnotations, setLocalAnnotations] = useState<ViewAnnotation[]>([]);
+
   const [activeTool, setActiveTool] = useState<ActiveTool>('diagonal');
   const [currentCategory, setCurrentCategory] = useState<string>(categories[0] || "");
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(2);
@@ -156,15 +161,22 @@ const MaskOperate = () => {
 
   const hasActiveImage = images.length > 0 && currentImageIndex >= 0 && currentImageIndex < images.length;
   
-  const currentAnnotations = useMemo(() => {
-    return currentImageDetails ? allImageAnnotations[currentImageDetails.name] : null;
-  }, [currentImageDetails, allImageAnnotations]);
-  
-  const currentViewAnnotations: ViewAnnotation[] = currentAnnotations?.viewAnnotations || [];
-  const currentApiJson: ApiResponse = currentAnnotations?.apiJson || { key_points: [], segments: [] };
+  // Read from local state for rendering, not directly from global store.
+  const currentViewAnnotations: ViewAnnotation[] = localAnnotations; 
+  const currentApiJson = useMemo(() => convertViewToApi(currentViewAnnotations), [currentViewAnnotations]);
 
   const currentUndoStackSize = (mask_operationHistory[currentImageIndex] || []).length;
   const currentRedoStackSize = (mask_redoHistory[currentImageIndex] || []).length;
+
+  // Sync local annotation state when the image or global annotations change.
+  useEffect(() => {
+    if (currentImageDetails) {
+      const annotationsFromGlobalStore = allImageAnnotations[currentImageDetails.name]?.viewAnnotations || [];
+      setLocalAnnotations(annotationsFromGlobalStore);
+    } else {
+      setLocalAnnotations([]);
+    }
+  }, [currentImageDetails, allImageAnnotations]);
 
   const getResizeHandles = (box: ViewBoxAnnotation): {[key in ResizeHandle]: {x: number, y: number, size: number, cursor: string}} => {
     const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
@@ -352,7 +364,7 @@ const MaskOperate = () => {
     setMask_redoHistory(prev => ({...prev, [currentImageIndex]: []}));
   }, [currentImageDetails, currentImageIndex, currentViewAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory]);
 
-  const updateAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
+  const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
     if (!currentImageDetails) return;
     setAllImageAnnotations(prev => {
       const updatedApiJson = newApiJson || convertViewToApi(newViewAnnotations);
@@ -362,8 +374,9 @@ const MaskOperate = () => {
   
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
     const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? {...a, ...updates} : a);
-    updateAnnotations(newViewAnnotations);
-  }, [currentViewAnnotations, updateAnnotations]);
+    setLocalAnnotations(newViewAnnotations);
+    updateGlobalAnnotations(newViewAnnotations);
+  }, [currentViewAnnotations, updateGlobalAnnotations]);
 
   const handleEditFocus = useCallback((annotationId: string) => {
     if (isCurrentlyEditingId !== annotationId) {
@@ -375,17 +388,20 @@ const MaskOperate = () => {
   const addAnnotation = useCallback((newAnnotation: ViewAnnotation) => {
     if (!currentImageDetails) return;
     addUndoRecord();
-    updateAnnotations([...currentViewAnnotations, newAnnotation]);
-  }, [currentImageDetails, addUndoRecord, updateAnnotations, currentViewAnnotations]);
+    const newAnnos = [...currentViewAnnotations, newAnnotation];
+    setLocalAnnotations(newAnnos);
+    updateGlobalAnnotations(newAnnos);
+  }, [currentImageDetails, addUndoRecord, updateGlobalAnnotations, currentViewAnnotations]);
 
   const removeAnnotationById = useCallback((idToRemove: string) => {
     if (!currentImageDetails) return;
     addUndoRecord();
     const updatedAnnotations = currentViewAnnotations.filter(a => a.id !== idToRemove);
-    updateAnnotations(updatedAnnotations);
+    setLocalAnnotations(updatedAnnotations);
+    updateGlobalAnnotations(updatedAnnotations);
     if (selectedAnnotationId === idToRemove) setSelectedAnnotationId(null);
     message.success(`${t.deleteAnnotationTooltip} ${t.operationSuccessful}`);
-  }, [currentImageDetails, currentViewAnnotations, addUndoRecord, updateAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
+  }, [currentImageDetails, currentViewAnnotations, addUndoRecord, updateGlobalAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
 
   const performUndo = useCallback(() => {
     const history = mask_operationHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
@@ -393,6 +409,7 @@ const MaskOperate = () => {
     const redoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
     setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: [redoOp, ...(prev[currentImageIndex] || [])] }));
     setAllImageAnnotations(prev => ({...prev, [lastOp.imageId]: {...prev[lastOp.imageId], viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson }}));
+    setLocalAnnotations(lastOp.previousViewAnnotations); // Also update local state
     setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: history.slice(0, -1) }));
     message.success(t.operationSuccessful);
   }, [mask_operationHistory, currentImageIndex, currentImageDetails, currentViewAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful]);
@@ -403,6 +420,7 @@ const MaskOperate = () => {
     const undoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
     setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: [...(prev[currentImageIndex] || []), undoOp] }));
     setAllImageAnnotations(prev => ({...prev, [redoOp.imageId]: {...prev[redoOp.imageId], viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson }}));
+    setLocalAnnotations(redoOp.previousViewAnnotations); // Also update local state
     setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: history.slice(1) }));
     message.success(t.operationSuccessful);
   }, [mask_redoHistory, currentImageIndex, currentImageDetails, currentViewAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful]);
@@ -441,6 +459,7 @@ const MaskOperate = () => {
       setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: {} as any });
     }
   };
+
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!draggingState || !currentImageDetails) return;
     const mousePos = getScaledCoords(e); 
@@ -466,13 +485,18 @@ const MaskOperate = () => {
         }
         return anno;
       });
-      updateAnnotations(updatedAnnos);
+      // PERFORMANCE FIX: Update local state for fast preview, not the slow global state.
+      setLocalAnnotations(updatedAnnos);
     }
     setCanvasMousePos(mousePos);
   };
+
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!draggingState) return;
-    if (activeTool === 'rectangle' || activeTool === 'diagonal') {
+    // PERFORMANCE FIX: Commit the final state to the global store on mouse up.
+    if (activeTool === 'select') {
+        updateGlobalAnnotations(localAnnotations);
+    } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
         const start = draggingState.startMousePos; 
         const end = getScaledCoords(e);
         const color = categoryColors[currentCategory] || '#cccccc';
@@ -492,6 +516,7 @@ const MaskOperate = () => {
     }
     setDraggingState(null);
   };
+
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentImageDetails || draggingState) return;
     const clickPos = getScaledCoords(e);
@@ -559,21 +584,43 @@ const MaskOperate = () => {
     if(folderUploadRef.current) folderUploadRef.current.value = "";
   };
   
-  const navigateImage = (offset: number) => { const newIndex = currentImageIndex + offset; if (newIndex >= 0 && newIndex < images.length) { setCurrentImageIndex(newIndex); setSelectedAnnotationId(null); setDraggingState(null); } };
+  const navigateImage = (offset: number) => { 
+      const newIndex = currentImageIndex + offset; 
+      if (newIndex >= 0 && newIndex < images.length) { 
+        // Commit any pending changes for the current image before navigating
+        if(currentImageDetails) {
+            updateGlobalAnnotations(localAnnotations);
+        }
+        setCurrentImageIndex(newIndex); 
+        setSelectedAnnotationId(null); 
+        setDraggingState(null); 
+    } 
+  };
   
   const handleExportAll = async () => {
     if(images.length === 0) return;
     message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
     try {
         const zip = new JSZip();
-        zip.file("classes.txt", categories.join('\n'));
+
+        // Save categories in the FileOperate-compatible format
+        const exportClassObj: { [key: string]: string } = {};
+        categories.forEach((cat, index) => {
+            exportClassObj[index] = cat;
+        });
+        const classText = `classes = ${JSON.stringify(exportClassObj, null, 4)}`;
+        zip.file("classes.txt", classText);
         
         for (const imageFile of images) {
             zip.file(`images/${imageFile.name}`, imageFile);
             const imageName = imageFile.name;
             const annotationsForImage = allImageAnnotations[imageName] || { viewAnnotations: [], apiJson: {} };
             
-            const jsonContent = JSON.stringify(annotationsForImage.apiJson, null, 2);
+            // If the currently viewed image is being exported, use its latest local state
+            const finalAnnotations = (currentImageDetails?.name === imageName) ? localAnnotations : annotationsForImage.viewAnnotations;
+            const finalApiJson = convertViewToApi(finalAnnotations);
+
+            const jsonContent = JSON.stringify(finalApiJson, null, 2);
 
             const baseName = getFileNameWithoutExtension(imageName);
             zip.file(`json/${baseName}.json`, jsonContent);
@@ -641,7 +688,8 @@ const MaskOperate = () => {
         const finalViewAnnotations = convertApiToView(apiResult, updatedCategoryColors, currentLineWidth);
 
         addUndoRecord();
-        updateAnnotations(finalViewAnnotations, apiResult);
+        setLocalAnnotations(finalViewAnnotations);
+        updateGlobalAnnotations(finalViewAnnotations, apiResult);
         message.success({ content: `${t.operationSuccessful}: ${finalViewAnnotations.length} annotations loaded.`, key: 'ai-annotation', duration: 3 });
 
     } catch (error: any) {
@@ -705,20 +753,80 @@ const MaskOperate = () => {
         }
     });
   };
-  const handleExportClasses = () => saveAs(new Blob([categories.join('\n')], {type: "text/plain;charset=utf-8"}), "classes.txt");
-  const handleImportClasses = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if(!file) return; const text = await file.text();
-    const newCats = text.split('\n').map(l => l.trim()).filter(Boolean); const newColors: {[key: string]: string} = {};
-    const updatedDefaultColors = Object.entries(defaultCategoryColors).reduce((acc, [key, value]) => { acc[key] = rgbaToHex(value); return acc; }, {} as {[key: string]: string});
-    newCats.forEach((cat, i) => { newColors[cat] = categoryColors[cat] || updatedDefaultColors[cat] || Object.values(updatedDefaultColors)[i % Object.keys(updatedDefaultColors).length] });
-    setCategories(newCats); setCategoryColors(newColors); if(newCats.length > 0) setCurrentCategory(newCats[0]);
-    message.success(`${newCats.length} ${t.category.toLowerCase()}(s) imported.`);
-    if(classesFileRef.current) classesFileRef.current.value = "";
+
+  /**
+   * @why This function is created to handle exporting only the classes,
+   * in a format compatible with `FileOperate`. It fixes a bug where the
+   * "Export All" function was incorrectly used.
+   */
+  const handleExportClasses = () => {
+    if (categories.length === 0) {
+      message.info(t.noCategoriesToExport || 'No classes to export.');
+      return;
+    }
+    const exportClassObj: { [key: string]: string } = {};
+    categories.forEach((cat, index) => {
+      exportClassObj[index] = cat;
+    });
+    const classText = `classes = ${JSON.stringify(exportClassObj, null, 4)}`;
+    const blob = new Blob([classText], { type: 'text/plain;charset=utf-8' });
+    saveAs(blob, 'classes.txt');
+    message.success(t.exportSuccessMessage || 'Classes exported successfully.');
   };
+  
+  /**
+   * @why This function is updated to be compatible with `FileOperate`'s class format.
+   * It now parses a `classes = { "0": "name", ... }` structure.
+   */
+  const handleImportClasses = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if(!file) return; 
+    const text = await file.text();
+    try {
+        const jsonStringMatch = text.match(/=\s*({[\s\S]*})/);
+        if (!jsonStringMatch || !jsonStringMatch[1]) throw new Error("Invalid format: Could not find object literal '{...}'.");
+        
+        const jsonString = jsonStringMatch[1];
+        const parsedObject = new Function(`return ${jsonString}`)();
+        if (typeof parsedObject !== 'object' || parsedObject === null) throw new Error("Parsed content is not a valid object.");
+
+        const importedCats: { index: number; label: string }[] = [];
+        for (const key in parsedObject) {
+            if (Object.prototype.hasOwnProperty.call(parsedObject, key)) {
+                const index = parseInt(key, 10);
+                const label = parsedObject[key];
+                if (!isNaN(index) && typeof label === 'string') {
+                    importedCats.push({ index, label });
+                }
+            }
+        }
+        if (importedCats.length === 0) throw new Error("No valid class entries found in the file.");
+
+        importedCats.sort((a, b) => a.index - b.index);
+        const newCatNames = importedCats.map(c => c.label);
+        const newCatColors: {[key: string]: string} = {};
+        const defaultColorValues = Object.values(defaultCategoryColors).map(rgbaToHex);
+        newCatNames.forEach((cat, i) => {
+            newCatColors[cat] = categoryColors[cat] || defaultColorValues[i % defaultColorValues.length];
+        });
+        
+        setCategories(newCatNames);
+        setCategoryColors(newCatColors);
+        if(newCatNames.length > 0) setCurrentCategory(newCatNames[0]);
+        message.success(`${newCatNames.length} ${t.category.toLowerCase()}(s) imported.`);
+
+    } catch (error: any) {
+        console.error("Failed to import classes:", error);
+        message.error(`导入类别失败: ${error.message}`);
+    } finally {
+        if(classesFileRef.current) classesFileRef.current.value = "";
+    }
+  };
+
   const handleClearAnnotations = () => {
     if (!currentImageDetails || currentViewAnnotations.length === 0) return;
     addUndoRecord();
-    updateAnnotations([]);
+    setLocalAnnotations([]);
+    updateGlobalAnnotations([]);
     setSelectedAnnotationId(null); message.success(t.clearAnnotationsButton + ' ' + t.operationSuccessful);
   };
 
@@ -811,7 +919,6 @@ const MaskOperate = () => {
                                 className="data-content-textarea"
                                 readOnly
                                 value={JSON.stringify(currentApiJson, null, 2)}
-                                style={{ flex: 1, minHeight: 0 }}
                             />
                         </div>
                     </TabPane>
@@ -821,6 +928,7 @@ const MaskOperate = () => {
                                 <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
                                 <Space.Compact>
                                     <Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport}/>} onClick={() => classesFileRef.current?.click()}/></Tooltip>
+                                    {/* BUG FIX: This button now correctly calls handleExportClasses, not handleExportAll. */}
                                     <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport}/>} onClick={handleExportClasses}/></Tooltip>
                                 </Space.Compact>
                             </Flex>
@@ -850,11 +958,11 @@ const MaskOperate = () => {
                                       disabled={!hasActiveImage || categories.length === 0} 
                                       placeholder={t.noCategoriesFound}
                                   >
-                                      {categories.map(cat => 
+                                      {categories.map((cat, index) => 
                                           <Option key={cat} value={cat}>
                                               <Space>
                                                   <div style={{ width: '14px', height: '14px', backgroundColor: categoryColors[cat] || '#ccc', borderRadius: '3px', border: '1px solid #ccc' }} />
-                                                  {cat}
+                                                  {`[${index}] ${cat}`}
                                               </Space>
                                           </Option>
                                       )}
