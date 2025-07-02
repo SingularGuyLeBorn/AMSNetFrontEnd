@@ -656,7 +656,7 @@ const MaskOperate = () => {
         const formData = new FormData();
         formData.append('file', currentImageDetails.originalFile, currentImageDetails.originalFile.name);
 
-        const response = await fetch('http://10.0.33.143:8100/process/', {
+        const response = await fetch('http://111.229.103.50:8199/process/', {
             method: 'POST',
             body: formData
         });

@@ -12,7 +12,7 @@
 export default {
   // 如果需要自定义本地开发服务器  请取消注释按需调整
   // dev: {
-  //   // 10.0.33.143:8000/api/** -> https://preview.pro.ant.design/api/**
+  //   // localhost:8000/api/** -> https://preview.pro.ant.design/api/**
   //   '/api/': {
   //     // 要代理的地址
   //     target: 'https://preview.pro.ant.design',
@@ -27,10 +27,10 @@ export default {
    * @doc https://github.com/chimurai/http-proxy-middleware
    */
   test: {
-    // 10.0.33.143:8000/api/** -> https://preview.pro.ant.design/api/**
+    // localhost:8000/api/** -> https://preview.pro.ant.design/api/**
     '/api/': {
       // target: 'https://proapi.azurewebsites.net',
-      target: 'http://10.0.33.143:8000',
+      target: 'http://localhost:8000',
       changeOrigin: true,
       pathRewrite: { '^': '' },
     },
