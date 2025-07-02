@@ -12,7 +12,7 @@ import {
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { RESIZE_HANDLE_SIZE, translations, defaultCategoryColors } from './constants';
-import type { ImageAnnotationData, ViewAnnotation, UndoOperation as MaskUndoOperation, ViewBoxAnnotation, ViewDiagonalAnnotation, Point, ApiResponse, ApiKeyPoint, ApiSegment } from './constants';
+import type { ImageAnnotationData, ViewAnnotation, UndoOperation as MaskUndoOperation, ViewBoxAnnotation, ViewDiagonalAnnotation, Point, ApiResponse, ApiKeyPoint, ApiSegment } from './constants.tsx';
 import './index.css';
 
 const { Title, Text } = Typography;
@@ -21,9 +21,10 @@ const { Option } = Select;
 const { TabPane } = Tabs;
 const { Sider, Content, Header } = Layout;
 
-type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete';
+type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete' | 'region-delete';
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
-type DraggingState = { type: 'move' | 'resize'; handle?: ResizeHandle; startMousePos: Point; startAnnotationState: ViewAnnotation; } | null;
+type DraggingState = { type: 'move' | 'resize' | 'region-select'; handle?: ResizeHandle; startMousePos: Point; startAnnotationState?: ViewAnnotation; } | null;
+type RegionSelectBox = { start: Point; end: Point; } | null;
 type ImageDetails = { name: string; url: string; width: number; height: number; originalFile: File; };
 
 const getFileNameWithoutExtension = (fileName: string): string => fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
@@ -146,7 +147,7 @@ const MaskOperate = () => {
   // This avoids updating the global zustand store on every mouse move, which is slow.
   const [localAnnotations, setLocalAnnotations] = useState<ViewAnnotation[]>([]);
 
-  const [activeTool, setActiveTool] = useState<ActiveTool>('diagonal');
+  const [activeTool, setActiveTool] = useState<ActiveTool>('select');
   const [currentCategory, setCurrentCategory] = useState<string>(categories[0] || "");
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(2);
   const [showCategoryInBox, setShowCategoryInBox] = useState<boolean>(true);
@@ -154,6 +155,7 @@ const MaskOperate = () => {
   const [inspectorWidth, setInspectorWidth] = useState<number>(350);
   const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
   const [draggingState, setDraggingState] = useState<DraggingState>(null);
+  const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox>(null);
   const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
   const [isAiAnnotating, setIsAiAnnotating] = useState(false);
   const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
@@ -289,6 +291,19 @@ const MaskOperate = () => {
                     renderDiagonal(previewDiag, ctx, true);
                 }
             }
+
+            // Draw region selection box
+            if (regionSelectBox) {
+                ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
+                ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
+                ctx.lineWidth = 1;
+                const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
+                const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
+                const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
+                const h = Math.abs(regionSelectBox.start.y - regionSelectBox.end.y);
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeRect(x, y, w, h);
+            }
         };
         if(img.complete) img.onload(new Event('load'));
     } else {
@@ -302,7 +317,7 @@ const MaskOperate = () => {
         ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
         ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
-  }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth]);
+  }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox]);
   
   const getScaledCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current;
@@ -429,7 +444,7 @@ const MaskOperate = () => {
   }, [mask_redoHistory, currentImageIndex, currentImageDetails, currentViewAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!currentImageDetails || !canvasRef.current) return;
+    if (!currentImageDetails || !canvasRef.current || e.button !== 0) return;
     const mousePos = getScaledCoords(e);
     if (activeTool === 'select') {
       const selectedAnno = currentViewAnnotations.find(a => a.id === selectedAnnotationId);
@@ -459,14 +474,19 @@ const MaskOperate = () => {
       }
     } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
       if (!currentCategory) { message.warning(t.noCategoriesFound); return; }
-      setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: {} as any });
+      setDraggingState({ type: 'move', startMousePos: mousePos });
+    } else if (activeTool === 'region-delete') {
+        setDraggingState({ type: 'region-select', startMousePos: mousePos });
     }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!draggingState || !currentImageDetails) return;
     const mousePos = getScaledCoords(e); 
-    if (activeTool === 'select' && draggingState.startAnnotationState.id) {
+    if (draggingState.type === 'region-select') {
+        setRegionSelectBox({ start: draggingState.startMousePos, end: mousePos });
+        redrawCanvas();
+    } else if (activeTool === 'select' && draggingState.startAnnotationState?.id) {
       const dx = mousePos.x - draggingState.startMousePos.x; const dy = mousePos.y - draggingState.startMousePos.y;
       const startState = draggingState.startAnnotationState;
       const updatedAnnos = currentViewAnnotations.map(anno => {
@@ -495,13 +515,51 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!draggingState) return;
+    if (!draggingState || e.button !== 0) return;
+    const end = getScaledCoords(e);
+
     // PERFORMANCE FIX: Commit the final state to the global store on mouse up.
     if (activeTool === 'select') {
         updateGlobalAnnotations(localAnnotations);
+    } else if (draggingState.type === 'region-select') {
+        const start = draggingState.startMousePos;
+        const selectionRect = {
+            x: Math.min(start.x, end.x), y: Math.min(start.y, end.y),
+            width: Math.abs(start.x - end.x), height: Math.abs(start.y - end.y)
+        };
+        
+        const idsToDelete = new Set<string>();
+        currentViewAnnotations.forEach(anno => {
+            let bbox: { x: number, y: number, width: number, height: number };
+            if ('width' in anno) {
+                bbox = { x: anno.x, y: anno.y, width: anno.width, height: anno.height };
+            } else {
+                const x1 = Math.min(anno.points[0].x, anno.points[1].x);
+                const y1 = Math.min(anno.points[0].y, anno.points[1].y);
+                const x2 = Math.max(anno.points[0].x, anno.points[1].x);
+                const y2 = Math.max(anno.points[0].y, anno.points[1].y);
+                bbox = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+            }
+            if (bbox.x >= selectionRect.x && bbox.y >= selectionRect.y &&
+                bbox.x + bbox.width <= selectionRect.x + selectionRect.width &&
+                bbox.y + bbox.height <= selectionRect.y + selectionRect.height) {
+                idsToDelete.add(anno.id);
+            }
+        });
+
+        if (idsToDelete.size > 0) {
+            addUndoRecord();
+            const updatedAnnotations = currentViewAnnotations.filter(a => !idsToDelete.has(a.id));
+            setLocalAnnotations(updatedAnnotations);
+            updateGlobalAnnotations(updatedAnnotations);
+            if (selectedAnnotationId && idsToDelete.has(selectedAnnotationId)) {
+                setSelectedAnnotationId(null);
+            }
+            message.success(`删除了 ${idsToDelete.size} 个标注。`);
+        }
+        setRegionSelectBox(null);
     } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
         const start = draggingState.startMousePos; 
-        const end = getScaledCoords(e);
         const color = categoryColors[currentCategory] || '#cccccc';
         if (activeTool === 'rectangle') {
             const width = Math.abs(start.x - end.x); const height = Math.abs(start.y - end.y);
@@ -521,7 +579,7 @@ const MaskOperate = () => {
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!currentImageDetails || draggingState) return;
+    if (!currentImageDetails || draggingState || e.button !== 0) return;
     const clickPos = getScaledCoords(e);
 
     if (activeTool === 'delete') {
@@ -553,11 +611,13 @@ const MaskOperate = () => {
     for(const imgFile of sortedImageFiles) {
         const baseName = getFileNameWithoutExtension(imgFile.name);
         const jsonFile = jsonFiles.find(f => getFileNameWithoutExtension(f.name) === baseName);
-        let apiJson: ApiResponse = {};
+        let apiJson: ApiResponse = { key_points: [], segments: [] };
 
         if(jsonFile) {
             try {
-                apiJson = JSON.parse(await jsonFile.text());
+                const parsedData = JSON.parse(await jsonFile.text());
+                apiJson = { key_points: parsedData.key_points || [], segments: parsedData.segments || [] };
+                
                 const viewAnnotations = convertApiToView(apiJson, tempColors, currentLineWidth);
                 
                 const newCats = [...new Set(viewAnnotations.map(va => va.category))];
@@ -570,7 +630,7 @@ const MaskOperate = () => {
 
             } catch(e) { 
                 message.error(`${t.errorParseJsonFile} ${jsonFile.name}: ${e instanceof Error ? e.message : String(e)}`);
-                apiJson = {};
+                apiJson = { key_points: [], segments: [] };
             }
         }
         
@@ -843,6 +903,16 @@ const MaskOperate = () => {
   };
 
   const isSelectedForEdit = (item: ViewAnnotation) => activeTool === 'select' && item.id === selectedAnnotationId;
+  
+  const getCanvasCursor = () => {
+      switch(activeTool) {
+          case 'delete': return 'delete-cursor';
+          case 'rectangle':
+          case 'diagonal':
+          case 'region-delete': return 'draw-cursor'; // crosshair
+          default: return 'default';
+      }
+  }
 
   return (
     <Layout className="unified-layout">
@@ -869,14 +939,15 @@ const MaskOperate = () => {
                     <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
                     <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
                     <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
+                    <Tooltip title={t.regionDelete} placement="right"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={!hasActiveImage} /></Tooltip>
                     <Divider style={{margin: '8px 0'}}/>
                     <Tooltip title={t.aiAnnotate} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!hasActiveImage || isAiAnnotating} /></Tooltip>
                 </Space>
             </Sider>
             <Layout className="main-content-wrapper">
                 <Content className="canvas-content">
-                    <div className={`canvas-wrapper ${activeTool === 'delete' ? 'delete-cursor' : (activeTool === 'select' ? '' : 'draw-cursor')}`}>
-                        <canvas ref={canvasRef} onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} onClick={handleCanvasClick}/>
+                    <div className={`canvas-wrapper`}>
+                        <canvas ref={canvasRef} onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} onClick={handleCanvasClick} className={getCanvasCursor()}/>
                     </div>
                 </Content>
                 {!isInspectorVisible && (<Tooltip title={t.showPanel} placement="left"><Button className="show-inspector-handle" type="primary" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsInspectorVisible(true)} /></Tooltip>)}

@@ -28,7 +28,7 @@ import {
     faUpload, faSave, faUndo, faRedo, faTrash,
     faArrowLeft, faArrowRight, faPaintBrush, faPlus,
     faPen, faList, faMinusCircle, faMousePointer,
-    faChevronLeft, faChevronRight, faRobot, faCogs, faTags, faFileImport, faFileExport, faDatabase
+    faChevronLeft, faChevronRight, faRobot, faCogs, faTags, faFileImport, faFileExport, faDatabase, faEraser
 } from "@fortawesome/free-solid-svg-icons";
 import { jsonNameColorMap, translations, ClassInfo, Operation, ApiResponse, ApiComponent } from './constants';
 import './index.css';
@@ -40,13 +40,14 @@ const { Sider, Content, Header } = Layout;
 const { TabPane } = Tabs;
 const { Panel } = Collapse;
 
-type ActiveTool = 'draw' | 'stain' | 'delete' | 'select';
+type ActiveTool = 'draw' | 'stain' | 'delete' | 'select' | 'region-delete';
 type Point = { x: number; y: number };
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
+type RegionSelectBox = { start: Point; end: Point; } | null;
 
 type DraggingState = {
-    type: 'move' | 'resize';
-    boxName: string;
+    type: 'move' | 'resize' | 'region-select';
+    boxName?: string;
     handle?: ResizeHandle;
     startMousePos: Point;
     startYoloData?: { relX: number; relY: number; };
@@ -186,7 +187,7 @@ const FileOperate: React.FC = () => {
     const [canvasImageData, setCanvasImageData] = useState<ImageData | null>(null);
     const [selectedJsonName, setSelectedJsonName] = useState<string | null>(null);
     const [selectedJsonType, setSelectedJsonType] = useState<'buildingBlocks' | 'constants' | null>(null);
-    const [activeTool, setActiveTool] = useState<ActiveTool>('draw');
+    const [activeTool, setActiveTool] = useState<ActiveTool>('select');
     const [redrawTrigger, setRedrawTrigger] = useState(0);
     const [inspectorWidth, setInspectorWidth] = useState<number>(350);
     const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
@@ -196,6 +197,7 @@ const FileOperate: React.FC = () => {
     const folderUploadRef = useRef<HTMLInputElement>(null);
 
     const [draggingState, setDraggingState] = useState<DraggingState>(null);
+    const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox>(null);
     const [selectedBoxName, setSelectedBoxName] = useState<string | null>(null);
     const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
     const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
@@ -276,25 +278,38 @@ const FileOperate: React.FC = () => {
                 });
 
                 const parsedJson = parseJsonContent(currentJsonContent);
-                if (!parsedJson.local) return;
+                if (parsedJson.local) {
+                    Object.values(parsedJson.local).forEach(nameMap => {
+                        if (nameMap && typeof nameMap === 'object') {
+                            Object.entries(nameMap).forEach(([name, boxNamesArray]) => {
+                                const color = jsonNameColorMap[name]; if (!color || !Array.isArray(boxNamesArray)) return;
+                                boxNamesArray.forEach(boxName => {
+                                    const yoloEntry = yoloDataForStain.find(y => y.name === boxName);
+                                    if (!yoloEntry) return;
 
-                Object.values(parsedJson.local).forEach(nameMap => {
-                    if (nameMap && typeof nameMap === 'object') {
-                        Object.entries(nameMap).forEach(([name, boxNamesArray]) => {
-                            const color = jsonNameColorMap[name]; if (!color || !Array.isArray(boxNamesArray)) return;
-                            boxNamesArray.forEach(boxName => {
-                                const yoloEntry = yoloDataForStain.find(y => y.name === boxName);
-                                if (!yoloEntry) return;
-
-                                const [, relX, relY, relW, relH] = yoloEntry.data;
-                                const absW = relW * canvas.width; const absH = relH * canvas.height;
-                                const absX = (relX * canvas.width) - absW / 2; const absY = (relY * canvas.height) - absH / 2;
-                                ctx.fillStyle = color; ctx.globalAlpha = 0.35;
-                                ctx.fillRect(absX, absY, absW, absH); ctx.globalAlpha = 1.0;
+                                    const [, relX, relY, relW, relH] = yoloEntry.data;
+                                    const absW = relW * canvas.width; const absH = relH * canvas.height;
+                                    const absX = (relX * canvas.width) - absW / 2; const absY = (relY * canvas.height) - absH / 2;
+                                    ctx.fillStyle = color; ctx.globalAlpha = 0.35;
+                                    ctx.fillRect(absX, absY, absW, absH); ctx.globalAlpha = 1.0;
+                                });
                             });
-                        });
-                    }
-                });
+                        }
+                    });
+                }
+                
+                // Draw region selection box
+                if (regionSelectBox) {
+                    ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
+                    ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
+                    ctx.lineWidth = 1;
+                    const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
+                    const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
+                    const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
+                    const h = Math.abs(regionSelectBox.start.y - regionSelectBox.end.y);
+                    ctx.fillRect(x, y, w, h);
+                    ctx.strokeRect(x, y, w, h);
+                }
             };
             img.src = URL.createObjectURL(currentPng);
             return () => URL.revokeObjectURL(img.src);
@@ -309,7 +324,7 @@ const FileOperate: React.FC = () => {
             ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
-    }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName]);
+    }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox]);
 
 
     const convertStandardYoloToInternal = useCallback((standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
@@ -361,7 +376,7 @@ const FileOperate: React.FC = () => {
         } else {
             setCurrentJsonContent(stringifyJsonContent(parseJsonContent(null)));
         }
-    }, [pngList, classMap, convertStandardYoloToInternal]);
+    }, [pngList, classMap, convertStandardYoloToInternal, setCurrentYoloContent, setCurrentJsonContent, setCurrentPng]);
 
     useEffect(() => {
         loadDataForIndex(currentIndex, yoloList, jsonList);
@@ -431,11 +446,13 @@ const FileOperate: React.FC = () => {
         const previousYoloContentForUndo = currentYoloContent;
         const previousJsonContentForUndo = currentJsonContent;
 
-        const newYoloLines = (currentYoloContent || '').split('\n').filter(line => !line.startsWith(boxNameToDelete + ' '));
-        const newYoloContent = newYoloLines.join('\n');
-        const deletedLineContent = (currentYoloContent || '').split('\n').find(line => line.startsWith(boxNameToDelete + ' '));
-        const deletedLineIndex = (currentYoloContent || '').split('\n').findIndex(line => line.startsWith(boxNameToDelete + ' '));
+        const allLines = (currentYoloContent || '').split('\n');
+        const deletedLineContent = allLines.find(line => line.startsWith(boxNameToDelete + ' '));
+        const deletedLineIndex = allLines.findIndex(line => line.startsWith(boxNameToDelete + ' '));
 
+        const newYoloLines = allLines.filter(line => !line.startsWith(boxNameToDelete + ' '));
+        const newYoloContent = newYoloLines.join('\n');
+        
         setCurrentYoloContent(newYoloContent);
 
         let newJsonContent = currentJsonContent;
@@ -468,9 +485,9 @@ const FileOperate: React.FC = () => {
             setSelectedBoxName(null);
         }
 
-        message.success(`标注'${boxNameToDelete}' 已删除`);
+        message.success(`标注 '${boxNameToDelete}' 已删除`);
         setRedrawTrigger(p => p + 1);
-    }, [currentYoloContent, currentJsonContent, currentIndex, selectedBoxName, setOperationHistory, setRedoHistory]);
+    }, [currentYoloContent, currentJsonContent, currentIndex, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
@@ -531,19 +548,22 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
+        if (e.button !== 0) return; // Only react to left-click
         if (activeTool === 'stain' || activeTool === 'delete') {
             handleCanvasAction(e);
             return;
         }
 
         const canvas = canvasRef.current; if (!canvas) return;
-        const { x, y } = getScaledCoords(e);
+        const startPos = getScaledCoords(e);
 
         if (activeTool === 'draw') {
-            setMouseDownCoords({ x, y });
+            setMouseDownCoords(startPos);
             setIsDrawing(true);
             const ctx = canvas.getContext('2d');
             if (ctx) setCanvasImageData(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        } else if (activeTool === 'region-delete') {
+            setDraggingState({ type: 'region-select', startMousePos: startPos });
         } else if (activeTool === 'select') {
             const yoloLines = currentYoloContent?.split('\n').filter(Boolean) || [];
 
@@ -557,12 +577,12 @@ const FileOperate: React.FC = () => {
 
                 for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
                     const handle = handles[handleKey];
-                    if (x >= handle.x && x <= handle.x + handle.size && y >= handle.y && y <= handle.y + handle.size) {
+                    if (startPos.x >= handle.x && startPos.x <= handle.x + handle.size && startPos.y >= handle.y && startPos.y <= handle.y + handle.size) {
                         setDraggingState({
                             type: 'resize',
                             boxName: selectedBoxName,
                             handle: handleKey,
-                            startMousePos: { x, y },
+                            startMousePos: startPos,
                             startAbsBox: { x: absLeft, y: absTop, w: absW, h: absH },
                             startFullYoloLine: selectedBoxLine
                         });
@@ -588,7 +608,7 @@ const FileOperate: React.FC = () => {
                 const absW = relW * canvas.width;
                 const absH = relH * canvas.height;
 
-                if (x >= absLeft && x <= absLeft + absW && y >= absTop && y <= absTop + absH) {
+                if (startPos.x >= absLeft && startPos.x <= absLeft + absW && startPos.y >= absTop && startPos.y <= absTop + absH) {
                     clickedBox = name;
                     clickedYoloData = { relX, relY };
                     break;
@@ -600,7 +620,7 @@ const FileOperate: React.FC = () => {
                 setDraggingState({
                     type: 'move',
                     boxName: clickedBox,
-                    startMousePos: { x, y },
+                    startMousePos: startPos,
                     startYoloData: clickedYoloData,
                 });
                 const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
@@ -614,7 +634,7 @@ const FileOperate: React.FC = () => {
 
     const handleMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current; if (!canvas) return;
-        const { x: currentX, y: currentY } = getScaledCoords(e);
+        const currentPos = getScaledCoords(e);
 
         if (isDrawing && activeTool === 'draw') {
             const ctx = canvas.getContext('2d');
@@ -622,45 +642,50 @@ const FileOperate: React.FC = () => {
                 ctx.putImageData(canvasImageData, 0, 0); ctx.beginPath();
                 ctx.strokeStyle = classMap[currentClassIndex]?.color || '#262626';
                 ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
-                ctx.rect(mouseDownCoords.x, mouseDownCoords.y, currentX - mouseDownCoords.x, currentY - mouseDownCoords.y);
+                ctx.rect(mouseDownCoords.x, mouseDownCoords.y, currentPos.x - mouseDownCoords.x, currentPos.y - mouseDownCoords.y);
                 ctx.stroke(); ctx.setLineDash([]);
             }
-        } else if (draggingState && activeTool === 'select') {
-            if (draggingState.type === 'move' && draggingState.startYoloData) {
-                const dx = (currentX - draggingState.startMousePos.x) / canvas.width;
-                const dy = (currentY - draggingState.startMousePos.y) / canvas.height;
-                const newRelX = draggingState.startYoloData.relX + dx;
-                const newRelY = draggingState.startYoloData.relY + dy;
+        } else if (draggingState) {
+            if (draggingState.type === 'region-select') {
+                setRegionSelectBox({ start: draggingState.startMousePos, end: currentPos });
+                setRedrawTrigger(p => p+1);
+            } else if (activeTool === 'select') {
+                if (draggingState.type === 'move' && draggingState.startYoloData) {
+                    const dx = (currentPos.x - draggingState.startMousePos.x) / canvas.width;
+                    const dy = (currentPos.y - draggingState.startMousePos.y) / canvas.height;
+                    const newRelX = draggingState.startYoloData.relX + dx;
+                    const newRelY = draggingState.startYoloData.relY + dy;
 
-                const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
-                    const parts = line.split(' ');
-                    if (parts[0] === draggingState.boxName) {
-                        return `${parts[0]} ${parts[1]} ${newRelX.toFixed(6)} ${newRelY.toFixed(6)} ${parts[4]} ${parts[5]}`;
-                    }
-                    return line;
-                }).join('\n');
-                setCurrentYoloContent(newYoloContent);
-                setRedrawTrigger(p => p + 1);
-            } else if (draggingState.type === 'resize' && draggingState.startAbsBox && draggingState.handle && draggingState.startFullYoloLine) {
-                const dx = currentX - draggingState.startMousePos.x;
-                const dy = currentY - draggingState.startMousePos.y;
-                let { x: newX, y: newY, w: newW, h: newH } = draggingState.startAbsBox;
+                    const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
+                        const parts = line.split(' ');
+                        if (parts[0] === draggingState.boxName) {
+                            return `${parts[0]} ${parts[1]} ${newRelX.toFixed(6)} ${newRelY.toFixed(6)} ${parts[4]} ${parts[5]}`;
+                        }
+                        return line;
+                    }).join('\n');
+                    setCurrentYoloContent(newYoloContent);
+                    setRedrawTrigger(p => p + 1);
+                } else if (draggingState.type === 'resize' && draggingState.startAbsBox && draggingState.handle && draggingState.startFullYoloLine) {
+                    const dx = currentPos.x - draggingState.startMousePos.x;
+                    const dy = currentPos.y - draggingState.startMousePos.y;
+                    let { x: newX, y: newY, w: newW, h: newH } = draggingState.startAbsBox;
 
-                if (draggingState.handle.includes('right')) newW = Math.max(1, draggingState.startAbsBox.w + dx);
-                if (draggingState.handle.includes('left')) { newX = draggingState.startAbsBox.x + dx; newW = Math.max(1, draggingState.startAbsBox.w - dx); }
-                if (draggingState.handle.includes('bottom')) newH = Math.max(1, draggingState.startAbsBox.h + dy);
-                if (draggingState.handle.includes('top')) { newY = draggingState.startAbsBox.y + dy; newH = Math.max(1, draggingState.startAbsBox.h - dy); }
+                    if (draggingState.handle.includes('right')) newW = Math.max(1, draggingState.startAbsBox.w + dx);
+                    if (draggingState.handle.includes('left')) { newX = draggingState.startAbsBox.x + dx; newW = Math.max(1, draggingState.startAbsBox.w - dx); }
+                    if (draggingState.handle.includes('bottom')) newH = Math.max(1, draggingState.startAbsBox.h + dy);
+                    if (draggingState.handle.includes('top')) { newY = draggingState.startAbsBox.y + dy; newH = Math.max(1, draggingState.startAbsBox.h - dy); }
 
-                const newRelW = newW / canvas.width; const newRelH = newH / canvas.height;
-                const newRelX = (newX + newW / 2) / canvas.width; const newRelY = (newY + newH / 2) / canvas.height;
+                    const newRelW = newW / canvas.width; const newRelH = newH / canvas.height;
+                    const newRelX = (newX + newW / 2) / canvas.width; const newRelY = (newY + newH / 2) / canvas.height;
 
-                const lineParts = draggingState.startFullYoloLine.split(' ');
-                const newLine = `${lineParts[0]} ${lineParts[1]} ${newRelX.toFixed(6)} ${newRelY.toFixed(6)} ${newRelW.toFixed(6)} ${newRelH.toFixed(6)}`;
+                    const lineParts = draggingState.startFullYoloLine.split(' ');
+                    const newLine = `${lineParts[0]} ${lineParts[1]} ${newRelX.toFixed(6)} ${newRelY.toFixed(6)} ${newRelW.toFixed(6)} ${newRelH.toFixed(6)}`;
 
-                const newYoloContent = (currentYoloContent || '').split('\n').map(line =>
-                    line.startsWith(draggingState.boxName + ' ') ? newLine : line
-                ).join('\n');
-                setCurrentYoloContent(newYoloContent);
+                    const newYoloContent = (currentYoloContent || '').split('\n').map(line =>
+                        line.startsWith(draggingState.boxName + ' ') ? newLine : line
+                    ).join('\n');
+                    setCurrentYoloContent(newYoloContent);
+                }
             }
         } else if (activeTool === 'select' && selectedBoxName) {
             let newHoveredHandle: ResizeHandle | null = null;
@@ -673,7 +698,7 @@ const FileOperate: React.FC = () => {
                 const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
                 for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
                     const handle = handles[handleKey];
-                    if (currentX >= handle.x && currentX <= handle.x + handle.size && currentY >= handle.y && currentY <= handle.y + handle.size) {
+                    if (currentPos.x >= handle.x && currentPos.x <= handle.x + handle.size && currentPos.y >= handle.y && currentPos.y <= handle.y + handle.size) {
                         newHoveredHandle = handleKey;
                         break;
                     }
@@ -686,12 +711,14 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseUp = (e: MouseEvent<HTMLCanvasElement>) => {
+        if (e.button !== 0) return;
+        const canvas = canvasRef.current; if (!canvas) return;
+        const upPos = getScaledCoords(e);
+        
         if (isDrawing && activeTool === 'draw') {
             setIsDrawing(false);
-            const canvas = canvasRef.current; if (!canvas) return;
-            const { x: upX, y: upY } = getScaledCoords(e);
-            const x1 = Math.min(mouseDownCoords.x, upX); const y1 = Math.min(mouseDownCoords.y, upY);
-            const width = Math.abs(upX - mouseDownCoords.x); const height = Math.abs(upY - mouseDownCoords.y);
+            const x1 = Math.min(mouseDownCoords.x, upPos.x); const y1 = Math.min(mouseDownCoords.y, upPos.y);
+            const width = Math.abs(upPos.x - mouseDownCoords.x); const height = Math.abs(upPos.y - mouseDownCoords.y);
 
             if (width > 2 && height > 2) {
                 const classLabel = classMap[currentClassIndex]?.label || `class_${currentClassIndex}`;
@@ -718,9 +745,77 @@ const FileOperate: React.FC = () => {
                 setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
             }
             setCanvasImageData(null); setRedrawTrigger(prev => prev + 1);
-        } else if (draggingState) {
-            setDraggingState(null);
+        } else if (draggingState && draggingState.type === 'region-select') {
+            const start = draggingState.startMousePos;
+            const end = upPos;
+            const selectionRect = {
+                x: Math.min(start.x, end.x),
+                y: Math.min(start.y, end.y),
+                width: Math.abs(start.x - end.x),
+                height: Math.abs(start.y - end.y),
+            };
+
+            const boxNamesToDelete: string[] = [];
+            parsedYoloData.forEach(item => {
+                const absW = item.w * canvas.width;
+                const absH = item.h * canvas.height;
+                const absLeft = (item.x - item.w / 2) * canvas.width;
+                const absTop = (item.y - item.h / 2) * canvas.height;
+                if (absLeft >= selectionRect.x &&
+                    absTop >= selectionRect.y &&
+                    absLeft + absW <= selectionRect.x + selectionRect.width &&
+                    absTop + absH <= selectionRect.y + selectionRect.height) {
+                    boxNamesToDelete.push(item.name);
+                }
+            });
+
+            if (boxNamesToDelete.length > 0) {
+                const previousYoloContentForUndo = currentYoloContent;
+                const previousJsonContentForUndo = currentJsonContent;
+
+                const allLines = (currentYoloContent || '').split('\n');
+                const deletedLines: { index: number, content: string }[] = [];
+                
+                const newYoloLines = allLines.filter((line, index) => {
+                    const name = line.split(' ')[0];
+                    if (boxNamesToDelete.includes(name)) {
+                        deletedLines.push({ index, content: line });
+                        return false;
+                    }
+                    return true;
+                });
+                const newYoloContent = newYoloLines.join('\n');
+                setCurrentYoloContent(newYoloContent);
+
+                let newJsonContent = currentJsonContent;
+                if (currentJsonContent) {
+                    const parsedJson = parseJsonContent(currentJsonContent);
+                    Object.keys(parsedJson.local).forEach(typeKey => {
+                        const type = typeKey as keyof typeof parsedJson.local;
+                        Object.keys(parsedJson.local[type]).forEach(nameKey => {
+                            parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
+                                (bName: string) => !boxNamesToDelete.includes(bName)
+                            );
+                        });
+                    });
+                    newJsonContent = stringifyJsonContent(parsedJson);
+                    setCurrentJsonContent(newJsonContent);
+                }
+
+                const newOp: Operation = {
+                    type: 'delete',
+                    deletedLines: deletedLines,
+                    previousYoloContent: previousYoloContentForUndo,
+                    previousJsonContent: previousJsonContentForUndo,
+                };
+                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
+                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                message.success(`删除了 ${boxNamesToDelete.length} 个标注。`);
+            }
         }
+        setDraggingState(null);
+        setRegionSelectBox(null);
+        setRedrawTrigger(p => p + 1);
     };
 
     const addUndoRecord = useCallback(() => {
@@ -776,6 +871,10 @@ const FileOperate: React.FC = () => {
 
     const saveAndSwitchIndex = useCallback((newIndex: number) => {
         if (newIndex < 0 || newIndex >= pngList.length) return;
+        if (currentIndex < 0 || currentIndex >= pngList.length) { // handle case where current index is invalid
+            setCurrentIndex(newIndex);
+            return;
+        }
 
         if (currentYoloContent !== null && pngList[currentIndex]) {
             const yoloFile = new File([currentYoloContent], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.txt`, { type: 'text/plain' });
@@ -799,7 +898,7 @@ const FileOperate: React.FC = () => {
         }
 
         setCurrentIndex(newIndex);
-    }, [currentIndex, pngList, currentYoloContent, currentJsonContent, setYoloList, setJsonList]);
+    }, [currentIndex, pngList, currentYoloContent, currentJsonContent, setYoloList, setJsonList, setCurrentIndex]);
 
     const handleNextIndex = () => saveAndSwitchIndex(currentIndex + 1);
     const handlePrevIndex = () => saveAndSwitchIndex(currentIndex - 1);
@@ -815,27 +914,27 @@ const FileOperate: React.FC = () => {
         try {
             const zip = new JSZip();
             
-            const yoloFileForCurrentIndex = (currentYoloContent !== null && pngList[currentIndex])
-                ? new File([currentYoloContent], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.txt`, { type: 'text/plain' })
-                : null;
+            // This ensures the currently edited (but not yet navigated away from) file is included
+            const allYoloFiles = new Map(yoloList.map(f => [getFileNameWithoutExtension(f.name), f]));
+            if (currentYoloContent !== null && pngList[currentIndex]) {
+                const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
+                allYoloFiles.set(baseName, new File([currentYoloContent], `${baseName}.txt`, { type: 'text/plain' }));
+            }
+    
+            const allJsonFiles = new Map(jsonList.map(f => [getFileNameWithoutExtension(f.name), f]));
+            if (currentJsonContent !== null && pngList[currentIndex]) {
+                const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
+                allJsonFiles.set(baseName, new File([currentJsonContent], `${baseName}.json`, { type: 'application/json' }));
+            }
 
-            const jsonFileForCurrentIndex = (currentJsonContent !== null && pngList[currentIndex])
-                ? new File([currentJsonContent], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.json`, { type: 'application/json' })
-                : null;
-
-            for (let i = 0; i < pngList.length; i++) {
-                const pngFile = pngList[i];
+            for (const pngFile of pngList) {
                 const baseName = getFileNameWithoutExtension(pngFile.name);
                 zip.file(`images/${pngFile.name}`, pngFile);
 
                 let yoloContentForFile = '';
-                if (i === currentIndex) {
-                    yoloContentForFile = currentYoloContent || '';
-                } else {
-                    const yoloFile = yoloList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-                    if (yoloFile) {
-                        yoloContentForFile = await yoloFile.text();
-                    }
+                const yoloFile = allYoloFiles.get(baseName);
+                if (yoloFile) {
+                    yoloContentForFile = await yoloFile.text();
                 }
 
                 const finalYoloContent = (yoloContentForFile || "").split('\n').map(line => {
@@ -846,13 +945,9 @@ const FileOperate: React.FC = () => {
                 zip.file(`yolo/${baseName}.txt`, finalYoloContent);
 
                 let jsonContentForFile = '{}';
-                if (i === currentIndex) {
-                    jsonContentForFile = currentJsonContent || '{}';
-                } else {
-                    const jsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-                    if (jsonFile) {
-                        jsonContentForFile = await jsonFile.text();
-                    }
+                const jsonFile = allJsonFiles.get(baseName);
+                if (jsonFile) {
+                    jsonContentForFile = await jsonFile.text();
                 }
                 zip.file(`json/${baseName}.json`, stringifyJsonContent(parseJsonContent(jsonContentForFile)));
             }
@@ -1009,6 +1104,16 @@ const FileOperate: React.FC = () => {
     };
 
     const isSelectedForEdit = (item: {name: string}) => activeTool === 'select' && item.name === selectedBoxName;
+    
+    const getCanvasCursor = () => {
+        switch(activeTool) {
+            case 'delete': return 'delete-cursor';
+            case 'draw': return 'draw-cursor';
+            case 'region-delete': return 'draw-cursor'; // crosshair
+            case 'select': return getCursorForHandle(hoveredHandle);
+            default: return 'default';
+        }
+    }
 
     return (
         <Layout className="unified-layout">
@@ -1035,6 +1140,7 @@ const FileOperate: React.FC = () => {
                         <Tooltip title={t.drawingMode} placement="right"><Button onClick={() => setActiveTool('draw')} type={activeTool === 'draw' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPen} />} disabled={pngList.length === 0} /></Tooltip>
                         <Tooltip title={t.coloringMode} placement="right"><Button onClick={() => setActiveTool('stain')} type={activeTool === 'stain' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={pngList.length === 0} /></Tooltip>
                         <Tooltip title={t.deleteBox} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={pngList.length === 0} /></Tooltip>
+                        <Tooltip title={t.regionDelete} placement="right"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={pngList.length === 0} /></Tooltip>
                         <Divider style={{ margin: '8px 0' }} />
                         <Tooltip title={t.aiAnnotation} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentPng || isAiAnnotating} /></Tooltip>
                     </Space>
@@ -1047,7 +1153,7 @@ const FileOperate: React.FC = () => {
                                 onMouseDown={handleMouseDown}
                                 onMouseMove={handleMouseMove}
                                 onMouseUp={handleMouseUp}
-                                className={`${activeTool === 'delete' ? 'delete-cursor' : (activeTool === 'draw' ? 'draw-cursor' : getCursorForHandle(hoveredHandle))}`}
+                                className={getCanvasCursor()}
                             />
                         </div>
                     </Content>
@@ -1119,12 +1225,10 @@ const FileOperate: React.FC = () => {
                              <div className="tab-pane-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                                 <div style={{ flex: 0.5, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     <Title level={5}>YOLO Data</Title>
-                                    {/* UI FIX: Removed problematic inline style `style={{flex: 1, minHeight: 0}}` */}
                                     <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
                                 </div>
                                 <div style={{ flex: 0.5, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
                                     <Title level={5}>JSON Data</Title>
-                                     {/* UI FIX: Removed problematic inline style `style={{flex: 1, minHeight: 0}}` */}
                                     <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
                                 </div>
                              </div>
@@ -1144,6 +1248,7 @@ const FileOperate: React.FC = () => {
                                 <Title level={5}>{t.settings}</Title>
                                 <p>此页面暂无特定设置。</p>
                             </div>
+
                         </TabPane>
                     </Tabs>
                 </Sider>
