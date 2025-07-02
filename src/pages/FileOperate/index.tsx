@@ -28,7 +28,7 @@ import {
     faUpload, faSave, faUndo, faRedo, faTrash,
     faArrowLeft, faArrowRight, faPaintBrush, faPlus,
     faPen, faList, faMinusCircle, faMousePointer,
-    faChevronLeft, faChevronRight, faRobot, faCogs, faTags, faFileImport, faFileExport, faDatabase, faEraser
+    faChevronLeft, faChevronRight, faRobot, faCogs, faTags, faFileImport, faFileExport, faDatabase, faEraser, faSearchPlus
 } from "@fortawesome/free-solid-svg-icons";
 import { jsonNameColorMap, translations, ClassInfo, Operation, ApiResponse, ApiComponent } from './constants';
 import './index.css';
@@ -46,13 +46,14 @@ type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomL
 type RegionSelectBox = { start: Point; end: Point; } | null;
 
 type DraggingState = {
-    type: 'move' | 'resize' | 'region-select';
+    type: 'move' | 'resize' | 'region-select' | 'magnifier-drag';
     boxName?: string;
     handle?: ResizeHandle;
     startMousePos: Point;
     startYoloData?: { relX: number; relY: number; };
     startAbsBox?: { x: number; y: number; w: number; h: number; };
     startFullYoloLine?: string;
+    offset?: Point; // for magnifier drag
 } | null;
 
 
@@ -65,6 +66,8 @@ interface JsonData {
 }
 
 const RESIZE_HANDLE_SIZE = 8;
+const MAGNIFIER_SIZE = 150; // The size of the magnifier view
+const MAGNIFIER_ZOOM = 3; // The zoom level
 
 const getFileNameWithoutExtension = (fileName: string): string => {
     const lastDotIndex = fileName.lastIndexOf('.');
@@ -74,12 +77,6 @@ const getFileNameWithoutExtension = (fileName: string): string => {
 
 const generateRandomColor = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
-/**
- * @description Parses a JSON string into a structured JsonData object.
- * @why This utility is moved outside the component to be reusable across the application, for example in `app.tsx` for global export.
- * @param jsonContent The JSON string to parse.
- * @returns A structured JsonData object, or a default empty structure if parsing fails.
- */
 export const parseJsonContent = (jsonContent: string | null): JsonData => {
     try {
         if (!jsonContent || jsonContent.trim() === "" || jsonContent.trim() === "{}") {
@@ -97,12 +94,6 @@ export const parseJsonContent = (jsonContent: string | null): JsonData => {
     }
 };
 
-/**
- * @description Stringifies a JsonData object into a formatted JSON string.
- * @why This utility is moved outside the component to be reusable across the application, for example in `app.tsx` for global export.
- * @param jsonObj The JsonData object to stringify.
- * @returns A formatted JSON string.
- */
 export const stringifyJsonContent = (jsonObj: JsonData | null): string => {
     if (!jsonObj) return "{}";
     return JSON.stringify(jsonObj, null, 2);
@@ -113,17 +104,14 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
     if (!Array.isArray(cpnts) || imageWidth === 0 || imageHeight === 0) {
         return "";
     }
-
     const yoloLines: string[] = [];
     const existingNames: { [key: string]: number } = {};
-
     cpnts.forEach(cpnt => {
         if (typeof cpnt.t === 'undefined' || typeof cpnt.b === 'undefined' || typeof cpnt.l === 'undefined' || typeof cpnt.r === 'undefined' || typeof cpnt.type === 'undefined') {
             console.warn('Skipping invalid cpnt object:', cpnt);
             return;
         }
         const { t: top, b: bottom, l: left, r: right, type } = cpnt;
-
         let classIndex = -1;
         let classLabel = '';
         for (const [idx, info] of Object.entries(classMap)) {
@@ -137,26 +125,20 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
             console.warn(`Class type "${type}" not found in classMap.`);
             return;
         }
-
         const absWidth = right - left;
         const absHeight = bottom - top;
         const absCenterX = left + absWidth / 2;
         const absCenterY = top + absHeight / 2;
-
         const relX = absCenterX / imageWidth;
         const relY = absCenterY / imageHeight;
         const relW = absWidth / imageWidth;
         const relH = absHeight / imageHeight;
-
         const baseName = classLabel;
         const counter = (existingNames[baseName] || 0) + 1;
         existingNames[baseName] = counter;
         const uniqueName = cpnt.name || `${baseName}_${counter - 1}`;
-
-
         yoloLines.push(`${uniqueName} ${classIndex} ${relX.toFixed(6)} ${relY.toFixed(6)} ${relW.toFixed(6)} ${relH.toFixed(6)}`);
     });
-
     return yoloLines.join('\n');
 };
 
@@ -180,6 +162,7 @@ const FileOperate: React.FC = () => {
 
     const [currentPng, setCurrentPng] = useState<File | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const magnifierCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const [currentClassIndex, setCurrentClassIndex] = useState<number>(0);
     const [isDrawing, setIsDrawing] = useState(false);
@@ -201,6 +184,13 @@ const FileOperate: React.FC = () => {
     const [selectedBoxName, setSelectedBoxName] = useState<string | null>(null);
     const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
     const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
+    
+    // Magnifier State
+    const [isMagnifierVisible, setIsMagnifierVisible] = useState(false);
+    const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
+    const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
+    const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
+
 
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
@@ -229,15 +219,6 @@ const FileOperate: React.FC = () => {
         return 'default';
     }
 
-    /**
-     * Redraws the entire canvas.
-     * @function
-     * @description This function is responsible for painting the current image and all its annotations (YOLO boxes, JSON stains) onto the canvas.
-     * @why
-     * This function was a major performance bottleneck. The original implementation re-parsed the entire YOLO data string on every render.
-     * The fix involves consuming the pre-parsed, memoized `parsedYoloData` object array directly. This avoids expensive string operations
-     * during high-frequency events like dragging or resizing, resulting in a smooth user experience.
-     */
     const redrawCanvas = useCallback(() => {
         const canvas = canvasRef.current; if (!canvas) return;
         const ctx = canvas.getContext('2d'); if (!ctx) return;
@@ -248,20 +229,14 @@ const FileOperate: React.FC = () => {
                 canvas.width = img.width; canvas.height = img.height;
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(img, 0, 0);
-
-                // PERFORMANCE FIX: Use the memoized `parsedYoloData` instead of re-parsing the YOLO string.
                 const yoloDataForStain: { name: string, data: number[] }[] = [];
-
                 parsedYoloData.forEach(item => {
-                    // This data structure is for the staining logic later on.
                     yoloDataForStain.push({ name: item.name, data: [item.classIdx, item.x, item.y, item.w, item.h] });
-
                     const { name, classIdx, x: relX, y: relY, w: relW, h: relH } = item;
                     const absW = relW * canvas.width;
                     const absH = relH * canvas.height;
                     const absLeft = (relX - relW / 2) * canvas.width;
                     const absTop = (relY - relH / 2) * canvas.height;
-
                     const isSelected = selectedBoxName === name;
                     const color = classMap[classIdx]?.color || '#808080';
                     ctx.beginPath();
@@ -269,7 +244,6 @@ const FileOperate: React.FC = () => {
                     ctx.lineWidth = isSelected ? 3 : 2;
                     ctx.rect(absLeft, absTop, absW, absH);
                     ctx.stroke();
-
                     if (isSelected) {
                         const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
                         ctx.fillStyle = '#0958d9';
@@ -286,7 +260,6 @@ const FileOperate: React.FC = () => {
                                 boxNamesArray.forEach(boxName => {
                                     const yoloEntry = yoloDataForStain.find(y => y.name === boxName);
                                     if (!yoloEntry) return;
-
                                     const [, relX, relY, relW, relH] = yoloEntry.data;
                                     const absW = relW * canvas.width; const absH = relH * canvas.height;
                                     const absX = (relX * canvas.width) - absW / 2; const absY = (relY * canvas.height) - absH / 2;
@@ -298,7 +271,6 @@ const FileOperate: React.FC = () => {
                     });
                 }
                 
-                // Draw region selection box
                 if (regionSelectBox) {
                     ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
                     ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
@@ -325,6 +297,57 @@ const FileOperate: React.FC = () => {
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
     }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox]);
+    
+    const getScaledCoords = useCallback((e: MouseEvent | {clientX: number, clientY: number}): Point => {
+        const canvas = canvasRef.current;
+        if (!canvas) return { x: 0, y: 0 };
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY,
+        };
+    }, []);
+
+    const drawMagnifier = useCallback(() => {
+        if (!isMagnifierVisible || !isMouseOnCanvas) return;
+        const mainCanvas = canvasRef.current;
+        const magCanvas = magnifierCanvasRef.current;
+        if (!mainCanvas || !magCanvas) return;
+
+        const magCtx = magCanvas.getContext('2d');
+        if (!magCtx) return;
+
+        magCtx.clearRect(0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
+        magCtx.imageSmoothingEnabled = false;
+
+        const sx = canvasMousePos.x - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
+        const sy = canvasMousePos.y - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
+        const sWidth = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
+        const sHeight = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
+
+        magCtx.drawImage(
+            mainCanvas,
+            sx, sy, sWidth, sHeight,
+            0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE
+        );
+
+        // Draw crosshair
+        magCtx.strokeStyle = 'red';
+        magCtx.lineWidth = 1;
+        magCtx.beginPath();
+        magCtx.moveTo(MAGNIFIER_SIZE / 2, 0);
+        magCtx.lineTo(MAGNIFIER_SIZE / 2, MAGNIFIER_SIZE);
+        magCtx.moveTo(0, MAGNIFIER_SIZE / 2);
+        magCtx.lineTo(MAGNIFIER_SIZE, MAGNIFIER_SIZE / 2);
+        magCtx.stroke();
+
+    }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos]);
+    
+    useEffect(() => {
+        drawMagnifier();
+    }, [canvasMousePos, drawMagnifier]);
 
 
     const convertStandardYoloToInternal = useCallback((standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
@@ -409,17 +432,32 @@ const FileOperate: React.FC = () => {
         };
     }, [isResizingInspector]);
 
-    const getScaledCoords = useCallback((e: MouseEvent<HTMLCanvasElement>): Point => {
-        const canvas = canvasRef.current;
-        if (!canvas) return { x: 0, y: 0 };
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        return {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY,
+    useEffect(() => {
+        const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
+            if (draggingState?.type === 'magnifier-drag' && draggingState.offset) {
+                setMagnifierPos({
+                    x: e.clientX - draggingState.offset.x,
+                    y: e.clientY - draggingState.offset.y
+                });
+            }
         };
-    }, []);
+
+        const handleGlobalMouseUp = () => {
+            if (draggingState?.type === 'magnifier-drag') {
+                setDraggingState(null);
+            }
+        };
+
+        if (draggingState?.type === 'magnifier-drag') {
+            window.addEventListener('mousemove', handleGlobalMouseMove);
+            window.addEventListener('mouseup', handleGlobalMouseUp);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', handleGlobalMouseMove);
+            window.removeEventListener('mouseup', handleGlobalMouseUp);
+        };
+    }, [draggingState]);
 
     const handleFolderUpload = (event: ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files; if (!files) return;
@@ -547,8 +585,20 @@ const FileOperate: React.FC = () => {
         }
     };
 
+    const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const { clientX, clientY } = e;
+        setDraggingState({
+            type: 'magnifier-drag',
+            startMousePos: { x: clientX, y: clientY },
+            offset: { x: clientX - magnifierPos.x, y: clientY - magnifierPos.y }
+        });
+    };
+
     const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only react to left-click
+        
         if (activeTool === 'stain' || activeTool === 'delete') {
             handleCanvasAction(e);
             return;
@@ -635,6 +685,7 @@ const FileOperate: React.FC = () => {
     const handleMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current; if (!canvas) return;
         const currentPos = getScaledCoords(e);
+        setCanvasMousePos(currentPos); // update canvas mouse pos for magnifier
 
         if (isDrawing && activeTool === 'draw') {
             const ctx = canvas.getContext('2d');
@@ -687,20 +738,22 @@ const FileOperate: React.FC = () => {
                     setCurrentYoloContent(newYoloContent);
                 }
             }
-        } else if (activeTool === 'select' && selectedBoxName) {
+        } else if (activeTool === 'select') {
             let newHoveredHandle: ResizeHandle | null = null;
-            const yoloLines = (currentYoloContent || '').split('\n');
-            const selectedLine = yoloLines.find(line => line.startsWith(selectedBoxName + ' '));
-            if (selectedLine) {
-                const [, relX, relY, relW, relH] = selectedLine.split(' ').slice(1).map(parseFloat);
-                const absW = relW * canvas.width, absH = relH * canvas.height;
-                const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
-                const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
-                for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
-                    const handle = handles[handleKey];
-                    if (currentPos.x >= handle.x && currentPos.x <= handle.x + handle.size && currentPos.y >= handle.y && currentPos.y <= handle.y + handle.size) {
-                        newHoveredHandle = handleKey;
-                        break;
+            if (selectedBoxName) {
+                const yoloLines = (currentYoloContent || '').split('\n');
+                const selectedLine = yoloLines.find(line => line.startsWith(selectedBoxName + ' '));
+                if (selectedLine) {
+                    const [, relX, relY, relW, relH] = selectedLine.split(' ').slice(1).map(parseFloat);
+                    const absW = relW * canvas.width, absH = relH * canvas.height;
+                    const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
+                    const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
+                    for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
+                        const handle = handles[handleKey];
+                        if (currentPos.x >= handle.x && currentPos.x <= handle.x + handle.size && currentPos.y >= handle.y && currentPos.y <= handle.y + handle.size) {
+                            newHoveredHandle = handleKey;
+                            break;
+                        }
                     }
                 }
             }
@@ -903,7 +956,6 @@ const FileOperate: React.FC = () => {
     const handleNextIndex = () => saveAndSwitchIndex(currentIndex + 1);
     const handlePrevIndex = () => saveAndSwitchIndex(currentIndex - 1);
 
-
     const handleSaveAllToZip = async () => {
         if (pngList.length === 0) {
             message.warning(t.noFile);
@@ -914,7 +966,6 @@ const FileOperate: React.FC = () => {
         try {
             const zip = new JSZip();
             
-            // This ensures the currently edited (but not yet navigated away from) file is included
             const allYoloFiles = new Map(yoloList.map(f => [getFileNameWithoutExtension(f.name), f]));
             if (currentYoloContent !== null && pngList[currentIndex]) {
                 const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
@@ -959,7 +1010,6 @@ const FileOperate: React.FC = () => {
             message.error({ content: `导出失败: ${err.message}`, key: "exporting", duration: 2 });
         }
     };
-
 
     const handleAiAnnotation = async () => {
         if (!currentPng || !canvasRef.current) { message.warning(t.noFile); return; }
@@ -1106,6 +1156,7 @@ const FileOperate: React.FC = () => {
     const isSelectedForEdit = (item: {name: string}) => activeTool === 'select' && item.name === selectedBoxName;
     
     const getCanvasCursor = () => {
+        if (isMagnifierVisible) return 'none'; // Hide system cursor when magnifier is active
         switch(activeTool) {
             case 'delete': return 'delete-cursor';
             case 'draw': return 'draw-cursor';
@@ -1137,6 +1188,7 @@ const FileOperate: React.FC = () => {
                 <Sider width={60} className="unified-tool-sider" theme="light">
                     <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
                         <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={pngList.length === 0} /></Tooltip>
+                        <Tooltip title={t.magnifier} placement="right"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={pngList.length === 0} /></Tooltip>
                         <Tooltip title={t.drawingMode} placement="right"><Button onClick={() => setActiveTool('draw')} type={activeTool === 'draw' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPen} />} disabled={pngList.length === 0} /></Tooltip>
                         <Tooltip title={t.coloringMode} placement="right"><Button onClick={() => setActiveTool('stain')} type={activeTool === 'stain' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={pngList.length === 0} /></Tooltip>
                         <Tooltip title={t.deleteBox} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={pngList.length === 0} /></Tooltip>
@@ -1146,7 +1198,10 @@ const FileOperate: React.FC = () => {
                     </Space>
                 </Sider>
                 <Layout className="main-content-wrapper">
-                    <Content className="canvas-content">
+                    <Content className="canvas-content"
+                        onMouseEnter={() => setIsMouseOnCanvas(true)}
+                        onMouseLeave={() => setIsMouseOnCanvas(false)}
+                    >
                         <div className={`canvas-wrapper`}>
                             <canvas
                                 ref={canvasRef}
@@ -1156,6 +1211,30 @@ const FileOperate: React.FC = () => {
                                 className={getCanvasCursor()}
                             />
                         </div>
+                        {isMagnifierVisible && (
+                            <div
+                                style={{
+                                    position: 'fixed',
+                                    top: magnifierPos.y,
+                                    left: magnifierPos.x,
+                                    width: MAGNIFIER_SIZE,
+                                    height: MAGNIFIER_SIZE,
+                                    border: '2px solid #4096ff',
+                                    borderRadius: '50%',
+                                    boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
+                                    cursor: 'move',
+                                    overflow: 'hidden'
+                                }}
+                                onMouseDown={handleMagnifierMouseDown}
+                            >
+                                <canvas
+                                    ref={magnifierCanvasRef}
+                                    width={MAGNIFIER_SIZE}
+                                    height={MAGNIFIER_SIZE}
+                                    style={{ cursor: 'none' }}
+                                />
+                            </div>
+                        )}
                     </Content>
                     {!isInspectorVisible && (
                         <Tooltip title={t.showPanel} placement="left">
@@ -1248,7 +1327,6 @@ const FileOperate: React.FC = () => {
                                 <Title level={5}>{t.settings}</Title>
                                 <p>此页面暂无特定设置。</p>
                             </div>
-
                         </TabPane>
                     </Tabs>
                 </Sider>

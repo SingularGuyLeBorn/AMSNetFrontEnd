@@ -1,4 +1,3 @@
-
 // START OF FILE src/pages/FileOperate/constants.ts
 /**
  * @description 标注类别信息的接口定义
@@ -84,7 +83,9 @@ export const translations: { [key: string]: TranslationSet } = {
     confirmDelete: '确认删除',
     cancel: '取消',
     classDeleted: '类别 %s 已删除',
-    deleteAnnotationTooltip: '删除此标注'
+    deleteAnnotationTooltip: '删除此标注',
+    magnifier: '放大镜',
+    regionDelete: '区域删除',
   },
   en: {
     uploadFolder: 'Upload Folder', undo: 'Undo', redo: 'Redo', save: 'Save', deleteBox: 'Delete Box', category: 'Category', previous: 'Previous', next: 'Next', currentFile: 'Current File', coloringMode: 'Coloring Mode', drawingMode: 'Drawing Mode', delete: 'Delete', saveAll: 'Export All (ZIP)', chooseJsonName: 'Choose Component (for coloring)', chooseJsonType: 'Choose Type (for coloring)', noFile: 'No files to operate on', dataExplorer: 'Data Explorer', settings: 'Settings', annotations: 'Annotations', currentImage: "Current:", noAnnotations: "No annotations for this image", noImages: "Please upload a folder first", selectTool: "Select/Move", operationSuccessful: "Operation successful", noUndoOperations: "No operations to undo", noRedoOperations: "No operations to redo", aiAnnotation: 'AI Auto-Annotation', aiAnnotating: 'AI Annotating...', aiFailed: "AI Annotation Failed", apiMode: 'API Mode', apiModeAuto: 'Auto', apiModeManual: 'Manual', manualApiEndpoint: 'Manual API Selection', apiForNew: 'API for New Image', apiForIncremental: 'API for Incremental', classManagement: 'Class Management', addClass: 'Add Class', importClasses: 'Import Classes', exportClasses: 'Export Classes', className: 'Class Name', hidePanel: 'Hide Panel', showPanel: 'Show Panel', rawData: 'Raw Data',
@@ -93,7 +94,9 @@ export const translations: { [key: string]: TranslationSet } = {
     confirmDelete: 'Confirm Delete',
     cancel: 'Cancel',
     classDeleted: 'Class %s has been deleted',
-    deleteAnnotationTooltip: 'Delete this annotation'
+    deleteAnnotationTooltip: 'Delete this annotation',
+    magnifier: 'Magnifier',
+    regionDelete: 'Region Delete',
   }
 };
 // END OF FILE src/pages/FileOperate/constants.ts

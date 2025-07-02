@@ -7,12 +7,12 @@ import {
   faUpload, faChevronLeft, faChevronRight, faUndo, faRedo,
   faDrawPolygon, faTrash, faPaintBrush,
   faCog, faList, faMousePointer, faSave, faEraser, faRobot,
-  faFileImport, faFileExport, faPlus, faMinusCircle, faTags, faDatabase
+  faFileImport, faFileExport, faPlus, faMinusCircle, faTags, faDatabase, faSearchPlus
 } from "@fortawesome/free-solid-svg-icons";
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { RESIZE_HANDLE_SIZE, translations, defaultCategoryColors } from './constants';
-import type { ImageAnnotationData, ViewAnnotation, UndoOperation as MaskUndoOperation, ViewBoxAnnotation, ViewDiagonalAnnotation, Point, ApiResponse, ApiKeyPoint, ApiSegment } from './constants.tsx';
+import type { ImageAnnotationData, ViewAnnotation, UndoOperation as MaskUndoOperation, ViewBoxAnnotation, ViewDiagonalAnnotation, Point, ApiResponse, ApiKeyPoint, ApiSegment } from './constants';
 import './index.css';
 
 const { Title, Text } = Typography;
@@ -22,10 +22,14 @@ const { TabPane } = Tabs;
 const { Sider, Content, Header } = Layout;
 
 type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete' | 'region-delete';
-type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
-type DraggingState = { type: 'move' | 'resize' | 'region-select'; handle?: ResizeHandle; startMousePos: Point; startAnnotationState?: ViewAnnotation; } | null;
+type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight' | 'start' | 'end';
+type DraggingState = { type: 'move' | 'resize' | 'region-select' | 'magnifier-drag'; handle?: ResizeHandle; startMousePos: Point; startAnnotationState?: ViewAnnotation; offset?: Point; } | null;
 type RegionSelectBox = { start: Point; end: Point; } | null;
 type ImageDetails = { name: string; url: string; width: number; height: number; originalFile: File; };
+
+const MAGNIFIER_SIZE = 150; // The size of the magnifier view
+const MAGNIFIER_ZOOM = 3; // The zoom level
+const DIAGONAL_HANDLE_SIZE = 10;
 
 const getFileNameWithoutExtension = (fileName: string): string => fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
 const generateUniqueId = (): string => `anno_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -41,12 +45,7 @@ const rgbaToHex = (rgba: string): string => {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
 };
 
-// --- 数据转换模块 ---
-
-/**
- * 将API响应的`key_points`和`segments`部分转换为前端渲染的`ViewDiagonalAnnotation`格式。
- */
-const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: string]: string }, thickness: number): ViewAnnotation[] => {
+export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: string]: string }, thickness: number): ViewAnnotation[] => {
     if (!apiData || !apiData.key_points || !apiData.segments) {
         return [];
     }
@@ -72,12 +71,6 @@ const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: strin
 };
 
 
-/**
- * @description 将前端的ViewAnnotation格式转换为API的kpt/segment格式 (用于导出)。
- * @why This utility is now exported so it can be used in `app.tsx` for the global export functionality, ensuring data is in the correct format.
- * @param viewAnnotations An array of annotations in the client-side view format.
- * @returns An ApiResponse object suitable for backend or file storage.
- */
 export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
     const key_points: ApiKeyPoint[] = [];
     const segments: ApiSegment[] = [];
@@ -143,8 +136,6 @@ const MaskOperate = () => {
   const t = translations[currentLang];
   const [currentImageDetails, setCurrentImageDetails] = useState<ImageDetails | null>(null);
   
-  // PERFORMANCE FIX: Local state for annotations of the current image.
-  // This avoids updating the global zustand store on every mouse move, which is slow.
   const [localAnnotations, setLocalAnnotations] = useState<ViewAnnotation[]>([]);
 
   const [activeTool, setActiveTool] = useState<ActiveTool>('select');
@@ -159,21 +150,25 @@ const MaskOperate = () => {
   const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
   const [isAiAnnotating, setIsAiAnnotating] = useState(false);
   const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
+  const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const magnifierCanvasRef = useRef<HTMLCanvasElement>(null);
   const folderUploadRef = useRef<HTMLInputElement>(null);
   const classesFileRef = useRef<HTMLInputElement>(null);
 
+  const [isMagnifierVisible, setIsMagnifierVisible] = useState(false);
+  const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
+  const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
+
   const hasActiveImage = images.length > 0 && currentImageIndex >= 0 && currentImageIndex < images.length;
   
-  // Read from local state for rendering, not directly from global store.
   const currentViewAnnotations: ViewAnnotation[] = localAnnotations; 
   const currentApiJson = useMemo(() => convertViewToApi(currentViewAnnotations), [currentViewAnnotations]);
 
   const currentUndoStackSize = (mask_operationHistory[currentImageIndex] || []).length;
   const currentRedoStackSize = (mask_redoHistory[currentImageIndex] || []).length;
 
-  // Sync local annotation state when the image or global annotations change.
   useEffect(() => {
     if (currentImageDetails) {
       const annotationsFromGlobalStore = allImageAnnotations[currentImageDetails.name]?.viewAnnotations || [];
@@ -183,7 +178,7 @@ const MaskOperate = () => {
     }
   }, [currentImageDetails, allImageAnnotations]);
 
-  const getResizeHandles = (box: ViewBoxAnnotation): {[key in ResizeHandle]: {x: number, y: number, size: number, cursor: string}} => {
+  const getResizeHandles = (box: ViewBoxAnnotation): {[key in ResizeHandle]?: {x: number, y: number, size: number, cursor: string}} => {
     const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
     return { topLeft: { x: x - s/2, y: y - s/2, size: s, cursor: 'nwse-resize' }, top: { x: x + width/2 - s/2, y: y - s/2, size: s, cursor: 'ns-resize' }, topRight: { x: x + width - s/2, y: y - s/2, size: s, cursor: 'nesw-resize' }, left: { x: x - s/2, y: y + height/2 - s/2, size: s, cursor: 'ew-resize' }, right: { x: x + width - s/2, y: y + height/2 - s/2, size: s, cursor: 'ew-resize' }, bottomLeft: { x: x - s/2, y: y + height - s/2, size: s, cursor: 'nesw-resize' }, bottom: { x: x + width/2 - s/2, y: y + height - s/2, size: s, cursor: 'ns-resize' }, bottomRight:{ x: x + width - s/2, y: y + height - s/2, size: s, cursor: 'nwse-resize' }, };
   };
@@ -210,7 +205,7 @@ const MaskOperate = () => {
       }
       if (isSelected) {
         const handles = getResizeHandles(box); ctx.fillStyle = '#0958d9';
-        Object.values(handles).forEach(handle => ctx.fillRect(handle.x, handle.y, handle.size, handle.size));
+        Object.values(handles).forEach(handle => { if(handle) ctx.fillRect(handle.x, handle.y, handle.size, handle.size) });
       }
     }
     ctx.restore();
@@ -240,8 +235,21 @@ const MaskOperate = () => {
     ctx.rect(-length / 2, -diag.thickness / 2, length, diag.thickness);
     ctx.fill();
     ctx.stroke();
-    
     ctx.restore();
+
+    if (isSelected) {
+        ctx.save();
+        ctx.fillStyle = '#0958d9';
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        [diag.points[0], diag.points[1]].forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, DIAGONAL_HANDLE_SIZE / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
     
     if (!isPreview && showCategoryInBox) {
         ctx.save();
@@ -319,7 +327,7 @@ const MaskOperate = () => {
     }
   }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox]);
   
-  const getScaledCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>): Point => {
+  const getScaledCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement> | {clientX: number, clientY: number}): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
@@ -330,6 +338,45 @@ const MaskOperate = () => {
         y: (e.clientY - rect.top) * scaleY,
     };
   }, []);
+  
+    const drawMagnifier = useCallback(() => {
+      if (!isMagnifierVisible || !isMouseOnCanvas) return;
+      const mainCanvas = canvasRef.current;
+      const magCanvas = magnifierCanvasRef.current;
+      if (!mainCanvas || !magCanvas) return;
+
+      const magCtx = magCanvas.getContext('2d');
+      if (!magCtx) return;
+
+      magCtx.clearRect(0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
+      magCtx.imageSmoothingEnabled = false;
+
+      const sx = canvasMousePos.x - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
+      const sy = canvasMousePos.y - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
+      const sWidth = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
+      const sHeight = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
+
+      magCtx.drawImage(
+          mainCanvas,
+          sx, sy, sWidth, sHeight,
+          0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE
+      );
+
+      // Draw crosshair
+      magCtx.strokeStyle = 'red';
+      magCtx.lineWidth = 1;
+      magCtx.beginPath();
+      magCtx.moveTo(MAGNIFIER_SIZE / 2, 0);
+      magCtx.lineTo(MAGNIFIER_SIZE / 2, MAGNIFIER_SIZE);
+      magCtx.moveTo(0, MAGNIFIER_SIZE / 2);
+      magCtx.lineTo(MAGNIFIER_SIZE, MAGNIFIER_SIZE / 2);
+      magCtx.stroke();
+  }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos]);
+
+  useEffect(() => {
+      drawMagnifier();
+  }, [canvasMousePos, drawMagnifier]);
+
 
   useEffect(() => { setCurrentLang(initialState?.language || 'zh'); }, [initialState?.language]);
 
@@ -356,22 +403,47 @@ const MaskOperate = () => {
   }, [redrawCanvas]);
 
   useEffect(() => {
-    const canvasEl = canvasRef.current; if (!canvasEl || !currentImageDetails) return;
     const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvasEl.getBoundingClientRect();
-      const scaleX = currentImageDetails.width / rect.width; const scaleY = currentImageDetails.height / rect.height;
-      setCanvasMousePos({ x: Math.max(0, (e.clientX - rect.left) * scaleX), y: Math.max(0, (e.clientY - rect.top) * scaleY) });
+        if (!isResizingInspector) return;
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
     };
-    canvasEl.addEventListener('mousemove', handleMouseMove);
-    return () => canvasEl.removeEventListener('mousemove', handleMouseMove);
-  }, [currentImageDetails]);
+    const handleMouseUp = () => setIsResizingInspector(false);
+    if (isResizingInspector) {
+        document.body.style.userSelect = 'none';
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingInspector]);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => { if (!isResizingInspector) return; const newWidth = window.innerWidth - e.clientX; if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth); };
-    const handleMouseUp = () => setIsResizingInspector(false);
-    if (isResizingInspector) { document.body.style.userSelect = 'none'; window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); }
-    return () => { document.body.style.userSelect = ''; window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
-  }, [isResizingInspector]);
+    const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
+        if (draggingState?.type === 'magnifier-drag' && draggingState.offset) {
+            setMagnifierPos({
+                x: e.clientX - draggingState.offset.x,
+                y: e.clientY - draggingState.offset.y
+            });
+        }
+    };
+    const handleGlobalMouseUp = () => {
+        if (draggingState?.type === 'magnifier-drag') {
+            setDraggingState(null);
+        }
+    };
+    if (draggingState?.type === 'magnifier-drag') {
+        window.addEventListener('mousemove', handleGlobalMouseMove);
+        window.addEventListener('mouseup', handleGlobalMouseUp);
+    }
+    return () => {
+        window.removeEventListener('mousemove', handleGlobalMouseMove);
+        window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [draggingState]);
   
   const isPointInRect = (point: Point, rect: { x: number; y: number; width: number; height: number }): boolean => ( point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height );
   
@@ -443,19 +515,43 @@ const MaskOperate = () => {
     message.success(t.operationSuccessful);
   }, [mask_redoHistory, currentImageIndex, currentImageDetails, currentViewAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful]);
 
+  const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const { clientX, clientY } = e;
+        setDraggingState({
+            type: 'magnifier-drag',
+            startMousePos: { x: clientX, y: clientY },
+            offset: { x: clientX - magnifierPos.x, y: clientY - magnifierPos.y }
+        });
+    };
+
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentImageDetails || !canvasRef.current || e.button !== 0) return;
+
     const mousePos = getScaledCoords(e);
     if (activeTool === 'select') {
       const selectedAnno = currentViewAnnotations.find(a => a.id === selectedAnnotationId);
-      if (selectedAnno && 'width' in selectedAnno) {
-        const handles = getResizeHandles(selectedAnno);
-        for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
-          const handle = handles[handleKey]; if(isPointInRect(mousePos, {x: handle.x, y: handle.y, width: handle.size, height: handle.size})) {
-            addUndoRecord(); setDraggingState({ type: 'resize', handle: handleKey, startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
+      if (selectedAnno) {
+          if ('width' in selectedAnno) {
+            const handles = getResizeHandles(selectedAnno);
+            for(const handleKey of Object.keys(handles) as (keyof typeof handles)[]) {
+              const handle = handles[handleKey]; if(handle && isPointInRect(mousePos, {x: handle.x, y: handle.y, width: handle.size, height: handle.size})) {
+                addUndoRecord(); setDraggingState({ type: 'resize', handle: handleKey, startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
+              }
+            }
+          } else if ('points' in selectedAnno) {
+             const distToStart = Math.hypot(mousePos.x - selectedAnno.points[0].x, mousePos.y - selectedAnno.points[0].y);
+             const distToEnd = Math.hypot(mousePos.x - selectedAnno.points[1].x, mousePos.y - selectedAnno.points[1].y);
+             if (distToStart < DIAGONAL_HANDLE_SIZE) {
+                addUndoRecord(); setDraggingState({ type: 'resize', handle: 'start', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno))}); return;
+             }
+             if (distToEnd < DIAGONAL_HANDLE_SIZE) {
+                addUndoRecord(); setDraggingState({ type: 'resize', handle: 'end', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno))}); return;
+             }
           }
-        }
       }
+      
       const clickedAnnotation = [...currentViewAnnotations].reverse().find((anno: ViewAnnotation) => {
         if ('points' in anno) {
           const { angleRad, length, centerX, centerY } = getDiagonalParameters(anno.points); const translatedX = mousePos.x - centerX; const translatedY = mousePos.y - centerY; const rotatedX = translatedX * Math.cos(-angleRad) - translatedY * Math.sin(-angleRad); const rotatedY = translatedX * Math.sin(-angleRad) + translatedY * Math.cos(-angleRad);
@@ -465,7 +561,7 @@ const MaskOperate = () => {
       if (clickedAnnotation) {
         if (selectedAnnotationId !== clickedAnnotation.id) { 
           setSelectedAnnotationId(clickedAnnotation.id); 
-        } else { 
+        } else {
           addUndoRecord(); 
           setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(clickedAnnotation)) }); 
         }
@@ -481,44 +577,51 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const currentCanvasMousePos = getScaledCoords(e);
+    setCanvasMousePos(currentCanvasMousePos);
+
     if (!draggingState || !currentImageDetails) return;
-    const mousePos = getScaledCoords(e); 
+
     if (draggingState.type === 'region-select') {
-        setRegionSelectBox({ start: draggingState.startMousePos, end: mousePos });
+        setRegionSelectBox({ start: draggingState.startMousePos, end: currentCanvasMousePos });
         redrawCanvas();
-    } else if (activeTool === 'select' && draggingState.startAnnotationState?.id) {
-      const dx = mousePos.x - draggingState.startMousePos.x; const dy = mousePos.y - draggingState.startMousePos.y;
-      const startState = draggingState.startAnnotationState;
-      const updatedAnnos = currentViewAnnotations.map(anno => {
-        if(anno.id === startState.id) {
-            let newAnno: ViewAnnotation = JSON.parse(JSON.stringify(anno));
-            if (draggingState.type === 'move') {
-                if ('points' in newAnno && 'points' in startState) {
-                  newAnno.points[0] = { x: startState.points[0].x + dx, y: startState.points[0].y + dy };
-                  newAnno.points[1] = { x: startState.points[1].x + dx, y: startState.points[1].y + dy };
-                } else if ('x' in newAnno && 'x' in startState) { newAnno.x = startState.x + dx; newAnno.y = startState.y + dy; }
-              } else if (draggingState.type === 'resize' && draggingState.handle && 'width' in newAnno && 'width' in startState) {
-                const { handle } = draggingState; const startBox = startState;
-                if (handle.includes('right')) newAnno.width = Math.max(1, startBox.width + dx);
-                if (handle.includes('left')) { newAnno.x = startBox.x + dx; newAnno.width = Math.max(1, startBox.width - dx); }
-                if (handle.includes('bottom')) newAnno.height = Math.max(1, startBox.height + dy);
-                if (handle.includes('top')) { newAnno.y = startBox.y + dy; newAnno.height = Math.max(1, startBox.height - dy); }
-            }
-            return newAnno;
-        }
-        return anno;
-      });
-      // PERFORMANCE FIX: Update local state for fast preview, not the slow global state.
-      setLocalAnnotations(updatedAnnos);
+    } else if (activeTool === 'select') {
+      if (draggingState.startAnnotationState?.id) {
+        const dx = currentCanvasMousePos.x - draggingState.startMousePos.x; const dy = currentCanvasMousePos.y - draggingState.startMousePos.y;
+        const startState = draggingState.startAnnotationState;
+        const updatedAnnos = currentViewAnnotations.map(anno => {
+          if(anno.id === startState.id) {
+              let newAnno: ViewAnnotation = JSON.parse(JSON.stringify(anno));
+              if (draggingState.type === 'move') {
+                  if ('points' in newAnno && 'points' in startState) {
+                    newAnno.points[0] = { x: startState.points[0].x + dx, y: startState.points[0].y + dy };
+                    newAnno.points[1] = { x: startState.points[1].x + dx, y: startState.points[1].y + dy };
+                  } else if ('x' in newAnno && 'x' in startState) { newAnno.x = startState.x + dx; newAnno.y = startState.y + dy; }
+                } else if (draggingState.type === 'resize' && draggingState.handle) {
+                  if ('width' in newAnno && 'width' in startState) { // Rectangle resize
+                    const { handle } = draggingState; const startBox = startState;
+                    if (handle.includes('right')) newAnno.width = Math.max(1, startBox.width + dx);
+                    if (handle.includes('left')) { newAnno.x = startBox.x + dx; newAnno.width = Math.max(1, startBox.width - dx); }
+                    if (handle.includes('bottom')) newAnno.height = Math.max(1, startBox.height + dy);
+                    if (handle.includes('top')) { newAnno.y = startBox.y + dy; newAnno.height = Math.max(1, startBox.height - dy); }
+                  } else if ('points' in newAnno && (draggingState.handle === 'start' || draggingState.handle === 'end')) { // Diagonal resize/rotate
+                    if (draggingState.handle === 'start') newAnno.points[0] = currentCanvasMousePos;
+                    else newAnno.points[1] = currentCanvasMousePos;
+                  }
+              }
+              return newAnno;
+          }
+          return anno;
+        });
+        setLocalAnnotations(updatedAnnos);
+      }
     }
-    setCanvasMousePos(mousePos);
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!draggingState || e.button !== 0) return;
     const end = getScaledCoords(e);
 
-    // PERFORMANCE FIX: Commit the final state to the global store on mouse up.
     if (activeTool === 'select') {
         updateGlobalAnnotations(localAnnotations);
     } else if (draggingState.type === 'region-select') {
@@ -647,19 +750,9 @@ const MaskOperate = () => {
     if(folderUploadRef.current) folderUploadRef.current.value = "";
   };
   
-  /**
-   * @description Navigates to a new image, ensuring the current image's state is saved first.
-   * @param offset The offset to navigate by (e.g., 1 for next, -1 for previous).
-   * @why This function is modified to ensure data consistency. Before changing the image index,
-   *      it explicitly calls `updateGlobalAnnotations` to save any pending changes from the
-   *      `localAnnotations` state into the global `allImageAnnotations` store. This prevents
-   *      data loss when navigating and is crucial for the global export functionality to work correctly.
-   */
   const navigateImage = (offset: number) => { 
       const newIndex = currentImageIndex + offset; 
       if (newIndex >= 0 && newIndex < images.length) { 
-        // [FIX]: Commit any pending local changes for the current image to the global store before navigating.
-        // This is the key to ensuring the global exporter has the latest data.
         if(currentImageDetails) {
             updateGlobalAnnotations(localAnnotations);
         }
@@ -675,7 +768,6 @@ const MaskOperate = () => {
     try {
         const zip = new JSZip();
 
-        // Save categories in the FileOperate-compatible format
         const exportClassObj: { [key: string]: string } = {};
         categories.forEach((cat, index) => {
             exportClassObj[index] = cat;
@@ -688,7 +780,6 @@ const MaskOperate = () => {
             const imageName = imageFile.name;
             const annotationsForImage = allImageAnnotations[imageName] || { viewAnnotations: [], apiJson: {} };
             
-            // If the currently viewed image is being exported, use its latest local state
             const finalAnnotations = (currentImageDetails?.name === imageName) ? localAnnotations : annotationsForImage.viewAnnotations;
             const finalApiJson = convertViewToApi(finalAnnotations);
 
@@ -826,11 +917,6 @@ const MaskOperate = () => {
     });
   };
 
-  /**
-   * @why This function is created to handle exporting only the classes,
-   * in a format compatible with `FileOperate`. It fixes a bug where the
-   * "Export All" function was incorrectly used.
-   */
   const handleExportClasses = () => {
     if (categories.length === 0) {
       message.info(t.noCategoriesToExport || 'No classes to export.');
@@ -846,10 +932,6 @@ const MaskOperate = () => {
     message.success(t.exportSuccessMessage || 'Classes exported successfully.');
   };
   
-  /**
-   * @why This function is updated to be compatible with `FileOperate`'s class format.
-   * It now parses a `classes = { "0": "name", ... }` structure.
-   */
   const handleImportClasses = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if(!file) return; 
     const text = await file.text();
@@ -905,6 +987,7 @@ const MaskOperate = () => {
   const isSelectedForEdit = (item: ViewAnnotation) => activeTool === 'select' && item.id === selectedAnnotationId;
   
   const getCanvasCursor = () => {
+      if (isMagnifierVisible) return 'none'; // Hide system cursor
       switch(activeTool) {
           case 'delete': return 'delete-cursor';
           case 'rectangle':
@@ -936,6 +1019,7 @@ const MaskOperate = () => {
             <Sider width={60} className="unified-tool-sider" theme="light">
                 <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
                     <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
+                    <Tooltip title={t.magnifier} placement="right"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={!hasActiveImage} /></Tooltip>
                     <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
                     <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
                     <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
@@ -945,10 +1029,37 @@ const MaskOperate = () => {
                 </Space>
             </Sider>
             <Layout className="main-content-wrapper">
-                <Content className="canvas-content">
+                <Content className="canvas-content"
+                    onMouseEnter={() => setIsMouseOnCanvas(true)}
+                    onMouseLeave={() => setIsMouseOnCanvas(false)}
+                >
                     <div className={`canvas-wrapper`}>
                         <canvas ref={canvasRef} onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} onClick={handleCanvasClick} className={getCanvasCursor()}/>
                     </div>
+                     {isMagnifierVisible && (
+                        <div 
+                            style={{
+                                position: 'fixed',
+                                top: magnifierPos.y,
+                                left: magnifierPos.x,
+                                width: MAGNIFIER_SIZE,
+                                height: MAGNIFIER_SIZE,
+                                border: '2px solid #4096ff',
+                                borderRadius: '50%',
+                                boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
+                                cursor: 'move',
+                                overflow: 'hidden',
+                            }}
+                            onMouseDown={handleMagnifierMouseDown}
+                        >
+                            <canvas
+                                ref={magnifierCanvasRef}
+                                width={MAGNIFIER_SIZE}
+                                height={MAGNIFIER_SIZE}
+                                style={{ cursor: 'none'}}
+                            />
+                        </div>
+                    )}
                 </Content>
                 {!isInspectorVisible && (<Tooltip title={t.showPanel} placement="left"><Button className="show-inspector-handle" type="primary" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsInspectorVisible(true)} /></Tooltip>)}
             </Layout>
@@ -1011,7 +1122,6 @@ const MaskOperate = () => {
                                 <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
                                 <Space.Compact>
                                     <Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport}/>} onClick={() => classesFileRef.current?.click()}/></Tooltip>
-                                    {/* BUG FIX: This button now correctly calls handleExportClasses, not handleExportAll. */}
                                     <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport}/>} onClick={handleExportClasses}/></Tooltip>
                                 </Space.Compact>
                             </Flex>

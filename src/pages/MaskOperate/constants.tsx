@@ -147,7 +147,9 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     confirmDelete: '确认删除',
     cancel: '取消',
     classDeleted: '类别 %s 已删除',
-    rawData: '原始数据'
+    rawData: '原始数据',
+    magnifier: '放大镜',
+    regionDelete: '区域删除',
   },
   en: {
     appName: 'Bedrock Annotator',
@@ -191,6 +193,8 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     cancel: 'Cancel',
     classDeleted: 'Class %s has been deleted',
     rawData: 'Raw Data',
+    magnifier: 'Magnifier',
+    regionDelete: 'Region Delete',
   },
 };
 // END OF FILE src/pages/MaskOperate/constants.ts
