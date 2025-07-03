@@ -183,15 +183,28 @@
   margin-bottom: 0 !important;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+/* Bedrock Fix: Cascade height: 100% through AntD's internal Tab structure */
+.inspector-tabs .ant-tabs-content-holder,
+.inspector-tabs .ant-tabs-content,
+.inspector-tabs .ant-tabs-tabpane {
+  height: 100%;
 }
 
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  /* IMPORTANT: This prevents the holder from scrolling */
 }
 
 .tab-pane-content {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 16px;
 }
 
 .class-list-container {
@@ -201,12 +214,15 @@
   border-radius: 6px;
 }
 
-/* --- 新增: 为标注列表提供滚动容器 --- */
 .annotation-collapse-container {
-  max-height: calc(100vh - 340px);
+  flex-grow: 1;
+  /* Grow to fill available space */
   overflow-y: auto;
+  /* Enable scrolling ONLY on this container */
   border-radius: 6px;
   border: 1px solid var(--border-color);
+  min-height: 50px;
+  /* Prevent collapsing to zero height */
 }
 
 
@@ -231,8 +247,6 @@
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
-  /* UI FIX: Changed min-height from an arbitrary large value to a sensible minimum.
-     Combined with flex-grow, this allows the textarea to be small but also expand to fill available space. */
   min-height: 100px;
   padding: 8px;
   border: 1px solid var(--border-color);

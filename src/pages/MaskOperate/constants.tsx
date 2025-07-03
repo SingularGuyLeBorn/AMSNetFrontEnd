@@ -1,5 +1,5 @@
-// START OF FILE src/pages/MaskOperate/constants.ts
-// MaskOperate/constants.ts
+// START OF FILE src/pages/MaskOperate/constants.tsx
+// MaskOperate/constants.tsx
 
 export const RESIZE_HANDLE_SIZE = 8;
 
@@ -53,12 +53,12 @@ export interface ApiSegment {
 }
 
 export interface ApiComponent {
-    b: number;
-    l: number;
-    r: number;
-    t: number;
-    type: string;
-    [key: string]: any;
+  b: number;
+  l: number;
+  r: number;
+  t: number;
+  type: string;
+  [key: string]: any;
 }
 
 export interface ApiResponse {
@@ -150,6 +150,9 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     rawData: '原始数据',
     magnifier: '放大镜',
     regionDelete: '区域删除',
+    regionDeleteMode: '区域删除模式',
+    fullyContained: '全包删除',
+    intersecting: '接触删除',
   },
   en: {
     appName: 'Bedrock Annotator',
@@ -195,6 +198,9 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     rawData: 'Raw Data',
     magnifier: 'Magnifier',
     regionDelete: 'Region Delete',
+    regionDeleteMode: 'Region Delete Mode',
+    fullyContained: 'Fully Contained',
+    intersecting: 'Intersecting',
   },
 };
-// END OF FILE src/pages/MaskOperate/constants.ts
+// END OF FILE src/pages/MaskOperate/constants.tsx

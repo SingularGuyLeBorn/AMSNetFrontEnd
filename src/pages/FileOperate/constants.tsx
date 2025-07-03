@@ -1,4 +1,4 @@
-// START OF FILE src/pages/FileOperate/constants.ts
+// START OF FILE src/pages/FileOperate/constants.tsx
 /**
  * @description 标注类别信息的接口定义
  */
@@ -9,13 +9,13 @@ export interface ClassInfo {
 
 // Bedrock Note: 新增API响应类型定义，与MaskOperate保持同步，以便调用同一个后端
 export interface ApiComponent {
-    b: number; // bottom
-    l: number; // left
-    r: number; // right
-    t: number; // top
-    type: string;
-    // 允许其他可能的字段
-    [key: string]: any;
+  b: number; // bottom
+  l: number; // left
+  r: number; // right
+  t: number; // top
+  type: string;
+  // 允许其他可能的字段
+  [key: string]: any;
 }
 
 export interface ApiResponse {
@@ -86,6 +86,9 @@ export const translations: { [key: string]: TranslationSet } = {
     deleteAnnotationTooltip: '删除此标注',
     magnifier: '放大镜',
     regionDelete: '区域删除',
+    regionDeleteMode: '区域删除模式',
+    fullyContained: '全包删除',
+    intersecting: '接触删除',
   },
   en: {
     uploadFolder: 'Upload Folder', undo: 'Undo', redo: 'Redo', save: 'Save', deleteBox: 'Delete Box', category: 'Category', previous: 'Previous', next: 'Next', currentFile: 'Current File', coloringMode: 'Coloring Mode', drawingMode: 'Drawing Mode', delete: 'Delete', saveAll: 'Export All (ZIP)', chooseJsonName: 'Choose Component (for coloring)', chooseJsonType: 'Choose Type (for coloring)', noFile: 'No files to operate on', dataExplorer: 'Data Explorer', settings: 'Settings', annotations: 'Annotations', currentImage: "Current:", noAnnotations: "No annotations for this image", noImages: "Please upload a folder first", selectTool: "Select/Move", operationSuccessful: "Operation successful", noUndoOperations: "No operations to undo", noRedoOperations: "No operations to redo", aiAnnotation: 'AI Auto-Annotation', aiAnnotating: 'AI Annotating...', aiFailed: "AI Annotation Failed", apiMode: 'API Mode', apiModeAuto: 'Auto', apiModeManual: 'Manual', manualApiEndpoint: 'Manual API Selection', apiForNew: 'API for New Image', apiForIncremental: 'API for Incremental', classManagement: 'Class Management', addClass: 'Add Class', importClasses: 'Import Classes', exportClasses: 'Export Classes', className: 'Class Name', hidePanel: 'Hide Panel', showPanel: 'Show Panel', rawData: 'Raw Data',
@@ -97,6 +100,9 @@ export const translations: { [key: string]: TranslationSet } = {
     deleteAnnotationTooltip: 'Delete this annotation',
     magnifier: 'Magnifier',
     regionDelete: 'Region Delete',
+    regionDeleteMode: 'Region Delete Mode',
+    fullyContained: 'Fully Contained',
+    intersecting: 'Intersecting',
   }
 };
-// END OF FILE src/pages/FileOperate/constants.ts
+// END OF FILE src/pages/FileOperate/constants.tsx

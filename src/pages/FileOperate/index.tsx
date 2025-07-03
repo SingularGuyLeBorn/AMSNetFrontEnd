@@ -1,36 +1,51 @@
 // START OF FILE src/pages/FileOperate/index.tsx
-import React, { useState, useRef, useEffect, ChangeEvent, MouseEvent, useCallback, useMemo } from 'react';
 import {
-    Layout,
-    Tabs,
+    faArrowLeft, faArrowRight,
+    faChevronLeft, faChevronRight,
+    faCogs,
+    faDatabase, faEraser,
+    faFileExport,
+    faFileImport,
+    faList, faMinusCircle, faMousePointer,
+    faPaintBrush,
+    faPen,
+    faPlus,
+    faRedo,
+    faRobot,
+    faSave,
+    faSearchPlus,
+    faTags,
+    faTrash,
+    faUndo,
+    faUpload
+} from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useModel } from "@umijs/max";
+import {
     Button,
-    Space,
-    Typography,
-    Select,
-    Form,
-    Input,
-    Tooltip,
-    message,
-    List,
-    Radio,
-    Divider,
-    Flex,
-    Modal,
     Collapse,
     Descriptions,
+    Divider,
+    Flex,
+    Form,
+    Input,
     InputNumber,
+    Layout,
+    List,
+    Modal,
+    Radio,
+    RadioChangeEvent,
+    Select,
+    Space,
+    Tabs,
+    Tooltip,
+    Typography,
+    message,
 } from 'antd';
-import { useModel } from "@umijs/max";
-import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import {
-    faUpload, faSave, faUndo, faRedo, faTrash,
-    faArrowLeft, faArrowRight, faPaintBrush, faPlus,
-    faPen, faList, faMinusCircle, faMousePointer,
-    faChevronLeft, faChevronRight, faRobot, faCogs, faTags, faFileImport, faFileExport, faDatabase, faEraser, faSearchPlus
-} from "@fortawesome/free-solid-svg-icons";
-import { jsonNameColorMap, translations, ClassInfo, Operation, ApiResponse, ApiComponent } from './constants';
+import JSZip from 'jszip';
+import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ApiComponent, ApiResponse, ClassInfo, Operation, jsonNameColorMap, translations } from './constants';
 import './index.css';
 
 
@@ -44,6 +59,7 @@ type ActiveTool = 'draw' | 'stain' | 'delete' | 'select' | 'region-delete';
 type Point = { x: number; y: number };
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
 type RegionSelectBox = { start: Point; end: Point; } | null;
+type RegionDeleteMode = 'contain' | 'intersect';
 
 type DraggingState = {
     type: 'move' | 'resize' | 'region-select' | 'magnifier-drag';
@@ -181,10 +197,11 @@ const FileOperate: React.FC = () => {
 
     const [draggingState, setDraggingState] = useState<DraggingState>(null);
     const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox>(null);
+    const [regionDeleteMode, setRegionDeleteMode] = useState<RegionDeleteMode>('contain');
     const [selectedBoxName, setSelectedBoxName] = useState<string | null>(null);
     const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
     const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
-    
+
     // Magnifier State
     const [isMagnifierVisible, setIsMagnifierVisible] = useState(false);
     const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
@@ -205,10 +222,10 @@ const FileOperate: React.FC = () => {
         }).filter((item): item is { name: string; classIdx: number; x: number; y: number; w: number; h: number; } => item !== null && !isNaN(item.classIdx));
     }, [currentYoloContent]);
 
-    const getResizeHandles = (box: {x: number, y: number, width: number, height: number}): {[key in ResizeHandle]: {x: number, y: number, size: number}} => {
+    const getResizeHandles = (box: { x: number, y: number, width: number, height: number }): { [key in ResizeHandle]: { x: number, y: number, size: number } } => {
         const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
-        return { topLeft: { x: x - s/2, y: y - s/2, size: s }, top: { x: x + width/2 - s/2, y: y - s/2, size: s }, topRight: { x: x + width - s/2, y: y - s/2, size: s }, left: { x: x - s/2, y: y + height/2 - s/2, size: s }, right: { x: x + width - s/2, y: y + height/2 - s/2, size: s }, bottomLeft: { x: x - s/2, y: y + height - s/2, size: s }, bottom: { x: x + width/2 - s/2, y: y + height - s/2, size: s }, bottomRight:{ x: x + width - s/2, y: y + height - s/2, size: s }, };
-      };
+        return { topLeft: { x: x - s / 2, y: y - s / 2, size: s }, top: { x: x + width / 2 - s / 2, y: y - s / 2, size: s }, topRight: { x: x + width - s / 2, y: y - s / 2, size: s }, left: { x: x - s / 2, y: y + height / 2 - s / 2, size: s }, right: { x: x + width - s / 2, y: y + height / 2 - s / 2, size: s }, bottomLeft: { x: x - s / 2, y: y + height - s / 2, size: s }, bottom: { x: x + width / 2 - s / 2, y: y + height - s / 2, size: s }, bottomRight: { x: x + width - s / 2, y: y + height - s / 2, size: s }, };
+    };
 
     const getCursorForHandle = (handle: ResizeHandle | null): string => {
         if (!handle) return 'default';
@@ -245,7 +262,7 @@ const FileOperate: React.FC = () => {
                     ctx.rect(absLeft, absTop, absW, absH);
                     ctx.stroke();
                     if (isSelected) {
-                        const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
+                        const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
                         ctx.fillStyle = '#0958d9';
                         Object.values(handles).forEach(handle => ctx.fillRect(handle.x, handle.y, handle.size, handle.size));
                     }
@@ -270,7 +287,7 @@ const FileOperate: React.FC = () => {
                         }
                     });
                 }
-                
+
                 if (regionSelectBox) {
                     ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
                     ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
@@ -297,8 +314,8 @@ const FileOperate: React.FC = () => {
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
     }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox]);
-    
-    const getScaledCoords = useCallback((e: MouseEvent | {clientX: number, clientY: number}): Point => {
+
+    const getScaledCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
         if (!canvas) return { x: 0, y: 0 };
         const rect = canvas.getBoundingClientRect();
@@ -344,7 +361,7 @@ const FileOperate: React.FC = () => {
         magCtx.stroke();
 
     }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos]);
-    
+
     useEffect(() => {
         drawMagnifier();
     }, [canvasMousePos, drawMagnifier]);
@@ -490,7 +507,7 @@ const FileOperate: React.FC = () => {
 
         const newYoloLines = allLines.filter(line => !line.startsWith(boxNameToDelete + ' '));
         const newYoloContent = newYoloLines.join('\n');
-        
+
         setCurrentYoloContent(newYoloContent);
 
         let newJsonContent = currentJsonContent;
@@ -598,7 +615,7 @@ const FileOperate: React.FC = () => {
 
     const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only react to left-click
-        
+
         if (activeTool === 'stain' || activeTool === 'delete') {
             handleCanvasAction(e);
             return;
@@ -623,9 +640,9 @@ const FileOperate: React.FC = () => {
                 const [, relX, relY, relW, relH] = parts;
                 const absW = relW * canvas.width, absH = relH * canvas.height;
                 const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
-                const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
+                const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
 
-                for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
+                for (const handleKey of Object.keys(handles) as ResizeHandle[]) {
                     const handle = handles[handleKey];
                     if (startPos.x >= handle.x && startPos.x <= handle.x + handle.size && startPos.y >= handle.y && startPos.y <= handle.y + handle.size) {
                         setDraggingState({
@@ -699,7 +716,7 @@ const FileOperate: React.FC = () => {
         } else if (draggingState) {
             if (draggingState.type === 'region-select') {
                 setRegionSelectBox({ start: draggingState.startMousePos, end: currentPos });
-                setRedrawTrigger(p => p+1);
+                setRedrawTrigger(p => p + 1);
             } else if (activeTool === 'select') {
                 if (draggingState.type === 'move' && draggingState.startYoloData) {
                     const dx = (currentPos.x - draggingState.startMousePos.x) / canvas.width;
@@ -747,8 +764,8 @@ const FileOperate: React.FC = () => {
                     const [, relX, relY, relW, relH] = selectedLine.split(' ').slice(1).map(parseFloat);
                     const absW = relW * canvas.width, absH = relH * canvas.height;
                     const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
-                    const handles = getResizeHandles({x: absLeft, y: absTop, width: absW, height: absH});
-                    for(const handleKey of Object.keys(handles) as ResizeHandle[]) {
+                    const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
+                    for (const handleKey of Object.keys(handles) as ResizeHandle[]) {
                         const handle = handles[handleKey];
                         if (currentPos.x >= handle.x && currentPos.x <= handle.x + handle.size && currentPos.y >= handle.y && currentPos.y <= handle.y + handle.size) {
                             newHoveredHandle = handleKey;
@@ -767,7 +784,7 @@ const FileOperate: React.FC = () => {
         if (e.button !== 0) return;
         const canvas = canvasRef.current; if (!canvas) return;
         const upPos = getScaledCoords(e);
-        
+
         if (isDrawing && activeTool === 'draw') {
             setIsDrawing(false);
             const x1 = Math.min(mouseDownCoords.x, upPos.x); const y1 = Math.min(mouseDownCoords.y, upPos.y);
@@ -801,7 +818,7 @@ const FileOperate: React.FC = () => {
         } else if (draggingState && draggingState.type === 'region-select') {
             const start = draggingState.startMousePos;
             const end = upPos;
-            const selectionRect = {
+            const selRect = {
                 x: Math.min(start.x, end.x),
                 y: Math.min(start.y, end.y),
                 width: Math.abs(start.x - end.x),
@@ -810,14 +827,31 @@ const FileOperate: React.FC = () => {
 
             const boxNamesToDelete: string[] = [];
             parsedYoloData.forEach(item => {
-                const absW = item.w * canvas.width;
-                const absH = item.h * canvas.height;
-                const absLeft = (item.x - item.w / 2) * canvas.width;
-                const absTop = (item.y - item.h / 2) * canvas.height;
-                if (absLeft >= selectionRect.x &&
-                    absTop >= selectionRect.y &&
-                    absLeft + absW <= selectionRect.x + selectionRect.width &&
-                    absTop + absH <= selectionRect.y + selectionRect.height) {
+                const boxRect = {
+                    width: item.w * canvas.width,
+                    height: item.h * canvas.height,
+                    x: (item.x - item.w / 2) * canvas.width,
+                    y: (item.y - item.h / 2) * canvas.height
+                };
+
+                let shouldDelete = false;
+                if (regionDeleteMode === 'contain') {
+                    shouldDelete = (
+                        boxRect.x >= selRect.x &&
+                        boxRect.y >= selRect.y &&
+                        boxRect.x + boxRect.width <= selRect.x + selRect.width &&
+                        boxRect.y + boxRect.height <= selRect.y + selRect.height
+                    );
+                } else { // 'intersect' mode
+                    shouldDelete = !(
+                        boxRect.x > selRect.x + selRect.width ||
+                        boxRect.x + boxRect.width < selRect.x ||
+                        boxRect.y > selRect.y + selRect.height ||
+                        boxRect.y + boxRect.height < selRect.y
+                    );
+                }
+
+                if (shouldDelete) {
                     boxNamesToDelete.push(item.name);
                 }
             });
@@ -828,7 +862,7 @@ const FileOperate: React.FC = () => {
 
                 const allLines = (currentYoloContent || '').split('\n');
                 const deletedLines: { index: number, content: string }[] = [];
-                
+
                 const newYoloLines = allLines.filter((line, index) => {
                     const name = line.split(' ')[0];
                     if (boxNamesToDelete.includes(name)) {
@@ -875,27 +909,27 @@ const FileOperate: React.FC = () => {
         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
         setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
         setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
-      }, [currentYoloContent, currentIndex, setOperationHistory, setRedoHistory]);
+    }, [currentYoloContent, currentIndex, setOperationHistory, setRedoHistory]);
 
-      const handleEditFocus = useCallback((boxName: string) => {
+    const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
-          addUndoRecord();
-          setIsCurrentlyEditingId(boxName);
+            addUndoRecord();
+            setIsCurrentlyEditingId(boxName);
         }
-      }, [isCurrentlyEditingId, addUndoRecord]);
+    }, [isCurrentlyEditingId, addUndoRecord]);
 
-      const handleAnnotationPropertyUpdate = useCallback((boxName: string, propIndex: number, value: number | null) => {
+    const handleAnnotationPropertyUpdate = useCallback((boxName: string, propIndex: number, value: number | null) => {
         if (value === null) return;
         const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
-          const parts = line.split(' ');
-          if (parts[0] === boxName) {
-            parts[propIndex + 1] = (value as number).toFixed(6);
-            return parts.join(' ');
-          }
-          return line;
+            const parts = line.split(' ');
+            if (parts[0] === boxName) {
+                parts[propIndex + 1] = (value as number).toFixed(6);
+                return parts.join(' ');
+            }
+            return line;
         }).join('\n');
         setCurrentYoloContent(newYoloContent);
-      }, [currentYoloContent, setCurrentYoloContent]);
+    }, [currentYoloContent, setCurrentYoloContent]);
 
     const handleUndo = () => {
         const currentImageHistory = operationHistory[currentIndex] || [];
@@ -965,13 +999,13 @@ const FileOperate: React.FC = () => {
 
         try {
             const zip = new JSZip();
-            
+
             const allYoloFiles = new Map(yoloList.map(f => [getFileNameWithoutExtension(f.name), f]));
             if (currentYoloContent !== null && pngList[currentIndex]) {
                 const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
                 allYoloFiles.set(baseName, new File([currentYoloContent], `${baseName}.txt`, { type: 'text/plain' }));
             }
-    
+
             const allJsonFiles = new Map(jsonList.map(f => [getFileNameWithoutExtension(f.name), f]));
             if (currentJsonContent !== null && pngList[currentIndex]) {
                 const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
@@ -1041,9 +1075,9 @@ const FileOperate: React.FC = () => {
             const resultData: ApiResponse = await response.json();
 
             if (!resultData || !resultData.cpnts || resultData.cpnts.length === 0) {
-                 message.info({ content: "AI 未返回任何有效标注。", key: 'ai-annotation', duration: 3 });
-                 setIsAiAnnotating(false);
-                 return;
+                message.info({ content: "AI 未返回任何有效标注。", key: 'ai-annotation', duration: 3 });
+                setIsAiAnnotating(false);
+                return;
             }
 
             const previousYolo = currentYoloContent;
@@ -1055,8 +1089,8 @@ const FileOperate: React.FC = () => {
             const newlyDiscovered = newLabels.filter(l => !existingLabels.includes(l));
 
             let currentClassMap = classMap;
-            if(newlyDiscovered.length > 0) {
-                let newClassMap = {...classMap};
+            if (newlyDiscovered.length > 0) {
+                let newClassMap = { ...classMap };
                 let lastIndex = Object.keys(classMap).length > 0 ? Math.max(...Object.keys(classMap).map(Number)) : -1;
                 newlyDiscovered.forEach(label => {
                     lastIndex++;
@@ -1069,13 +1103,34 @@ const FileOperate: React.FC = () => {
             const newYoloContent = convertCpntsToYolo(resultData.cpnts, width, height, currentClassMap);
 
             if (!newYoloContent) {
-                 message.info({ content: "AI 未返回可解析的标注。", key: 'ai-annotation', duration: 3 });
-                 setIsAiAnnotating(false);
-                 return;
+                message.info({ content: "AI 未返回可解析的标注。", key: 'ai-annotation', duration: 3 });
+                setIsAiAnnotating(false);
+                return;
             }
 
+            const newJsonContent = JSON.stringify(parseJsonContent(JSON.stringify(resultData, null, 2)), null, 2);
+
+            // Bedrock Fix: Persist AI annotation results to the global state immediately
+            const baseName = getFileNameWithoutExtension(currentPng.name);
+            const yoloFile = new File([newYoloContent], `${baseName}.txt`, { type: 'text/plain' });
+            setYoloList(prev => {
+                const newList = [...prev];
+                const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === baseName);
+                if (idx > -1) newList[idx] = yoloFile; else newList.push(yoloFile);
+                return newList;
+            });
+
+            const jsonFile = new File([newJsonContent], `${baseName}.json`, { type: 'application/json' });
+            setJsonList(prev => {
+                const newList = [...prev];
+                const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === baseName);
+                if (idx > -1) newList[idx] = jsonFile; else newList.push(jsonFile);
+                return newList;
+            });
+
+
             setCurrentYoloContent(newYoloContent);
-            setCurrentJsonContent(JSON.stringify(parseJsonContent(JSON.stringify(resultData, null, 2)), null, 2));
+            setCurrentJsonContent(newJsonContent);
 
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
             setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
@@ -1094,7 +1149,7 @@ const FileOperate: React.FC = () => {
     const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomColor() } })); };
     const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setClassMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
     const handleDeleteClass = (indexToDelete: number) => { const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${classMap[indexToDelete]?.label}`) : `确认删除类别 [${indexToDelete}] ${classMap[indexToDelete]?.label}?`; Modal.confirm({ title: title, content: t.deleteClassConfirmContent, okText: t.confirmDelete, cancelText: t.cancel, okType: 'danger', onOk: () => { const newClassMap = { ...classMap }; delete newClassMap[indexToDelete]; setClassMap(newClassMap); if (currentClassIndex === indexToDelete) { const firstKey = Object.keys(newClassMap)[0]; setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0); } message.success(t.classDeleted.replace('%s', classMap[indexToDelete]?.label || '')); } }); };
-    
+
     const handleExportClasses = () => {
         const exportObj: { [key: string]: string } = {};
         for (const key in classMap) {
@@ -1153,11 +1208,11 @@ const FileOperate: React.FC = () => {
         if (event.target) event.target.value = '';
     };
 
-    const isSelectedForEdit = (item: {name: string}) => activeTool === 'select' && item.name === selectedBoxName;
-    
+    const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName;
+
     const getCanvasCursor = () => {
         if (isMagnifierVisible) return 'none'; // Hide system cursor when magnifier is active
-        switch(activeTool) {
+        switch (activeTool) {
             case 'delete': return 'delete-cursor';
             case 'draw': return 'draw-cursor';
             case 'region-delete': return 'draw-cursor'; // crosshair
@@ -1248,16 +1303,25 @@ const FileOperate: React.FC = () => {
                         tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}
                     >
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
-                            <div className="tab-pane-content">
-                                <Form layout="vertical">
-                                    <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
-                                        <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => ( <Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option> ))}</Select>
-                                    </Form.Item>
-                                    <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
-                                    <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
-                                </Form>
-                                <Divider />
-                                <Title level={5} style={{ marginBottom: 8 }}>{t.annotations}</Title>
+                            {/* Bedrock Fix: Use Flex component for robust layout */}
+                            <Flex vertical className="tab-pane-content">
+                                <div style={{ flexShrink: 0 }}>
+                                    <Form layout="vertical">
+                                        <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
+                                            <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
+                                        </Form.Item>
+                                        <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
+                                        <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
+                                        <Form.Item label={t.regionDeleteMode} style={{ marginBottom: 8, display: activeTool === 'region-delete' ? 'block' : 'none' }}>
+                                            <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode}>
+                                                <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
+                                                <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
+                                            </Radio.Group>
+                                        </Form.Item>
+                                    </Form>
+                                    <Divider />
+                                    <Title level={5} style={{ marginBottom: 8 }}>{t.annotations}</Title>
+                                </div>
                                 {parsedYoloData.length > 0 ? (
                                     <div className="annotation-collapse-container">
                                         <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost>
@@ -1298,10 +1362,10 @@ const FileOperate: React.FC = () => {
                                         </Collapse>
                                     </div>
                                 ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{t.noAnnotations}</Text>}
-                            </div>
+                            </Flex>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-                             <div className="tab-pane-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                            <div className="tab-pane-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                                 <div style={{ flex: 0.5, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     <Title level={5}>YOLO Data</Title>
                                     <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
@@ -1310,14 +1374,14 @@ const FileOperate: React.FC = () => {
                                     <Title level={5}>JSON Data</Title>
                                     <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
                                 </div>
-                             </div>
+                            </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
                             <div className="tab-pane-content">
                                 <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
                                 <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
                                 <div className="class-list-container">
-                                    <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return ( <List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item> ); }} />
+                                    <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
                                 </div>
                                 <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16 }}>{t.addClass}</Button>
                             </div>
