@@ -7,22 +7,24 @@ export interface ClassInfo {
   color: string;
 }
 
-// Bedrock Note: 新增API响应类型定义，与MaskOperate保持同步，以便调用同一个后端
+// Bedrock Change: Unified API response type definitions, aligned with MaskOperate
+// This ensures consistency when processing data from the shared backend.
 export interface ApiComponent {
   b: number; // bottom
   l: number; // left
   r: number; // right
   t: number; // top
   type: string;
-  // 允许其他可能的字段
+  // Allows for other potential fields from the API
   [key: string]: any;
 }
 
 export interface ApiResponse {
   cpnts?: ApiComponent[];
-  // 保留 key_points 和 segments 的可选定义，以增强类型安全性
+  // Retaining optional definitions for key_points and segments to enhance type safety
   key_points?: any[];
   segments?: any[];
+  // Allows for other top-level keys in the response
   [key: string]: any;
 }
 

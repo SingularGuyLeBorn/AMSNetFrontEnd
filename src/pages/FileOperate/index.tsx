@@ -81,6 +81,13 @@ interface JsonData {
     global: { [key: string]: any };
 }
 
+// Bedrock Change: Define a more specific API Response Type
+type FullApiResponse = ApiResponse & {
+    netlist_scs?: string;
+    netlist_cdl?: string;
+};
+
+
 const RESIZE_HANDLE_SIZE = 8;
 const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
@@ -99,13 +106,19 @@ export const parseJsonContent = (jsonContent: string | null): JsonData => {
             return { local: { buildingBlocks: {}, constants: {} }, global: {} };
         }
         const parsed = JSON.parse(jsonContent);
+        // This check is important because AI response will not have 'local'
+        if (!parsed.local && !parsed.global && (parsed.cpnts || parsed.segments)) {
+            // It looks like an AI response, not the internal format.
+            // For now, to avoid breaking the 'stain' tool, we treat it as empty for the internal structure.
+            return { local: { buildingBlocks: {}, constants: {} }, global: {} };
+        }
         parsed.local = parsed.local || { buildingBlocks: {}, constants: {} };
         parsed.local.buildingBlocks = parsed.local.buildingBlocks || {};
         parsed.local.constants = parsed.local.constants || {};
         parsed.global = parsed.global || {};
         return parsed;
     } catch (e) {
-        console.error("JSON parsing failed, returning default object.", e);
+        console.error("JSON parsing for staining tool failed, returning default object.", e);
         return { local: { buildingBlocks: {}, constants: {} }, global: {} };
     }
 };
@@ -208,6 +221,10 @@ const FileOperate: React.FC = () => {
     const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
     const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
 
+    // Bedrock Change: New states for netlist data
+    const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
+    const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
+
 
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
@@ -268,9 +285,10 @@ const FileOperate: React.FC = () => {
                     }
                 });
 
-                const parsedJson = parseJsonContent(currentJsonContent);
-                if (parsedJson.local) {
-                    Object.values(parsedJson.local).forEach(nameMap => {
+                // This uses parseJsonContent, which is designed for the stain tool's specific schema.
+                const parsedStainJson = parseJsonContent(currentJsonContent);
+                if (parsedStainJson.local) {
+                    Object.values(parsedStainJson.local).forEach(nameMap => {
                         if (nameMap && typeof nameMap === 'object') {
                             Object.entries(nameMap).forEach(([name, boxNamesArray]) => {
                                 const color = jsonNameColorMap[name]; if (!color || !Array.isArray(boxNamesArray)) return;
@@ -394,6 +412,8 @@ const FileOperate: React.FC = () => {
             setCurrentPng(null);
             setCurrentYoloContent('');
             setCurrentJsonContent('{}');
+            setNetlistScsContent(null);
+            setNetlistCdlContent(null);
             return;
         }
 
@@ -412,11 +432,44 @@ const FileOperate: React.FC = () => {
         const jsonFile = jsonListRef.find(f => getFileNameWithoutExtension(f.name) === baseName);
         if (jsonFile) {
             const text = await jsonFile.text();
-            setCurrentJsonContent(stringifyJsonContent(parseJsonContent(text)));
+            try {
+                // Bedrock Change: Robustly parse full JSON and distribute to different views
+                const fullData = JSON.parse(text);
+
+                // Check if it's the new API response format or the old internal format
+                if (typeof fullData === 'object' && fullData !== null && ('cpnts' in fullData || 'netlist_scs' in fullData)) {
+                    // It's the new format, filter for display
+                    const displayData: { [key: string]: any } = {};
+                    const allowedKeys = ['cpnts', 'key_points', 'ports', 'segments', 'schematic_h', 'schematic_w', 'name'];
+                    allowedKeys.forEach(key => {
+                        if (key in fullData) {
+                            displayData[key] = (fullData as any)[key];
+                        }
+                    });
+
+                    setCurrentJsonContent(JSON.stringify(displayData, null, 2));
+                    setNetlistScsContent(fullData.netlist_scs || null);
+                    setNetlistCdlContent(fullData.netlist_cdl || null);
+                } else {
+                    // It's the old format or something else, use the original logic
+                    setCurrentJsonContent(text); // Display as is
+                    setNetlistScsContent(null);
+                    setNetlistCdlContent(null);
+                }
+            } catch (e) {
+                // If parsing fails, it's likely the old format which might not be perfect JSON
+                setCurrentJsonContent(text);
+                setNetlistScsContent(null);
+                setNetlistCdlContent(null);
+            }
         } else {
-            setCurrentJsonContent(stringifyJsonContent(parseJsonContent(null)));
+            // No JSON file exists
+            setCurrentJsonContent('{}');
+            setNetlistScsContent(null);
+            setNetlistCdlContent(null);
         }
     }, [pngList, classMap, convertStandardYoloToInternal, setCurrentYoloContent, setCurrentJsonContent, setCurrentPng]);
+
 
     useEffect(() => {
         loadDataForIndex(currentIndex, yoloList, jsonList);
@@ -974,7 +1027,24 @@ const FileOperate: React.FC = () => {
             });
         }
         if (currentJsonContent !== null && pngList[currentIndex]) {
-            const jsonFile = new File([currentJsonContent], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.json`, { type: 'application/json' });
+            // Bedrock Change: Reconstruct the full JSON before saving if netlist data exists
+            let jsonToSave = currentJsonContent;
+            if (netlistScsContent || netlistCdlContent) {
+                try {
+                    const mainJsonPart = JSON.parse(currentJsonContent || '{}');
+                    const fullJsonData = {
+                        ...mainJsonPart,
+                        netlist_scs: netlistScsContent,
+                        netlist_cdl: netlistCdlContent
+                    };
+                    jsonToSave = JSON.stringify(fullJsonData, null, 2);
+                } catch (e) {
+                    // Fallback if currentJsonContent is not valid JSON
+                    console.error("Could not reconstruct full JSON for saving, saving display part only.", e);
+                }
+            }
+
+            const jsonFile = new File([jsonToSave], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.json`, { type: 'application/json' });
             setJsonList(prev => {
                 const newList = [...prev];
                 const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(jsonFile.name));
@@ -985,7 +1055,7 @@ const FileOperate: React.FC = () => {
         }
 
         setCurrentIndex(newIndex);
-    }, [currentIndex, pngList, currentYoloContent, currentJsonContent, setYoloList, setJsonList, setCurrentIndex]);
+    }, [currentIndex, pngList, currentYoloContent, currentJsonContent, netlistScsContent, netlistCdlContent, setYoloList, setJsonList, setCurrentIndex]);
 
     const handleNextIndex = () => saveAndSwitchIndex(currentIndex + 1);
     const handlePrevIndex = () => saveAndSwitchIndex(currentIndex - 1);
@@ -1009,7 +1079,19 @@ const FileOperate: React.FC = () => {
             const allJsonFiles = new Map(jsonList.map(f => [getFileNameWithoutExtension(f.name), f]));
             if (currentJsonContent !== null && pngList[currentIndex]) {
                 const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
-                allJsonFiles.set(baseName, new File([currentJsonContent], `${baseName}.json`, { type: 'application/json' }));
+                let jsonToSave = currentJsonContent;
+                if (netlistScsContent || netlistCdlContent) {
+                    try {
+                        const mainJsonPart = JSON.parse(currentJsonContent || '{}');
+                        const fullJsonData = {
+                            ...mainJsonPart,
+                            netlist_scs: netlistScsContent,
+                            netlist_cdl: netlistCdlContent
+                        };
+                        jsonToSave = JSON.stringify(fullJsonData, null, 2);
+                    } catch (e) { /* use filtered content as fallback */ }
+                }
+                allJsonFiles.set(baseName, new File([jsonToSave], `${baseName}.json`, { type: 'application/json' }));
             }
 
             for (const pngFile of pngList) {
@@ -1034,7 +1116,7 @@ const FileOperate: React.FC = () => {
                 if (jsonFile) {
                     jsonContentForFile = await jsonFile.text();
                 }
-                zip.file(`json/${baseName}.json`, stringifyJsonContent(parseJsonContent(jsonContentForFile)));
+                zip.file(`json/${baseName}.json`, jsonContentForFile); // Save the full/reconstructed JSON
             }
 
             const content = await zip.generateAsync({ type: 'blob' });
@@ -1072,7 +1154,7 @@ const FileOperate: React.FC = () => {
                 throw new Error(errorDetail);
             }
 
-            const resultData: ApiResponse = await response.json();
+            const resultData: FullApiResponse = await response.json();
 
             if (!resultData || !resultData.cpnts || resultData.cpnts.length === 0) {
                 message.info({ content: "AI 未返回任何有效标注。", key: 'ai-annotation', duration: 3 });
@@ -1108,7 +1190,16 @@ const FileOperate: React.FC = () => {
                 return;
             }
 
-            const newJsonContent = JSON.stringify(parseJsonContent(JSON.stringify(resultData, null, 2)), null, 2);
+            // Bedrock Change: Create a clean JSON object for display, filtering keys
+            const displayData: { [key: string]: any } = {};
+            const allowedKeys = ['cpnts', 'key_points', 'ports', 'segments', 'schematic_h', 'schematic_w', 'name'];
+            allowedKeys.forEach(key => {
+                if (key in resultData) {
+                    displayData[key] = (resultData as any)[key];
+                }
+            });
+            const displayJsonContent = JSON.stringify(displayData, null, 2);
+
 
             // Bedrock Fix: Persist AI annotation results to the global state immediately
             const baseName = getFileNameWithoutExtension(currentPng.name);
@@ -1120,7 +1211,8 @@ const FileOperate: React.FC = () => {
                 return newList;
             });
 
-            const jsonFile = new File([newJsonContent], `${baseName}.json`, { type: 'application/json' });
+            // Persist the full JSON data (including netlists) for robust loading/saving
+            const jsonFile = new File([JSON.stringify(resultData, null, 2)], `${baseName}.json`, { type: 'application/json' });
             setJsonList(prev => {
                 const newList = [...prev];
                 const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === baseName);
@@ -1128,9 +1220,12 @@ const FileOperate: React.FC = () => {
                 return newList;
             });
 
-
+            // Update local state for immediate display
             setCurrentYoloContent(newYoloContent);
-            setCurrentJsonContent(newJsonContent);
+            setCurrentJsonContent(displayJsonContent); // Use the filtered JSON for the main display
+            setNetlistScsContent(resultData.netlist_scs || '');
+            setNetlistCdlContent(resultData.netlist_cdl || '');
+
 
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
             setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
@@ -1303,8 +1398,7 @@ const FileOperate: React.FC = () => {
                         tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}
                     >
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
-                            {/* Bedrock Fix: Use Flex component for robust layout */}
-                            <Flex vertical className="tab-pane-content">
+                            <div className="tab-pane-content">
                                 <div style={{ flexShrink: 0 }}>
                                     <Form layout="vertical">
                                         <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
@@ -1362,17 +1456,27 @@ const FileOperate: React.FC = () => {
                                         </Collapse>
                                     </div>
                                 ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{t.noAnnotations}</Text>}
-                            </Flex>
+                            </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-                            <div className="tab-pane-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                                <div style={{ flex: 0.5, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <Title level={5}>YOLO Data</Title>
-                                    <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
-                                </div>
-                                <div style={{ flex: 0.5, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
-                                    <Title level={5}>JSON Data</Title>
-                                    <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
+                            <div className="tab-pane-content">
+                                <div className="data-view-container">
+                                    <div className="data-view-item">
+                                        <Title level={5}>YOLO Data (.txt)</Title>
+                                        <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
+                                    </div>
+                                    <div className="data-view-item">
+                                        <Title level={5}>Annotation Data (.json)</Title>
+                                        <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
+                                    </div>
+                                    <div className="data-view-item">
+                                        <Title level={5}>Netlist (.scs)</Title>
+                                        <textarea value={netlistScsContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (SCS format) will be shown here after processing." />
+                                    </div>
+                                    <div className="data-view-item">
+                                        <Title level={5}>Netlist (.cdl)</Title>
+                                        <textarea value={netlistCdlContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (CDL format) will be shown here after processing." />
+                                    </div>
                                 </div>
                             </div>
                         </TabPane>

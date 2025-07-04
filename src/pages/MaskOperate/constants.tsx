@@ -65,6 +65,9 @@ export interface ApiResponse {
   key_points?: ApiKeyPoint[];
   segments?: ApiSegment[];
   cpnts?: ApiComponent[];
+  // Bedrock Change: Add optional netlist fields for type safety
+  netlist_scs?: string;
+  netlist_cdl?: string;
   [key: string]: any;
 }
 

@@ -161,15 +161,29 @@
   margin-bottom: 0 !important;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+/* Bedrock Fix: Cascade height: 100% through AntD's internal Tab structure */
+.inspector-tabs .ant-tabs-content-holder,
+.inspector-tabs .ant-tabs-content,
+.inspector-tabs .ant-tabs-tabpane {
+  height: 100%;
 }
 
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  /* IMPORTANT: This prevents the holder from scrolling */
 }
 
 .tab-pane-content {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 16px;
+  overflow-y: auto;
 }
 
 .class-list-container {
@@ -180,10 +194,11 @@
 }
 
 .annotation-collapse-container {
-  max-height: calc(100vh - 200px); /* Adjusted for better default view */
+  flex-grow: 1;
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;
+  min-height: 50px;
 }
 
 .class-management-item {
@@ -203,12 +218,30 @@
   background-color: var(--background-color);
 }
 
+/* Bedrock Change: New styles for data view container (shared) */
+.data-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.data-view-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  /* Each item takes equal space */
+  min-height: 0;
+  /* Crucial for flexbox resizing in a scrolling container */
+}
+
 /* --- Data Textareas (Shared) --- */
-/* This class is used by both FileOperate and MaskOperate */
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
-  min-height: 150px;
+  min-height: 100px;
+  /* Reduced min-height to fit multiple textareas */
   padding: 8px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -216,7 +249,7 @@
   font-size: 13px;
   color: var(--text-color-primary);
   background-color: var(--sider-background-color);
-  resize: vertical;
+  resize: none;
 }
 
 /* --- Annotation List (Shared) --- */
@@ -241,7 +274,7 @@
 }
 
 .annotation-details-input {
-    width: 100%;
+  width: 100%;
 }
 
 /* --- Ant Design Overrides & Helpers --- */
@@ -262,4 +295,5 @@
 .ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
 }
+
 /* END OF FILE src/pages/MaskOperate/index.css */

@@ -205,6 +205,9 @@
   flex-direction: column;
   height: 100%;
   gap: 16px;
+  /* Bedrock Change: Ensure consistent gap */
+  overflow-y: auto;
+  /* Bedrock Change: Allow the whole pane to scroll if needed */
 }
 
 .class-list-container {
@@ -243,6 +246,25 @@
   background-color: var(--background-color);
 }
 
+/* Bedrock Change: New styles for data view container */
+.data-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.data-view-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  /* Each item takes equal space */
+  min-height: 0;
+  /* Crucial for flexbox resizing in a scrolling container */
+}
+
+
 /* --- Data Textareas (FileOperate) --- */
 .data-content-textarea {
   width: 100%;
@@ -255,7 +277,8 @@
   font-size: 13px;
   color: var(--text-color-primary);
   background-color: var(--sider-background-color);
-  resize: vertical;
+  resize: none;
+  /* Disable manual resizing */
 }
 
 /* --- Annotation List (MaskOperate & FileOperate) --- */

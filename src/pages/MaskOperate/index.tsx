@@ -88,7 +88,7 @@ export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key
 };
 
 
-export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
+export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiResponse, 'key_points' | 'segments'> => {
   const key_points: ApiKeyPoint[] = [];
   const segments: ApiSegment[] = [];
   const pointMap = new Map<string, number>();
@@ -155,6 +155,11 @@ const MaskOperate = () => {
 
   const [localAnnotations, setLocalAnnotations] = useState<ViewAnnotation[]>([]);
 
+  // Bedrock Change: Add state for netlist data
+  const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
+  const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
+
+
   const [activeTool, setActiveTool] = useState<ActiveTool>('select');
   const [currentCategory, setCurrentCategory] = useState<string>(categories[0] || "");
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(2);
@@ -182,19 +187,51 @@ const MaskOperate = () => {
   const hasActiveImage = images.length > 0 && currentImageIndex >= 0 && currentImageIndex < images.length;
 
   const currentViewAnnotations: ViewAnnotation[] = localAnnotations;
-  const currentApiJson = useMemo(() => convertViewToApi(currentViewAnnotations), [currentViewAnnotations]);
+  const currentApiJson = useMemo(() => {
+    if (!currentImageDetails) return {};
+    const sourceApi = allImageAnnotations[currentImageDetails.name]?.apiJson || {};
+    const generatedData = convertViewToApi(currentViewAnnotations);
+    return { ...sourceApi, ...generatedData };
+  }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
+
+  // Bedrock Change: Memoized value for Raw Data Tab display
+  const displayApiJson = useMemo(() => {
+    if (!currentImageDetails) return {};
+    const apiJsonForImage = allImageAnnotations[currentImageDetails.name]?.apiJson;
+    if (apiJsonForImage) {
+      return {
+        key_points: apiJsonForImage.key_points || [],
+        segments: apiJsonForImage.segments || []
+      };
+    }
+    // Fallback for purely manual annotations not yet saved
+    return convertViewToApi(currentViewAnnotations);
+  }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
+
 
   const currentUndoStackSize = (mask_operationHistory[currentImageIndex] || []).length;
   const currentRedoStackSize = (mask_redoHistory[currentImageIndex] || []).length;
 
+  // Bedrock Change: Enhanced data loading from global store
   useEffect(() => {
     if (currentImageDetails) {
-      const annotationsFromGlobalStore = allImageAnnotations[currentImageDetails.name]?.viewAnnotations || [];
-      setLocalAnnotations(annotationsFromGlobalStore);
+      const imageData = allImageAnnotations[currentImageDetails.name];
+      if (imageData) {
+        setLocalAnnotations(imageData.viewAnnotations || []);
+        setNetlistScsContent(imageData.apiJson?.netlist_scs || null);
+        setNetlistCdlContent(imageData.apiJson?.netlist_cdl || null);
+      } else {
+        setLocalAnnotations([]);
+        setNetlistScsContent(null);
+        setNetlistCdlContent(null);
+      }
     } else {
       setLocalAnnotations([]);
+      setNetlistScsContent(null);
+      setNetlistCdlContent(null);
     }
   }, [currentImageDetails, allImageAnnotations]);
+
 
   const getResizeHandles = (box: ViewBoxAnnotation): { [key in ResizeHandle]?: { x: number, y: number, size: number, cursor: string } } => {
     const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
@@ -475,8 +512,11 @@ const MaskOperate = () => {
   const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
     if (!currentImageDetails) return;
     setAllImageAnnotations(prev => {
-      const updatedApiJson = newApiJson || convertViewToApi(newViewAnnotations);
-      return { ...prev, [currentImageDetails.name]: { ...prev[currentImageDetails.name], viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
+      const sourceApiJson = prev[currentImageDetails.name]?.apiJson || {};
+      const generatedApiJson = convertViewToApi(newViewAnnotations);
+      // Combine generated data with existing data, preserving extra fields like 'cpnts' or netlists
+      const updatedApiJson = { ...sourceApiJson, ...generatedApiJson, ...(newApiJson || {}) };
+      return { ...prev, [currentImageDetails.name]: { viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
     });
   }, [currentImageDetails, setAllImageAnnotations]);
 
@@ -755,7 +795,8 @@ const MaskOperate = () => {
       if (jsonFile) {
         try {
           const parsedData = JSON.parse(await jsonFile.text());
-          apiJson = { key_points: parsedData.key_points || [], segments: parsedData.segments || [] };
+          // Bedrock Change: accept full API response on load
+          apiJson = parsedData;
 
           const viewAnnotations = convertApiToView(apiJson, tempColors, currentLineWidth);
 
@@ -790,11 +831,15 @@ const MaskOperate = () => {
     const newIndex = currentImageIndex + offset;
     if (newIndex >= 0 && newIndex < images.length) {
       if (currentImageDetails) {
-        updateGlobalAnnotations(localAnnotations);
+        // Save current state before navigating
+        updateGlobalAnnotations(localAnnotations, currentApiJson);
       }
       setCurrentImageIndex(newIndex);
       setSelectedAnnotationId(null);
       setDraggingState(null);
+      // Reset netlist content for the new image
+      setNetlistCdlContent(null);
+      setNetlistScsContent(null);
     }
   };
 
@@ -811,15 +856,25 @@ const MaskOperate = () => {
       const classText = `classes = ${JSON.stringify(exportClassObj, null, 4)}`;
       zip.file("classes.txt", classText);
 
+      // Create a final, up-to-date version of all annotations before zipping
+      const finalAllAnnotations = { ...allImageAnnotations };
+      if (currentImageDetails) {
+        const currentGeneratedData = convertViewToApi(localAnnotations);
+        finalAllAnnotations[currentImageDetails.name] = {
+          viewAnnotations: localAnnotations,
+          apiJson: {
+            ...(allImageAnnotations[currentImageDetails.name]?.apiJson || {}),
+            ...currentGeneratedData
+          }
+        };
+      }
+
       for (const imageFile of images) {
         zip.file(`images/${imageFile.name}`, imageFile);
         const imageName = imageFile.name;
-        const annotationsForImage = allImageAnnotations[imageName] || { viewAnnotations: [], apiJson: {} };
+        const annotationsForImage = finalAllAnnotations[imageName];
 
-        const finalAnnotations = (currentImageDetails?.name === imageName) ? localAnnotations : annotationsForImage.viewAnnotations;
-        const finalApiJson = convertViewToApi(finalAnnotations);
-
-        const jsonContent = JSON.stringify(finalApiJson, null, 2);
+        const jsonContent = JSON.stringify(annotationsForImage?.apiJson || {}, null, 2);
 
         const baseName = getFileNameWithoutExtension(imageName);
         zip.file(`json/${baseName}.json`, jsonContent);
@@ -843,7 +898,7 @@ const MaskOperate = () => {
       const formData = new FormData();
       formData.append('file', currentImageDetails.originalFile, currentImageDetails.originalFile.name);
 
-      const response = await fetch('http://111.229.103.50:8199/process/', {
+      const response = await fetch('http://111.229.103.50:8100/process/', {
         method: 'POST',
         body: formData
       });
@@ -867,6 +922,10 @@ const MaskOperate = () => {
         return;
       }
 
+      // Bedrock Change: Set netlist state from API response
+      setNetlistScsContent(apiResult.netlist_scs || null);
+      setNetlistCdlContent(apiResult.netlist_cdl || null);
+
       const newViewAnnotations = convertApiToView(apiResult, categoryColors, currentLineWidth);
 
       const newCatNames = [...new Set(newViewAnnotations.map(a => a.category))];
@@ -888,6 +947,7 @@ const MaskOperate = () => {
 
       addUndoRecord();
       setLocalAnnotations(finalViewAnnotations);
+      // Persist the full API result (including netlists) to the global store
       updateGlobalAnnotations(finalViewAnnotations, apiResult);
       message.success({ content: `${t.operationSuccessful}: ${finalViewAnnotations.length} annotations loaded.`, key: 'ai-annotation', duration: 3 });
 
@@ -1144,12 +1204,34 @@ const MaskOperate = () => {
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-              <div className="tab-pane-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                <textarea
-                  className="data-content-textarea"
-                  readOnly
-                  value={JSON.stringify(currentApiJson, null, 2)}
-                />
+              <div className="tab-pane-content data-view-container">
+                <div className="data-view-item">
+                  <Title level={5}>Core Annotation Data (.json)</Title>
+                  <textarea
+                    className="data-content-textarea"
+                    readOnly
+                    value={JSON.stringify(displayApiJson, null, 2)}
+                    placeholder="Key points and segments data will be shown here."
+                  />
+                </div>
+                <div className="data-view-item">
+                  <Title level={5}>Netlist (.scs)</Title>
+                  <textarea
+                    className="data-content-textarea"
+                    readOnly
+                    value={netlistScsContent || ""}
+                    placeholder="Netlist (SCS format) will be shown here after processing."
+                  />
+                </div>
+                <div className="data-view-item">
+                  <Title level={5}>Netlist (.cdl)</Title>
+                  <textarea
+                    className="data-content-textarea"
+                    readOnly
+                    value={netlistCdlContent || ""}
+                    placeholder="Netlist (CDL format) will be shown here after processing."
+                  />
+                </div>
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
