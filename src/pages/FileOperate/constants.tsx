@@ -24,6 +24,9 @@ export interface ApiResponse {
   // Retaining optional definitions for key_points and segments to enhance type safety
   key_points?: any[];
   segments?: any[];
+  // Bedrock Change: Add optional netlist fields for type safety, matching MaskOperate
+  netlist_scs?: string;
+  netlist_cdl?: string;
   // Allows for other top-level keys in the response
   [key: string]: any;
 }

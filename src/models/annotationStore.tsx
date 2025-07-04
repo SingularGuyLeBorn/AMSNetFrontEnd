@@ -1,22 +1,32 @@
-import { useState } from 'react';
-import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
-import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
+// START OF FILE src/models/annotationStore.tsx
 import type { ClassInfo, Operation } from '@/pages/FileOperate/constants';
+import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
 import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/pages/MaskOperate/constants';
+import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
+import { useState } from 'react';
 
-// 新增：RGBA转HEX的辅助函数，确保颜色选择器能正确显示
+// Bedrock Change: Add a robust RGBA to HEX conversion helper function.
+// This is critical for ensuring the color picker input works correctly, as it requires HEX values.
 const rgbaToHex = (rgba: string): string => {
-  if (!rgba) return '#000000';
+  // Return early if the value is already a valid HEX color or is invalid.
+  if (!rgba || typeof rgba !== 'string') return '#000000';
   if (rgba.startsWith('#')) return rgba;
+
+  // Use a regular expression to extract the R, G, B values.
   const parts = rgba.match(/(\d+(\.\d+)?)/g);
-  if (!parts || parts.length < 3) return '#000000';
+  if (!parts || parts.length < 3) return '#000000'; // Return black for invalid formats.
+
+  // Parse integer values from the extracted parts.
   const r = parseInt(parts[0], 10);
   const g = parseInt(parts[1], 10);
   const b = parseInt(parts[2], 10);
+
+  // Convert to HEX and ensure it has 6 digits, padding with leading zeros if necessary.
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
 };
 
-// 修改：在这里将初始的RGBA颜色对象转换为HEX格式的对象
+// Bedrock Change: Pre-process the default RGBA colors into HEX format upon initialization.
+// This ensures that the state starts with the correct data type, preventing downstream bugs.
 const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduce(
   (acc, [key, value]) => {
     acc[key] = rgbaToHex(value);
@@ -71,13 +81,13 @@ export default function useAnnotationStore() {
 
   // MaskOperate 页面的所有图片标注数据集合，以图片名为 key
   const [mask_allImageAnnotations, setMask_allImageAnnotations] = useState<{ [imageName: string]: ImageAnnotationData }>({});
-  
+
   // MaskOperate 页面的类别列表 (保持不变)
   const [mask_categories, setMask_categories] = useState<string[]>(Object.keys(defaultCategoryColors));
-  
-  // 修改：使用预处理过的HEX颜色对象进行初始化
+
+  // Bedrock Change: Use the pre-processed HEX color object for initialization.
   const [mask_categoryColors, setMask_categoryColors] = useState<{ [key: string]: string }>(initialMaskCategoryHexColors);
-  
+
   // MaskOperate 页面当前选中的标注ID
   const [mask_selectedAnnotationId, setMask_selectedAnnotationId] = useState<string | null>(null);
   // MaskOperate 页面的操作历史，用于撤销
@@ -107,3 +117,4 @@ export default function useAnnotationStore() {
     mask_redoHistory, setMask_redoHistory,
   };
 }
+// END OF FILE src/models/annotationStore.tsx

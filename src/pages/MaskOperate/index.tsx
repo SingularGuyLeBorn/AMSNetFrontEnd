@@ -194,15 +194,16 @@ const MaskOperate = () => {
     return { ...sourceApi, ...generatedData };
   }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
 
-  // Bedrock Change: Memoized value for Raw Data Tab display
+  // Bedrock Change: Memoized value for Raw Data Tab display, showing only core data.
   const displayApiJson = useMemo(() => {
     if (!currentImageDetails) return {};
     const apiJsonForImage = allImageAnnotations[currentImageDetails.name]?.apiJson;
     if (apiJsonForImage) {
-      return {
-        key_points: apiJsonForImage.key_points || [],
-        segments: apiJsonForImage.segments || []
-      };
+      // Create a copy and remove netlist data for display purposes
+      const displayData = { ...apiJsonForImage };
+      delete displayData.netlist_cdl;
+      delete displayData.netlist_scs;
+      return displayData;
     }
     // Fallback for purely manual annotations not yet saved
     return convertViewToApi(currentViewAnnotations);
@@ -898,7 +899,7 @@ const MaskOperate = () => {
       const formData = new FormData();
       formData.append('file', currentImageDetails.originalFile, currentImageDetails.originalFile.name);
 
-      const response = await fetch('http://111.229.103.50:8100/process/', {
+      const response = await fetch('http://111.229.103.50:8199/process/', {
         method: 'POST',
         body: formData
       });
@@ -1204,43 +1205,46 @@ const MaskOperate = () => {
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-              <div className="tab-pane-content data-view-container">
-                <div className="data-view-item">
-                  <Title level={5}>Core Annotation Data (.json)</Title>
-                  <textarea
-                    className="data-content-textarea"
-                    readOnly
-                    value={JSON.stringify(displayApiJson, null, 2)}
-                    placeholder="Key points and segments data will be shown here."
-                  />
-                </div>
-                <div className="data-view-item">
-                  <Title level={5}>Netlist (.scs)</Title>
-                  <textarea
-                    className="data-content-textarea"
-                    readOnly
-                    value={netlistScsContent || ""}
-                    placeholder="Netlist (SCS format) will be shown here after processing."
-                  />
-                </div>
-                <div className="data-view-item">
-                  <Title level={5}>Netlist (.cdl)</Title>
-                  <textarea
-                    className="data-content-textarea"
-                    readOnly
-                    value={netlistCdlContent || ""}
-                    placeholder="Netlist (CDL format) will be shown here after processing."
-                  />
-                </div>
-              </div>
+              <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <TabPane tab="Core Data (.json)" key="json-data">
+                  <div className="data-view-item" style={{ height: '100%' }}>
+                    <textarea
+                      className="data-content-textarea"
+                      readOnly
+                      value={JSON.stringify(displayApiJson, null, 2)}
+                      placeholder="Key points and segments data will be shown here."
+                    />
+                  </div>
+                </TabPane>
+                <TabPane tab="Netlist (.scs)" key="scs-data">
+                  <div className="data-view-item" style={{ height: '100%' }}>
+                    <textarea
+                      className="data-content-textarea"
+                      readOnly
+                      value={netlistScsContent || ""}
+                      placeholder="Netlist (SCS format) will be shown here after processing."
+                    />
+                  </div>
+                </TabPane>
+                <TabPane tab="Netlist (.cdl)" key="cdl-data">
+                  <div className="data-view-item" style={{ height: '100%' }}>
+                    <textarea
+                      className="data-content-textarea"
+                      readOnly
+                      value={netlistCdlContent || ""}
+                      placeholder="Netlist (CDL format) will be shown here after processing."
+                    />
+                  </div>
+                </TabPane>
+              </Tabs>
             </TabPane>
             <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
               <div className="tab-pane-content">
                 <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
                   <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
                   <Space.Compact>
-                    <Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
-                    <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
+                    <Tooltip title={t.importClasses || "Import Classes"}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
+                    <Tooltip title={t.exportClasses || "Export Classes"}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
                   </Space.Compact>
                 </Flex>
                 <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{ display: 'none' }} />
@@ -1250,7 +1254,7 @@ const MaskOperate = () => {
                       <div className="class-management-item">
                         <input type="color" value={categoryColors[cat] || '#cccccc'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value)} className="color-picker-input" />
                         <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} placeholder={t.className} />
-                        <Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
+                        <Tooltip title={t.delete || "Delete"}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
                       </div>
                     </List.Item>
                   )} />

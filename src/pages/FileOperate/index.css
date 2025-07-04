@@ -186,7 +186,7 @@
   flex-shrink: 0;
 }
 
-/* Bedrock Fix: Cascade height: 100% through AntD's internal Tab structure */
+/* Bedrock Change: Cascade height: 100% through AntD's internal Tab structure to enable flexbox layout */
 .inspector-tabs .ant-tabs-content-holder,
 .inspector-tabs .ant-tabs-content,
 .inspector-tabs .ant-tabs-tabpane {
@@ -196,7 +196,7 @@
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
   overflow: hidden;
-  /* IMPORTANT: This prevents the holder from scrolling */
+  /* IMPORTANT: This prevents the holder from having its own scrollbar */
 }
 
 .tab-pane-content {
@@ -205,13 +205,14 @@
   flex-direction: column;
   height: 100%;
   gap: 16px;
-  /* Bedrock Change: Ensure consistent gap */
+  /* Bedrock Change: Allow the content of the pane itself to scroll if it overflows */
   overflow-y: auto;
-  /* Bedrock Change: Allow the whole pane to scroll if needed */
 }
 
 .class-list-container {
+  /* This container holds the list of classes for editing */
   max-height: calc(100vh - 350px);
+  /* A fallback max-height */
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -219,9 +220,9 @@
 
 .annotation-collapse-container {
   flex-grow: 1;
-  /* Grow to fill available space */
+  /* This allows the annotation list to fill available vertical space */
   overflow-y: auto;
-  /* Enable scrolling ONLY on this container */
+  /* Enable scrolling ONLY on this container if the list is long */
   border-radius: 6px;
   border: 1px solid var(--border-color);
   min-height: 50px;
@@ -246,11 +247,12 @@
   background-color: var(--background-color);
 }
 
-/* Bedrock Change: New styles for data view container */
+/* Bedrock Change: New styles for the nested data view container in the "Raw Data" tab */
 .data-view-container {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* This container needs to fill the entire tab pane */
   height: 100%;
 }
 
@@ -259,16 +261,17 @@
   flex-direction: column;
   gap: 8px;
   flex: 1;
-  /* Each item takes equal space */
+  /* Each item (e.g., YOLO data, JSON data) takes equal vertical space */
   min-height: 0;
-  /* Crucial for flexbox resizing in a scrolling container */
+  /* Crucial for flexbox resizing within a scrolling container */
 }
 
 
-/* --- Data Textareas (FileOperate) --- */
+/* Bedrock Change: Ensure textareas within the new data view grow to fill their container */
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
+  /* This makes the textarea expand vertically */
   min-height: 100px;
   padding: 8px;
   border: 1px solid var(--border-color);
@@ -278,10 +281,10 @@
   color: var(--text-color-primary);
   background-color: var(--sider-background-color);
   resize: none;
-  /* Disable manual resizing */
+  /* Disable manual resizing by the user */
 }
 
-/* --- Annotation List (MaskOperate & FileOperate) --- */
+/* --- Annotation List (Shared Styles) --- */
 .annotation-panel-item .ant-collapse-header {
   padding: 8px 12px !important;
 }

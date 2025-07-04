@@ -81,11 +81,8 @@ interface JsonData {
     global: { [key: string]: any };
 }
 
-// Bedrock Change: Define a more specific API Response Type
-type FullApiResponse = ApiResponse & {
-    netlist_scs?: string;
-    netlist_cdl?: string;
-};
+// Bedrock Change: Use the more specific ApiResponse type from constants
+type FullApiResponse = ApiResponse;
 
 
 const RESIZE_HANDLE_SIZE = 8;
@@ -221,7 +218,7 @@ const FileOperate: React.FC = () => {
     const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
     const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
 
-    // Bedrock Change: New states for netlist data
+    // Bedrock Change: New states for netlist data to align with MaskOperate
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
@@ -434,24 +431,22 @@ const FileOperate: React.FC = () => {
             const text = await jsonFile.text();
             try {
                 // Bedrock Change: Robustly parse full JSON and distribute to different views
-                const fullData = JSON.parse(text);
+                const fullData: FullApiResponse = JSON.parse(text);
 
                 // Check if it's the new API response format or the old internal format
-                if (typeof fullData === 'object' && fullData !== null && ('cpnts' in fullData || 'netlist_scs' in fullData)) {
-                    // It's the new format, filter for display
-                    const displayData: { [key: string]: any } = {};
-                    const allowedKeys = ['cpnts', 'key_points', 'ports', 'segments', 'schematic_h', 'schematic_w', 'name'];
-                    allowedKeys.forEach(key => {
-                        if (key in fullData) {
-                            displayData[key] = (fullData as any)[key];
-                        }
-                    });
-
-                    setCurrentJsonContent(JSON.stringify(displayData, null, 2));
+                if (typeof fullData === 'object' && fullData !== null) {
                     setNetlistScsContent(fullData.netlist_scs || null);
                     setNetlistCdlContent(fullData.netlist_cdl || null);
+
+                    // Create a clean JSON object for display, filtering out netlist keys
+                    const displayData: { [key: string]: any } = { ...fullData };
+                    delete displayData.netlist_scs;
+                    delete displayData.netlist_cdl;
+
+                    setCurrentJsonContent(JSON.stringify(displayData, null, 2));
+
                 } else {
-                    // It's the old format or something else, use the original logic
+                    // It's likely the old format or something else, use the original logic
                     setCurrentJsonContent(text); // Display as is
                     setNetlistScsContent(null);
                     setNetlistCdlContent(null);
@@ -1191,41 +1186,16 @@ const FileOperate: React.FC = () => {
             }
 
             // Bedrock Change: Create a clean JSON object for display, filtering keys
-            const displayData: { [key: string]: any } = {};
-            const allowedKeys = ['cpnts', 'key_points', 'ports', 'segments', 'schematic_h', 'schematic_w', 'name'];
-            allowedKeys.forEach(key => {
-                if (key in resultData) {
-                    displayData[key] = (resultData as any)[key];
-                }
-            });
+            const displayData: { [key: string]: any } = { ...resultData };
+            delete displayData.netlist_scs;
+            delete displayData.netlist_cdl;
             const displayJsonContent = JSON.stringify(displayData, null, 2);
-
-
-            // Bedrock Fix: Persist AI annotation results to the global state immediately
-            const baseName = getFileNameWithoutExtension(currentPng.name);
-            const yoloFile = new File([newYoloContent], `${baseName}.txt`, { type: 'text/plain' });
-            setYoloList(prev => {
-                const newList = [...prev];
-                const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === baseName);
-                if (idx > -1) newList[idx] = yoloFile; else newList.push(yoloFile);
-                return newList;
-            });
-
-            // Persist the full JSON data (including netlists) for robust loading/saving
-            const jsonFile = new File([JSON.stringify(resultData, null, 2)], `${baseName}.json`, { type: 'application/json' });
-            setJsonList(prev => {
-                const newList = [...prev];
-                const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === baseName);
-                if (idx > -1) newList[idx] = jsonFile; else newList.push(jsonFile);
-                return newList;
-            });
 
             // Update local state for immediate display
             setCurrentYoloContent(newYoloContent);
             setCurrentJsonContent(displayJsonContent); // Use the filtered JSON for the main display
-            setNetlistScsContent(resultData.netlist_scs || '');
-            setNetlistCdlContent(resultData.netlist_cdl || '');
-
+            setNetlistScsContent(resultData.netlist_scs || null);
+            setNetlistCdlContent(resultData.netlist_cdl || null);
 
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
             setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
@@ -1459,26 +1429,28 @@ const FileOperate: React.FC = () => {
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-                            <div className="tab-pane-content">
-                                <div className="data-view-container">
-                                    <div className="data-view-item">
-                                        <Title level={5}>YOLO Data (.txt)</Title>
+                            <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                <TabPane tab="YOLO (.txt)" key="yolo-data">
+                                    <div className="data-view-item" style={{ height: '100%' }}>
                                         <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
                                     </div>
-                                    <div className="data-view-item">
-                                        <Title level={5}>Annotation Data (.json)</Title>
+                                </TabPane>
+                                <TabPane tab="Annotation Data (.json)" key="json-data">
+                                    <div className="data-view-item" style={{ height: '100%' }}>
                                         <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
                                     </div>
-                                    <div className="data-view-item">
-                                        <Title level={5}>Netlist (.scs)</Title>
+                                </TabPane>
+                                <TabPane tab="Netlist (.scs)" key="scs-data">
+                                    <div className="data-view-item" style={{ height: '100%' }}>
                                         <textarea value={netlistScsContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (SCS format) will be shown here after processing." />
                                     </div>
-                                    <div className="data-view-item">
-                                        <Title level={5}>Netlist (.cdl)</Title>
+                                </TabPane>
+                                <TabPane tab="Netlist (.cdl)" key="cdl-data">
+                                    <div className="data-view-item" style={{ height: '100%' }}>
                                         <textarea value={netlistCdlContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (CDL format) will be shown here after processing." />
                                     </div>
-                                </div>
-                            </div>
+                                </TabPane>
+                            </Tabs>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
                             <div className="tab-pane-content">
