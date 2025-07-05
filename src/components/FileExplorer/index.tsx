@@ -11,6 +11,7 @@ const { Text } = Typography;
 
 interface FileExplorerProps {
     onFileSelect: (filePath: string) => void;
+    activeFilePath: string | null; // Bedrock V4 Change: Receive active path as a prop
     modifiedFiles: Record<string, number>;
 }
 
@@ -21,8 +22,8 @@ const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.webp'];
  * @description A file explorer component with search and natural sorting.
  * It only displays image files and prunes empty directories.
  */
-const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, modifiedFiles }) => {
-    const { fileTree, currentFilePath } = useModel('annotationStore');
+const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, activeFilePath, modifiedFiles }) => {
+    const { fileTree } = useModel('annotationStore');
 
     /**
      * @description Recursively flattens the file tree to get a list of all image files for searching.
@@ -132,7 +133,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, modifiedFiles
                         showIcon
                         defaultExpandAll
                         autoExpandParent
-                        selectedKeys={currentFilePath ? [currentFilePath] : []}
+                        selectedKeys={activeFilePath ? [activeFilePath] : []}
                         onSelect={(selectedKeys, info) => {
                             if (info.node.isLeaf && selectedKeys.length > 0) {
                                 onFileSelect(selectedKeys[0] as string);

@@ -61,7 +61,8 @@ const naturalSort = (a: string, b: string): number => {
 const GlobalUploader: React.FC = () => {
   const {
     setFileTree,
-    setCurrentFilePath,
+    setFile_currentFilePath, // Bedrock V4 Change
+    setMask_currentFilePath, // Bedrock V4 Change
     setFile_yoloFileContents,
     setFile_jsonFileContents,
     setFile_operationHistory,
@@ -92,7 +93,6 @@ const GlobalUploader: React.FC = () => {
     const nodeMap = new Map<string, DirectoryNode>([['root', root]]);
     let firstImageFile: FileNode | null = null;
 
-    // Bedrock Change V4: Sort files by their full relative path using natural sort.
     const allFiles = files.filter(f => f.size > 0).sort((a, b) => naturalSort(a.webkitRelativePath, b.webkitRelativePath));
 
     // 1. Build the file tree
@@ -196,11 +196,13 @@ const GlobalUploader: React.FC = () => {
     setMask_redoHistory({});
     setModifiedFiles({});
 
-    // Set initial file
+    // Bedrock V4 Change: Set the initial file for both pages independently.
     if (firstImageFile) {
-      setCurrentFilePath(firstImageFile.key);
+      setFile_currentFilePath(firstImageFile.key);
+      setMask_currentFilePath(firstImageFile.key);
     } else {
-      setCurrentFilePath(null);
+      setFile_currentFilePath(null);
+      setMask_currentFilePath(null);
     }
 
     message.success({ content: '文件夹上传并处理成功！', key: 'global-upload', duration: 3 });
