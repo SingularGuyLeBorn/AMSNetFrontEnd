@@ -61,25 +61,26 @@ const naturalSort = (a: string, b: string): number => {
 const GlobalUploader: React.FC = () => {
   const {
     setFileTree,
-    setFile_currentFilePath, // Bedrock V4 Change
-    setMask_currentFilePath, // Bedrock V4 Change
+    setFile_currentFilePath,
+    setMask_currentFilePath,
     setFile_yoloFileContents,
     setFile_jsonFileContents,
     setFile_operationHistory,
     setFile_redoHistory,
+    setFile_modifiedFiles, // Bedrock V4.1 Change
     setMask_allImageAnnotations,
     setMask_operationHistory,
     setMask_redoHistory,
     setMask_categories,
     setMask_categoryColors,
-    setModifiedFiles,
+    setMask_modifiedFiles, // Bedrock V4.1 Change
     mask_categoryColors,
     file_classMap,
   } = useModel('annotationStore');
 
   /**
    * @description Processes an array of uploaded files, constructs a file tree,
-   *              and populates the global annotation stores.
+   *              and populates the global annotation stores for ALL pages independently.
    * @param {File[]} files - The array of files from the uploader.
    */
   const handleGlobalUpload = async (files: File[]) => {
@@ -183,18 +184,19 @@ const GlobalUploader: React.FC = () => {
       }
     }
 
-    // 4. Update global state
+    // 4. Update global state for ALL pages
     setFile_yoloFileContents(yoloContents);
     setFile_jsonFileContents(jsonContents);
     setMask_allImageAnnotations(maskAnnotations);
     setMask_categories(Array.from(tempCategories));
 
-    // Reset histories and modification state
+    // Reset histories and modification state for ALL pages
     setFile_operationHistory({});
     setFile_redoHistory({});
+    setFile_modifiedFiles({}); // Bedrock V4.1 Change
     setMask_operationHistory({});
     setMask_redoHistory({});
-    setModifiedFiles({});
+    setMask_modifiedFiles({}); // Bedrock V4.1 Change
 
     // Bedrock V4 Change: Set the initial file for both pages independently.
     if (firstImageFile) {
@@ -395,4 +397,5 @@ declare global {
     };
   }
 }
+
 // END OF FILE src/app.tsx

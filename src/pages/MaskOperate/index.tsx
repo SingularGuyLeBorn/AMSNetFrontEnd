@@ -147,15 +147,14 @@ const MaskOperate = () => {
   const { initialState } = useModel('@@initialState');
   const {
     fileTree,
-    mask_currentFilePath, setMask_currentFilePath, // Bedrock V4 Change
+    mask_currentFilePath, setMask_currentFilePath,
     mask_allImageAnnotations: allImageAnnotations, setMask_allImageAnnotations: setAllImageAnnotations,
     mask_categories: categories, setMask_categories: setCategories,
     mask_categoryColors: categoryColors, setMask_categoryColors: setCategoryColors,
     mask_selectedAnnotationId: selectedAnnotationId, setMask_selectedAnnotationId: setSelectedAnnotationId,
     mask_operationHistory, setMask_operationHistory,
     mask_redoHistory, setMask_redoHistory,
-    modifiedFiles,
-    markFileAsModified,
+    mask_modifiedFiles, setMask_modifiedFiles,
   } = useModel('annotationStore');
 
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
@@ -555,8 +554,10 @@ const MaskOperate = () => {
     const operation: MaskUndoOperation = { filePath: mask_currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
     setMask_operationHistory(prev => ({ ...prev, [mask_currentFilePath]: [...(prev[mask_currentFilePath] || []), operation] }));
     setMask_redoHistory(prev => ({ ...prev, [mask_currentFilePath]: [] }));
-    markFileAsModified(mask_currentFilePath);
-  }, [mask_currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory, markFileAsModified]);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
+  }, [mask_currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory, setMask_modifiedFiles]);
 
   const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
     if (!mask_currentFilePath) return;
@@ -571,8 +572,10 @@ const MaskOperate = () => {
 
       return { ...prev, [mask_currentFilePath]: { viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
     });
-    markFileAsModified(mask_currentFilePath);
-  }, [mask_currentFilePath, setAllImageAnnotations, markFileAsModified]);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
+  }, [mask_currentFilePath, setAllImageAnnotations, setMask_modifiedFiles]);
 
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
     const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? { ...a, ...updates } : a);
@@ -616,9 +619,11 @@ const MaskOperate = () => {
     });
 
     setMask_operationHistory(prev => ({ ...prev, [mask_currentFilePath]: history.slice(0, -1) }));
-    markFileAsModified(mask_currentFilePath);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
     message.success(t.operationSuccessful);
-  }, [mask_operationHistory, mask_currentFilePath, localAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful, markFileAsModified]);
+  }, [mask_operationHistory, mask_currentFilePath, localAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful, setMask_modifiedFiles]);
 
   const performRedo = useCallback(() => {
     if (!mask_currentFilePath) return;
@@ -633,9 +638,11 @@ const MaskOperate = () => {
     });
 
     setMask_redoHistory(prev => ({ ...prev, [mask_currentFilePath]: history.slice(1) }));
-    markFileAsModified(mask_currentFilePath);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
     message.success(t.operationSuccessful);
-  }, [mask_redoHistory, mask_currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful, markFileAsModified]);
+  }, [mask_redoHistory, mask_currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful, setMask_modifiedFiles]);
 
 
   const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -980,7 +987,9 @@ const MaskOperate = () => {
     setAllImageAnnotations(newAllAnnos);
 
     if (currentCategory === oldName) setCurrentCategory(newNameTrimmed);
-    markFileAsModified(mask_currentFilePath);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
   };
   const handleUpdateColor = (catName: string, newColor: string) => {
     setCategoryColors(prev => ({ ...prev, [catName]: newColor }));
@@ -990,7 +999,9 @@ const MaskOperate = () => {
       newAllAnnos[filePath] = { ...newAllAnnos[filePath], viewAnnotations: updatedViewAnnos };
     });
     setAllImageAnnotations(newAllAnnos);
-    markFileAsModified(mask_currentFilePath);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
   };
   const handleDeleteClass = (className: string) => {
     const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', className) : `确认删除类别 ${className}?`;
@@ -1003,9 +1014,16 @@ const MaskOperate = () => {
         delete newCategoryColors[className];
 
         const newAllAnnotations = { ...allImageAnnotations };
+        const updatedTimestamps: Record<string, number> = {};
+        const now = Date.now();
+
         Object.keys(newAllAnnotations).forEach(filePath => {
           const annotationsForImage = newAllAnnotations[filePath];
           const filteredViewAnnos = annotationsForImage.viewAnnotations.filter(anno => anno.category !== className);
+
+          if (filteredViewAnnos.length < annotationsForImage.viewAnnotations.length) {
+            updatedTimestamps[filePath] = now;
+          }
 
           const newApiJson = convertViewToApi(filteredViewAnnos);
 
@@ -1021,8 +1039,7 @@ const MaskOperate = () => {
         setCategories(newCategories);
         setCategoryColors(newCategoryColors);
         setAllImageAnnotations(newAllAnnotations);
-
-        Object.keys(newAllAnnotations).forEach(filePath => markFileAsModified(filePath));
+        setMask_modifiedFiles(prev => ({ ...prev, ...updatedTimestamps }));
 
         if (currentCategory === className) setCurrentCategory(newCategories[0] || "");
         message.success(t.classDeleted.replace('%s', className));
@@ -1134,7 +1151,7 @@ const MaskOperate = () => {
       </Header>
       <Layout hasSider>
         <Sider width={leftSiderWidth} className="file-explorer-sider" theme="light">
-          <FileExplorer onFileSelect={handleFileSelect} activeFilePath={mask_currentFilePath} modifiedFiles={modifiedFiles} />
+          <FileExplorer onFileSelect={handleFileSelect} activeFilePath={mask_currentFilePath} modifiedFiles={mask_modifiedFiles} />
         </Sider>
         <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
 
@@ -1319,4 +1336,5 @@ const MaskOperate = () => {
 };
 
 export default MaskOperate;
-// END OF FILE src/pages/MaskOperate/index.tsx
+
+// File: src/pages/MaskOperate/index.tsx

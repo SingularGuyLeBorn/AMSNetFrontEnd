@@ -219,14 +219,13 @@ const FileOperate: React.FC = () => {
     const { initialState } = useModel('@@initialState');
     const {
         fileTree,
-        file_currentFilePath, setFile_currentFilePath, // Bedrock V4 Change
+        file_currentFilePath, setFile_currentFilePath,
         file_classMap: classMap, setFile_classMap: setClassMap,
         file_yoloFileContents, setFile_yoloFileContents,
         file_jsonFileContents, setFile_jsonFileContents,
         file_operationHistory: operationHistory, setFile_operationHistory: setOperationHistory,
         file_redoHistory: redoHistory, setFile_redoHistory: setRedoHistory,
-        modifiedFiles,
-        markFileAsModified,
+        file_modifiedFiles, setFile_modifiedFiles,
     } = useModel('annotationStore');
 
     const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
@@ -272,7 +271,6 @@ const FileOperate: React.FC = () => {
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
-    // Bedrock Change V4: Centralized state saving logic
     const saveCurrentState = useCallback(() => {
         if (!file_currentFilePath) return;
 
@@ -288,7 +286,6 @@ const FileOperate: React.FC = () => {
         setFile_jsonFileContents(prev => ({ ...prev, [file_currentFilePath]: jsonToSave || '{}' }));
     }, [file_currentFilePath, currentYoloContent, currentJsonContent, netlistScsContent, netlistCdlContent, setFile_yoloFileContents, setFile_jsonFileContents]);
 
-    // Bedrock Change V4: Effect for auto-saving on component unmount (page switch)
     const saveFuncRef = useRef(saveCurrentState);
     saveFuncRef.current = saveCurrentState;
 
@@ -302,7 +299,6 @@ const FileOperate: React.FC = () => {
         setCurrentLang(initialState?.language || 'zh');
     }, [initialState?.language]);
 
-    // This effect now triggers when the page-specific file path changes
     useEffect(() => {
         if (file_currentFilePath && fileTree) {
             const node = findFileNodeByKey(file_currentFilePath, fileTree);
@@ -615,10 +611,12 @@ const FileOperate: React.FC = () => {
             setSelectedBoxName(null);
         }
 
-        markFileAsModified(file_currentFilePath);
+        if (file_currentFilePath) {
+            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        }
         message.success(`标注 '${boxNameToDelete}' 已删除`);
         setRedrawTrigger(p => p + 1);
-    }, [currentYoloContent, currentJsonContent, file_currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName, markFileAsModified]);
+    }, [currentYoloContent, currentJsonContent, file_currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName, setFile_modifiedFiles]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
@@ -654,7 +652,9 @@ const FileOperate: React.FC = () => {
                     const newOp: Operation = { type: 'stain', boxName, jsonType: selectedJsonType, jsonName: selectedJsonName, previousJsonContent: previousJson };
                     setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
                     setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-                    markFileAsModified(file_currentFilePath);
+                    if (file_currentFilePath) {
+                        setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+                    }
                     setRedrawTrigger(p => p + 1);
                     break;
                 }
@@ -890,7 +890,9 @@ const FileOperate: React.FC = () => {
                 const newOp: Operation = { type: 'draw', yoloData: [yoloFormatData], previousYoloContent: previousYolo };
                 setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
                 setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-                markFileAsModified(file_currentFilePath);
+                if (file_currentFilePath) {
+                    setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+                }
             }
             setCanvasImageData(null); setRedrawTrigger(prev => prev + 1);
         } else if (draggingState && draggingState.type === 'region-select') {
@@ -975,12 +977,16 @@ const FileOperate: React.FC = () => {
                 };
                 setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
                 setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-                markFileAsModified(file_currentFilePath);
+                if (file_currentFilePath) {
+                    setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+                }
                 message.success(`删除了 ${boxNamesToDelete.length} 个标注。`);
             }
         }
         if (draggingState) { // Any drag operation should mark file as modified
-            markFileAsModified(file_currentFilePath);
+            if (file_currentFilePath) {
+                setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+            }
         }
         setDraggingState(null);
         setRegionSelectBox(null);
@@ -992,8 +998,10 @@ const FileOperate: React.FC = () => {
         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
         setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
         setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-        markFileAsModified(file_currentFilePath);
-    }, [currentYoloContent, file_currentFilePath, setOperationHistory, setRedoHistory, markFileAsModified]);
+        if (file_currentFilePath) {
+            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        }
+    }, [currentYoloContent, file_currentFilePath, setOperationHistory, setRedoHistory, setFile_modifiedFiles]);
 
     const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
@@ -1013,8 +1021,10 @@ const FileOperate: React.FC = () => {
             return line;
         }).join('\n');
         setCurrentYoloContent(newYoloContent);
-        markFileAsModified(file_currentFilePath);
-    }, [currentYoloContent, setCurrentYoloContent, file_currentFilePath, markFileAsModified]);
+        if (file_currentFilePath) {
+            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        }
+    }, [currentYoloContent, setCurrentYoloContent, file_currentFilePath, setFile_modifiedFiles]);
 
     const handleUndo = () => {
         if (!file_currentFilePath) return;
@@ -1027,7 +1037,9 @@ const FileOperate: React.FC = () => {
         setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: currentImageHistory.slice(0, -1) }));
         if ('previousYoloContent' in lastOperation) { setCurrentYoloContent(lastOperation.previousYoloContent); }
         if ('previousJsonContent' in lastOperation) { setCurrentJsonContent(lastOperation.previousJsonContent); }
-        markFileAsModified(file_currentFilePath);
+        if (file_currentFilePath) {
+            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        }
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
     const handleRedo = () => {
@@ -1041,7 +1053,9 @@ const FileOperate: React.FC = () => {
         setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: currentImageRedoHistory.slice(1) }));
         if ('previousYoloContent' in operationToRedo) { setCurrentYoloContent(operationToRedo.previousYoloContent); }
         if ('previousJsonContent' in operationToRedo) { setCurrentJsonContent(operationToRedo.previousJsonContent); }
-        markFileAsModified(file_currentFilePath);
+        if (file_currentFilePath) {
+            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        }
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
 
@@ -1051,7 +1065,9 @@ const FileOperate: React.FC = () => {
             return;
         }
         saveCurrentState();
-        markFileAsModified(file_currentFilePath);
+        if (file_currentFilePath) {
+            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        }
         message.success(`${t.save} ${t.operationSuccessful}`);
     };
 
@@ -1196,7 +1212,9 @@ const FileOperate: React.FC = () => {
             setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
             setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
 
-            markFileAsModified(file_currentFilePath);
+            if (file_currentFilePath) {
+                setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+            }
             setRedrawTrigger(p => p + 1);
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
 
@@ -1308,7 +1326,7 @@ const FileOperate: React.FC = () => {
             </Header>
             <Layout hasSider>
                 <Sider width={leftSiderWidth} className="file-explorer-sider" theme="light">
-                    <FileExplorer onFileSelect={handleFileSelect} activeFilePath={file_currentFilePath} modifiedFiles={modifiedFiles} />
+                    <FileExplorer onFileSelect={handleFileSelect} activeFilePath={file_currentFilePath} modifiedFiles={file_modifiedFiles} />
                 </Sider>
                 <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
 
@@ -1464,4 +1482,5 @@ const FileOperate: React.FC = () => {
 };
 
 export default FileOperate;
-// END OF FILE src/pages/FileOperate/index.tsx
+
+// File: src/pages/FileOperate/index.tsx

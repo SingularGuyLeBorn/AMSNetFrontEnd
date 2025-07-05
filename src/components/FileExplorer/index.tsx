@@ -21,6 +21,7 @@ const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.webp'];
 /**
  * @description A file explorer component with search and natural sorting.
  * It only displays image files and prunes empty directories.
+ * It is now a pure presentational component driven by props.
  */
 const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, activeFilePath, modifiedFiles }) => {
     const { fileTree } = useModel('annotationStore');
@@ -104,7 +105,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, activeFilePat
 
     if (!fileTree) {
         return (
-            <div style={{ padding: '20px', textAlign: 'center' }}>
+            <div className="file-explorer-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
                 <Empty description="请上传一个文件夹以开始。" />
             </div>
         );
@@ -113,8 +114,8 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, activeFilePat
     const treeData = convertToTreeData(fileTree);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+        <div className="file-explorer-container">
+            <div className="file-explorer-header">
                 <AutoComplete
                     style={{ width: '100%' }}
                     options={searchableFiles}
@@ -127,7 +128,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, activeFilePat
                     <Input.Search />
                 </AutoComplete>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
+            <div className="file-explorer-tree-wrapper">
                 {treeData ? (
                     <Tree
                         showIcon
@@ -153,4 +154,5 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ onFileSelect, activeFilePat
 };
 
 export default FileExplorer;
+
 // END OF FILE src/components/FileExplorer/index.tsx

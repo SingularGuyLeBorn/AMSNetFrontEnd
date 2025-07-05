@@ -39,29 +39,28 @@ const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduc
 
 /**
  * @description
- * 全局数据仓库 (Global Data Store) V3 - Context-Isolated
+ * 全局数据仓库 (Global Data Store) V4.1 - 绝对隔离版
  *
  * 该 Store 负责管理整个应用中与标注相关的共享状态。
  * 设计原则：
- * 1. 页面上下文隔离: 每个标注页面 (`FileOperate`, `MaskOperate`) 拥有自己独立的当前文件指针 (`file_currentFilePath`, `mask_currentFilePath`)，彻底解决了页面间导航状态交叉污染的问题。
+ * 1. 页面上下文隔离: 每个标注页面 (`FileOperate`, `MaskOperate`) 拥有自己独立的当前文件指针和所有相关状态，包括修改记录，彻底解决了页面间任何状态的交叉污染问题。
  * 2. 路径驱动 (Path-Driven): 所有与文件相关的状态，其访问键都是文件的唯一路径 (filePath)。
  * 3. 统一数据源: `fileTree` 作为单一的、权威的文件结构源。
+ * 4. 命名空间: 所有页面专属状态均以页面标识（如 `file_`, `mask_`）为前缀，确保了代码层面的隔离性和可读性。
  */
 export default function useAnnotationStore() {
   // ===================================================================
-  // 共享状态
+  // 共享状态 (Shared State)
   // ===================================================================
 
   const [fileTree, setFileTree] = useState<DirectoryNode | null>(null);
-  const [modifiedFiles, setModifiedFiles] = useState<Record<string, number>>({});
 
   // ===================================================================
-  // FileOperate 页面状态
+  // FileOperate 页面状态 (FileOperate Page State)
   // ===================================================================
 
-  // Bedrock V4 Change: Page-specific navigation state
   const [file_currentFilePath, setFile_currentFilePath] = useState<string | null>(null);
-
+  const [file_modifiedFiles, setFile_modifiedFiles] = useState<Record<string, number>>({});
   const [file_yoloFileContents, setFile_yoloFileContents] = useState<Record<string, string>>({});
   const [file_jsonFileContents, setFile_jsonFileContents] = useState<Record<string, string>>({});
   const [file_classMap, setFile_classMap] = useState<{ [key: number]: ClassInfo }>(initialIndexClassColorMap);
@@ -69,12 +68,11 @@ export default function useAnnotationStore() {
   const [file_redoHistory, setFile_redoHistory] = useState<Record<string, Operation[]>>({});
 
   // ===================================================================
-  // MaskOperate 页面状态
+  // MaskOperate 页面状态 (MaskOperate Page State)
   // ===================================================================
 
-  // Bedrock V4 Change: Page-specific navigation state
   const [mask_currentFilePath, setMask_currentFilePath] = useState<string | null>(null);
-
+  const [mask_modifiedFiles, setMask_modifiedFiles] = useState<Record<string, number>>({});
   const [mask_allImageAnnotations, setMask_allImageAnnotations] = useState<Record<string, ImageAnnotationData>>({});
   const [mask_categories, setMask_categories] = useState<string[]>(Object.keys(defaultCategoryColors));
   const [mask_categoryColors, setMask_categoryColors] = useState<{ [key: string]: string }>(initialMaskCategoryHexColors);
@@ -82,20 +80,14 @@ export default function useAnnotationStore() {
   const [mask_operationHistory, setMask_operationHistory] = useState<Record<string, MaskUndoOperation[]>>({});
   const [mask_redoHistory, setMask_redoHistory] = useState<Record<string, MaskUndoOperation[]>>({});
 
-  const markFileAsModified = (filePath: string | null) => {
-    if (filePath) {
-      setModifiedFiles(prev => ({ ...prev, [filePath]: Date.now() }));
-    }
-  };
 
   return {
     // Shared State Exports
     fileTree, setFileTree,
-    modifiedFiles, setModifiedFiles,
-    markFileAsModified,
 
     // FileOperate Exports
     file_currentFilePath, setFile_currentFilePath,
+    file_modifiedFiles, setFile_modifiedFiles,
     file_yoloFileContents, setFile_yoloFileContents,
     file_jsonFileContents, setFile_jsonFileContents,
     file_classMap, setFile_classMap,
@@ -104,6 +96,7 @@ export default function useAnnotationStore() {
 
     // MaskOperate Exports
     mask_currentFilePath, setMask_currentFilePath,
+    mask_modifiedFiles, setMask_modifiedFiles,
     mask_allImageAnnotations, setMask_allImageAnnotations,
     mask_categories, setMask_categories,
     mask_categoryColors, setMask_categoryColors,
