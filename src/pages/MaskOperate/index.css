@@ -56,25 +56,14 @@
   text-overflow: ellipsis;
 }
 
-/* --- Tool Sider (Left) --- */
-.unified-tool-sider {
+/* --- File Explorer Sider (Left) --- */
+.file-explorer-sider {
   background-color: var(--sider-background-color) !important;
-  border-right: 1px solid var(--border-color);
   box-shadow: 1px 0 4px rgba(0, 21, 41, 0.05);
+  display: flex;
+  flex-direction: column;
 }
 
-.tool-button {
-  width: 44px !important;
-  height: 44px !important;
-  font-size: 18px !important;
-  border-radius: 8px !important;
-}
-
-.tool-button.ant-btn-primary {
-  background-color: var(--primary-color-light) !important;
-  color: var(--primary-color-dark) !important;
-  border-color: var(--primary-color-light) !important;
-}
 
 /* --- Main Content & Canvas --- */
 .main-content-wrapper {
@@ -123,32 +112,22 @@
 .resizer-horizontal {
   width: 5px;
   height: 100%;
-  background: transparent;
+  background: var(--border-color);
   cursor: ew-resize;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: 10;
+  transition: background-color 0.2s;
+}
+
+.resizer-horizontal:hover {
+  background: var(--primary-color);
 }
 
 .unified-inspector-sider {
   background-color: var(--background-color) !important;
-  border-left: 1px solid var(--border-color);
   box-shadow: -1px 0 4px rgba(0, 21, 41, 0.05);
   display: flex;
   flex-direction: column;
-}
-
-.show-inspector-handle {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  border-radius: 8px 0 0 8px !important;
-  z-index: 10;
-  width: 24px;
-  height: 48px;
-  padding: 0;
 }
 
 .inspector-tabs {
@@ -164,7 +143,6 @@
   flex-shrink: 0;
 }
 
-/* Bedrock Change: Cascade height: 100% through AntD's internal Tab structure to enable flexbox layout */
 .inspector-tabs .ant-tabs-content-holder,
 .inspector-tabs .ant-tabs-content,
 .inspector-tabs .ant-tabs-tabpane {
@@ -174,7 +152,6 @@
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
   overflow: hidden;
-  /* IMPORTANT: This prevents the holder from having its own scrollbar */
 }
 
 .tab-pane-content {
@@ -183,14 +160,11 @@
   flex-direction: column;
   height: 100%;
   gap: 16px;
-  /* Bedrock Change: Allow the content of the pane itself to scroll if it overflows */
   overflow-y: auto;
 }
 
 .class-list-container {
-  /* This container holds the list of classes for editing */
   max-height: calc(100vh - 350px);
-  /* A fallback max-height */
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -198,13 +172,10 @@
 
 .annotation-collapse-container {
   flex-grow: 1;
-  /* This allows the annotation list to fill available vertical space */
   overflow-y: auto;
-  /* Enable scrolling ONLY on this container if the list is long */
   border-radius: 6px;
   border: 1px solid var(--border-color);
   min-height: 50px;
-  /* Prevent collapsing to zero height */
 }
 
 .class-management-item {
@@ -224,12 +195,10 @@
   background-color: var(--background-color);
 }
 
-/* Bedrock Change: New styles for the nested data view container in the "Raw Data" tab */
 .data-view-container {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  /* This container needs to fill the entire tab pane */
   height: 100%;
 }
 
@@ -238,16 +207,12 @@
   flex-direction: column;
   gap: 8px;
   flex: 1;
-  /* Each item (e.g., YOLO data, JSON data) takes equal vertical space */
   min-height: 0;
-  /* Crucial for flexbox resizing within a scrolling container */
 }
 
-/* Bedrock Change: Ensure textareas within the new data view grow to fill their container */
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
-  /* This makes the textarea expand vertically */
   min-height: 100px;
   padding: 8px;
   border: 1px solid var(--border-color);
@@ -257,7 +222,6 @@
   color: var(--text-color-primary);
   background-color: var(--sider-background-color);
   resize: none;
-  /* Disable manual resizing by the user */
 }
 
 /* --- Annotation List (Shared Styles) --- */

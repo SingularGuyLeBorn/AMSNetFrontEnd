@@ -1,6 +1,11 @@
 // START OF FILE src/app.tsx
 import Footer from '@/components/Footer';
+import type { DirectoryNode, FileNode, FileTreeNode } from '@/models/fileTree';
 import type { ApiResponse as MaskApiResponse, ImageAnnotationData as MaskImageAnnotationData } from '@/pages/MaskOperate/constants';
+// Bedrock Change: Import helpers with specific aliases to avoid name collisions between pages.
+import { convertStandardYoloToInternal as fileOperateConvertYolo } from '@/pages/FileOperate/index';
+
+import { convertApiToView as maskConvertApiToView, convertViewToApi as maskConvertViewToApi } from '@/pages/MaskOperate/index';
 import { getLoginUserUsingGet } from '@/services/backend/userController';
 import { FileZipOutlined, GlobalOutlined, UploadOutlined } from '@ant-design/icons';
 import type { RunTimeLayoutConfig } from '@umijs/max';
@@ -12,41 +17,33 @@ import React from 'react';
 import defaultSettings from '../config/defaultSettings';
 import { AvatarDropdown } from './components/RightContent/AvatarDropdown';
 import { requestConfig } from './requestConfig';
-// Bedrock Change: Import helpers with named exports from their respective modules to ensure functionality.
-// These functions are critical for data conversion and manipulation.
-import { convertApiToView, convertViewToApi } from "@/pages/MaskOperate/index";
 
 const loginPath = '/user/login';
 
-/**
- * @description Helper function to get the filename without its extension.
- * @param {string} fileName - The full name of the file.
- * @returns {string} The filename without the extension.
- */
-const getFileNameWithoutExtension = (fileName: string): string => {
-  const lastDotIndex = fileName.lastIndexOf('.');
-  if (lastDotIndex === -1) return fileName;
-  return fileName.substring(0, lastDotIndex);
-};
 
 // 全局文件上传组件
 const GlobalUploader: React.FC = () => {
   const {
-    setFile_pngList,
-    setFile_yoloList,
-    setFile_jsonList,
-    setFile_currentIndex,
-    setFile_currentYoloContent,
-    setFile_currentJsonContent,
+    setFileTree,
+    setCurrentFilePath,
+    setFile_yoloFileContents,
+    setFile_jsonFileContents,
+    setFile_operationHistory,
+    setFile_redoHistory,
     setMask_allImageAnnotations,
     setMask_operationHistory,
     setMask_redoHistory,
-    setMask_currentIndex,
     setMask_categories,
     setMask_categoryColors,
     mask_categoryColors,
+    file_classMap,
   } = useModel('annotationStore');
 
+  /**
+   * @description Processes an array of uploaded files, constructs a file tree,
+   *              and populates the global annotation stores.
+   * @param {File[]} files - The array of files from the uploader.
+   */
   const handleGlobalUpload = async (files: File[]) => {
     if (!files || files.length === 0) {
       message.warning("文件夹中未选择任何文件。");
@@ -54,54 +51,118 @@ const GlobalUploader: React.FC = () => {
     }
     message.loading({ content: "正在处理文件夹...", key: 'global-upload', duration: 0 });
 
-    const compareFn = (a: File, b: File) => a.name.localeCompare(b.name, undefined, { numeric: true });
+    const root: DirectoryNode = { key: 'root', title: 'Project', isLeaf: false, children: [] };
+    const nodeMap = new Map<string, DirectoryNode>([['root', root]]);
+    let firstImageFile: FileNode | null = null;
 
-    const pngList: File[] = files.filter(f => f.type.startsWith('image/')).sort(compareFn);
-    const yoloList: File[] = files.filter(f => f.name.endsWith('.txt')).sort(compareFn);
-    const jsonList: File[] = files.filter(f => f.name.endsWith('.json')).sort(compareFn);
+    const allFiles = files.filter(f => f.size > 0).sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
 
-    setFile_pngList(pngList);
-    setFile_yoloList(yoloList);
-    setFile_jsonList(jsonList);
+    // 1. Build the file tree
+    for (const file of allFiles) {
+      const pathParts = file.webkitRelativePath.split('/').filter(p => p);
+      if (pathParts.length === 0) continue; // Skip empty paths
 
-    // Reset FileOperate state
-    setFile_currentIndex(0);
-    const firstYoloFile = yoloList.find(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(pngList[0]?.name));
-    const firstJsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(pngList[0]?.name));
-    setFile_currentYoloContent(firstYoloFile ? await firstYoloFile.text() : '');
-    setFile_currentJsonContent(firstJsonFile ? await firstJsonFile.text() : '{}');
-
-    // Reset MaskOperate state
-    const newAnnotationsData: { [imageName: string]: MaskImageAnnotationData } = {};
-    const tempCategories = new Set(Object.keys(mask_categoryColors));
-
-    for (const imgFile of pngList) {
-      const baseName = getFileNameWithoutExtension(imgFile.name);
-      const annotationJsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-      let apiJson: MaskApiResponse = {};
-      let viewAnnotations: MaskImageAnnotationData['viewAnnotations'] = [];
-
-      if (annotationJsonFile) {
-        try {
-          apiJson = JSON.parse(await annotationJsonFile.text());
-          // Derive view annotations from loaded API data
-          viewAnnotations = convertApiToView(apiJson, mask_categoryColors, 2); // default thickness 2
-          viewAnnotations.forEach(anno => tempCategories.add(anno.category));
-        } catch (e) {
-          console.error(`解析MaskOperate的JSON文件失败 ${imgFile.name}:`, e);
-        }
+      const rootFolderName = pathParts[0];
+      if (root.title === 'Project') {
+        root.title = rootFolderName;
+        root.key = rootFolderName;
+        nodeMap.set(rootFolderName, root);
+        nodeMap.delete('root');
       }
-      newAnnotationsData[imgFile.name] = { viewAnnotations, apiJson };
+
+      let currentPath = root.key;
+      let currentNode: DirectoryNode = root;
+
+      for (let i = 1; i < pathParts.length - 1; i++) {
+        const part = pathParts[i];
+        const newPath = `${currentPath}/${part}`;
+        if (!nodeMap.has(newPath)) {
+          const newDirNode: DirectoryNode = {
+            key: newPath,
+            title: part,
+            isLeaf: false,
+            children: [],
+          };
+          currentNode.children.push(newDirNode);
+          nodeMap.set(newPath, newDirNode);
+          currentNode = newDirNode;
+        } else {
+          currentNode = nodeMap.get(newPath)!;
+        }
+        currentPath = newPath;
+      }
+
+      const fileName = pathParts[pathParts.length - 1];
+      const fileNode: FileNode = {
+        key: file.webkitRelativePath,
+        title: fileName,
+        isLeaf: true,
+        file: file,
+      };
+      currentNode.children.push(fileNode);
+
+      if (file.type.startsWith('image/') && !firstImageFile) {
+        firstImageFile = fileNode;
+      }
     }
 
-    const newCats = Array.from(tempCategories);
-    setMask_categories(newCats);
-    // Here you could add logic to assign new colors if any new categories were found
+    setFileTree(root);
 
-    setMask_allImageAnnotations(newAnnotationsData);
+    // 2. Prepare annotation data holders
+    const yoloContents: Record<string, string> = {};
+    const jsonContents: Record<string, string> = {};
+    const maskAnnotations: Record<string, MaskImageAnnotationData> = {};
+    const tempCategories = new Set(Object.keys(mask_categoryColors));
+
+    // 3. Populate annotation data from txt and json files
+    for (const file of allFiles) {
+      const filePath = file.webkitRelativePath;
+      const fileExt = filePath.split('.').pop()?.toLowerCase();
+      const baseFilePath = filePath.substring(0, filePath.lastIndexOf('.'));
+
+      const imageFileMatch = allFiles.find(f => f.type.startsWith('image/') && f.webkitRelativePath.startsWith(baseFilePath));
+      if (!imageFileMatch) continue; // Annotation file without a matching image
+      const imagePath = imageFileMatch.webkitRelativePath;
+
+      if (fileExt === 'txt') {
+        const content = await file.text();
+        yoloContents[imagePath] = fileOperateConvertYolo(content, file_classMap);
+      } else if (fileExt === 'json') {
+        const content = await file.text();
+        jsonContents[imagePath] = content;
+
+        // Also process for MaskOperate
+        try {
+          const apiJson: MaskApiResponse = JSON.parse(content);
+          if (apiJson.key_points || apiJson.segments || apiJson.cpnts) {
+            const viewAnnotations = maskConvertApiToView(apiJson, mask_categoryColors, 2);
+            viewAnnotations.forEach(anno => tempCategories.add(anno.category));
+            maskAnnotations[imagePath] = { viewAnnotations, apiJson };
+          }
+        } catch (e) {
+          // Not a valid mask JSON, ignore for MaskOperate
+        }
+      }
+    }
+
+    // 4. Update global state
+    setFile_yoloFileContents(yoloContents);
+    setFile_jsonFileContents(jsonContents);
+    setMask_allImageAnnotations(maskAnnotations);
+    setMask_categories(Array.from(tempCategories));
+
+    // Reset histories
+    setFile_operationHistory({});
+    setFile_redoHistory({});
     setMask_operationHistory({});
     setMask_redoHistory({});
-    setMask_currentIndex(0);
+
+    // Set initial file
+    if (firstImageFile) {
+      setCurrentFilePath(firstImageFile.key);
+    } else {
+      setCurrentFilePath(null);
+    }
 
     message.success({ content: '文件夹上传并处理成功！', key: 'global-upload', duration: 3 });
   };
@@ -121,24 +182,26 @@ const GlobalUploader: React.FC = () => {
   );
 };
 
+
 /**
- * @description 全局导出组件，现在能够智能处理当前页面的实时编辑数据。
- * @why 这是解决核心问题的关键。此组件现在直接从 `annotationStore` 读取当前激活的索引和对应的内存中的（可能未保存的）内容。
- *      这确保了即使用户没有通过切换图片等操作触发保存，"全局导出"也能获取到最新的工作成果。
+ * @description Global exporter component. It intelligently handles data from the current page's real-time state.
+ *              This is key to solving a core problem: it reads the active file path and corresponding in-memory
+ *              content directly from the `annotationStore`. This ensures that even if the user hasn't triggered a save
+ *              by switching images, the "Global Export" captures the latest work.
  */
 const GlobalExporter: React.FC = () => {
   const {
-    file_pngList,
-    file_yoloList,
-    file_jsonList,
-    file_currentIndex,
-    file_currentYoloContent,
-    file_currentJsonContent,
+    fileTree,
+    file_yoloFileContents,
+    file_jsonFileContents,
     mask_allImageAnnotations,
   } = useModel('annotationStore');
 
+  /**
+   * @description Exports all annotation data from both FileOperate and MaskOperate pages into a structured ZIP file.
+   */
   const handleGlobalExport = async () => {
-    if (file_pngList.length === 0) {
+    if (!fileTree) {
       message.warning("没有可导出的文件。");
       return;
     }
@@ -146,64 +209,54 @@ const GlobalExporter: React.FC = () => {
 
     try {
       const zip = new JSZip();
-      const imagesFolder = zip.folder('images');
-      const cpntFolder = zip.folder('yolo'); // For FileOperate's YOLO .txt
-      const jsonFolder = zip.folder('json'); // For FileOperate's JSON
-      const wireFolder = zip.folder('wire'); // For MaskOperate's .json
 
-      if (!imagesFolder || !cpntFolder || !jsonFolder || !wireFolder) {
-        throw new Error("创建ZIP文件夹失败。");
-      }
+      // This recursive function will build the ZIP structure matching the fileTree
+      const addNodeToZip = async (node: FileTreeNode, currentZipFolder: JSZip) => {
+        if (!node.isLeaf) { // Directory
+          const folder = currentZipFolder.folder(node.title);
+          if (folder) {
+            for (const child of node.children) {
+              await addNodeToZip(child, folder);
+            }
+          }
+        } else { // File (Image)
+          const fileNode = node as FileNode;
+          const baseName = fileNode.title.substring(0, fileNode.title.lastIndexOf('.'));
 
-      for (let i = 0; i < file_pngList.length; i++) {
-        const imageFile = file_pngList[i];
-        const baseName = getFileNameWithoutExtension(imageFile.name);
+          // 1. Add image file to its folder
+          currentZipFolder.file(fileNode.title, fileNode.file);
 
-        // 1. Add image file
-        imagesFolder.file(imageFile.name, imageFile);
+          // 2. Handle FileOperate YOLO (.txt) export
+          const yoloContent = file_yoloFileContents[fileNode.key] || "";
+          const standardYoloContent = (yoloContent).split('\n').map(line => {
+            if (!line.trim()) return '';
+            const parts = line.split(' ');
+            return parts.length >= 6 ? parts.slice(1).join(' ') : (parts.length === 5 ? line : '');
+          }).filter(Boolean).join('\n');
+          currentZipFolder.file(`${baseName}.txt`, standardYoloContent);
 
-        // 2. Add or supplement FileOperate's YOLO (.txt) and JSON (.json) files
-        let yoloContentToExport: string = '';
-        let jsonContentToExport: string = '{}';
+          // 3. Handle both FileOperate and MaskOperate JSON export
+          const fileOperateJsonContent = file_jsonFileContents[fileNode.key] || "{}";
 
-        if (i === file_currentIndex) {
-          // If it's the currently active file in FileOperate, use the live data from the store.
-          yoloContentToExport = file_currentYoloContent || '';
-          jsonContentToExport = file_currentJsonContent || '{}';
-        } else {
-          // Otherwise, find the corresponding file in the list.
-          const yoloFile = file_yoloList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-          if (yoloFile) {
-            yoloContentToExport = await yoloFile.text();
+          const maskAnnotationData = mask_allImageAnnotations[fileNode.key];
+          let maskJsonContent = "{}";
+          if (maskAnnotationData) {
+            const finalApiJson = maskConvertViewToApi(maskAnnotationData.viewAnnotations);
+            // IMPORTANT: Preserve original, non-convertible data like netlists
+            const fullApiJson = { ...maskAnnotationData.apiJson, ...finalApiJson };
+            maskJsonContent = JSON.stringify(fullApiJson, null, 2);
           }
 
-          const jsonFile = file_jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-          if (jsonFile) {
-            jsonContentToExport = await jsonFile.text();
-          }
+          // Since both might generate a .json, we must put them in separate folders
+          const jsonFolder = zip.folder('json');
+          jsonFolder?.file(`${baseName}.json`, fileOperateJsonContent);
+
+          const wireFolder = zip.folder('wire');
+          wireFolder?.file(`${baseName}.json`, maskJsonContent);
         }
+      };
 
-        // Convert internal YOLO format to standard YOLOv5 format for export
-        const standardYoloContent = (yoloContentToExport || "").split('\n').map(line => {
-          if (!line.trim()) return '';
-          const parts = line.split(' ');
-          // Standard format is `class_idx x_center y_center width height`
-          return parts.length >= 6 ? parts.slice(1).join(' ') : (parts.length === 5 ? line : '');
-        }).filter(Boolean).join('\n');
-
-        cpntFolder.file(`${baseName}.txt`, standardYoloContent);
-        jsonFolder.file(`${baseName}.json`, jsonContentToExport);
-
-        // 3. Add or supplement MaskOperate's (wire) JSON file
-        // The store `mask_allImageAnnotations` is the single source of truth.
-        const annotationData = mask_allImageAnnotations[imageFile.name];
-        // Ensure the apiJson is up-to-date with viewAnnotations before exporting.
-        const generatedApiJson = convertViewToApi(annotationData?.viewAnnotations || []);
-        const finalApiJson = { ...(annotationData?.apiJson || {}), ...generatedApiJson };
-
-        const wireJsonContent = JSON.stringify(finalApiJson, null, 2);
-        wireFolder.file(`${baseName}.json`, wireJsonContent);
-      }
+      await addNodeToZip(fileTree, zip);
 
       const zipContent = await zip.generateAsync({ type: 'blob' });
       saveAs(zipContent, 'global_annotations_export.zip');

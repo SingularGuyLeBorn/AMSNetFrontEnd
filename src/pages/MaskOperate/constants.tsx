@@ -79,7 +79,7 @@ export type ImageAnnotationData = {
 
 // --- 撤销/重做操作定义 ---
 export type UndoOperation = {
-  imageId: string;
+  filePath: string;
   previousViewAnnotations: ViewAnnotation[];
   previousApiJson: ApiResponse;
 };

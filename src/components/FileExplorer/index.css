@@ -1,0 +1,58 @@
+/* START OF FILE src/components/FileExplorer/index.css */
+.file-explorer-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 8px;
+    background-color: var(--sider-background-color);
+}
+
+.file-explorer-header {
+    padding: 8px 4px;
+    flex-shrink: 0;
+}
+
+.file-explorer-tree-wrapper {
+    flex-grow: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+    /* Space for scrollbar */
+}
+
+/* AntD Tree Overrides */
+.file-explorer-container .ant-tree {
+    background-color: transparent;
+}
+
+.file-explorer-container .ant-tree-node-content-wrapper {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 2px 4px !important;
+    border-radius: 4px;
+}
+
+.file-explorer-container .ant-tree-node-content-wrapper:hover {
+    background-color: var(--primary-color-light) !important;
+}
+
+.file-explorer-container .ant-tree-node-content-wrapper.ant-tree-node-selected {
+    background-color: var(--primary-color) !important;
+    color: #fff;
+}
+
+.file-explorer-container .ant-tree-treenode {
+    padding: 2px 0;
+}
+
+.file-explorer-container .ant-tree .ant-tree-node-content-wrapper .ant-tree-iconEle {
+    margin-right: 6px;
+}
+
+.file-explorer-container .ant-tree-switcher-icon,
+.file-explorer-container .ant-tree-icon__customize {
+    font-size: 14px !important;
+}
+
+/* END OF FILE src/components/FileExplorer/index.css */

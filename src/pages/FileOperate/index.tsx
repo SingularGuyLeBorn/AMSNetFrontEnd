@@ -1,7 +1,7 @@
 // START OF FILE src/pages/FileOperate/index.tsx
+import FileExplorer from "@/components/FileExplorer";
+import type { FileNode } from "@/models/fileTree";
 import {
-    faArrowLeft, faArrowRight,
-    faChevronLeft, faChevronRight,
     faCogs,
     faDatabase, faEraser,
     faFileExport,
@@ -16,8 +16,7 @@ import {
     faSearchPlus,
     faTags,
     faTrash,
-    faUndo,
-    faUpload
+    faUndo
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useModel } from "@umijs/max";
@@ -45,7 +44,8 @@ import {
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiComponent, ApiResponse, ClassInfo, Operation, jsonNameColorMap, translations } from './constants';
+import type { ApiComponent, ApiResponse, ClassInfo, Operation } from './constants';
+import { jsonNameColorMap, translations } from './constants';
 import './index.css';
 
 
@@ -81,7 +81,6 @@ interface JsonData {
     global: { [key: string]: any };
 }
 
-// Bedrock Change: Use the more specific ApiResponse type from constants
 type FullApiResponse = ApiResponse;
 
 
@@ -89,11 +88,58 @@ const RESIZE_HANDLE_SIZE = 8;
 const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
 
-const getFileNameWithoutExtension = (fileName: string): string => {
-    const lastDotIndex = fileName.lastIndexOf('.');
-    if (lastDotIndex === -1) return fileName;
-    return fileName.substring(0, lastDotIndex);
+/**
+ * @description Recursively searches for a file node by its path (key) in the file tree.
+ * @param {string} key The path of the file to find.
+ * @param {any} node The current node to search within.
+ * @returns {FileNode | null} The found file node or null.
+ */
+const findFileNodeByKey = (key: string, node: any): FileNode | null => {
+    if (node.key === key && node.isLeaf) {
+        return node;
+    }
+    if (!node.isLeaf) {
+        for (const child of node.children) {
+            const found = findFileNodeByKey(key, child);
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return null;
 };
+
+/**
+ * @description Converts a standard YOLO format (class_idx x y w h) to the internal format (name class_idx x y w h).
+ *              This is a pure utility function.
+ * @param {string} standardYoloContent - The content in standard YOLO format.
+ * @param {{ [key: number]: ClassInfo }} classMap - The map of class indices to class info.
+ * @returns {string} The content in the internal YOLO format.
+ */
+export const convertStandardYoloToInternal = (standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
+    const lines = standardYoloContent.split('\n').filter(line => line.trim() !== '');
+    if (lines.length === 0) return '';
+    const firstLineParts = lines[0].split(' ');
+    // Check if the first line looks like standard YOLO (starts with a number, has 5 parts)
+    // If not, assume it's already in the internal format.
+    if (firstLineParts.length !== 5 || isNaN(parseFloat(firstLineParts[0]))) {
+        return standardYoloContent;
+    }
+    const nameCounters: { [key: string]: number } = {};
+    const internalYoloLines = lines.map(line => {
+        const parts = line.split(' ');
+        if (parts.length !== 5) return line; // a malformed line, pass through
+        const classIndex = parseInt(parts[0], 10);
+        if (isNaN(classIndex)) return line; // malformed line
+        const classLabel = classMap[classIndex]?.label || `class_${classIndex}`;
+        const counter = nameCounters[classLabel] || 0;
+        nameCounters[classLabel] = counter + 1;
+        const uniqueName = `${classLabel}_${counter}`;
+        return `${uniqueName} ${line}`;
+    });
+    return internalYoloLines.join('\n');
+};
+
 
 const generateRandomColor = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
@@ -172,13 +218,10 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
 const FileOperate: React.FC = () => {
     const { initialState } = useModel('@@initialState');
     const {
+        fileTree, currentFilePath, setCurrentFilePath,
         file_classMap: classMap, setFile_classMap: setClassMap,
-        file_pngList: pngList, setFile_pngList: setPngList,
-        file_yoloList: yoloList, setFile_yoloList: setYoloList,
-        file_jsonList: jsonList, setFile_jsonList: setJsonList,
-        file_currentIndex: currentIndex, setFile_currentIndex: setCurrentIndex,
-        file_currentYoloContent: currentYoloContent, setFile_currentYoloContent: setCurrentYoloContent,
-        file_currentJsonContent: currentJsonContent, setFile_currentJsonContent: setCurrentJsonContent,
+        file_yoloFileContents, setFile_yoloFileContents,
+        file_jsonFileContents, setFile_jsonFileContents,
         file_operationHistory: operationHistory, setFile_operationHistory: setOperationHistory,
         file_redoHistory: redoHistory, setFile_redoHistory: setRedoHistory,
     } = useModel('annotationStore');
@@ -186,7 +229,11 @@ const FileOperate: React.FC = () => {
     const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
     const t = translations[currentLang];
 
+    // Local state for the current file's content, derived from global store
+    const [currentYoloContent, setCurrentYoloContent] = useState<string | null>(null);
+    const [currentJsonContent, setCurrentJsonContent] = useState<string | null>(null);
     const [currentPng, setCurrentPng] = useState<File | null>(null);
+
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const magnifierCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -198,12 +245,13 @@ const FileOperate: React.FC = () => {
     const [selectedJsonType, setSelectedJsonType] = useState<'buildingBlocks' | 'constants' | null>(null);
     const [activeTool, setActiveTool] = useState<ActiveTool>('select');
     const [redrawTrigger, setRedrawTrigger] = useState(0);
-    const [inspectorWidth, setInspectorWidth] = useState<number>(350);
-    const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
-    const [isInspectorVisible, setIsInspectorVisible] = useState<boolean>(true);
+    const [leftSiderWidth, setLeftSiderWidth] = useState<number>(250);
+    const [rightSiderWidth, setRightSiderWidth] = useState<number>(350);
+    const [isResizingLeft, setIsResizingLeft] = useState<boolean>(false);
+    const [isResizingRight, setIsResizingRight] = useState<boolean>(false);
+
     const [isAiAnnotating, setIsAiAnnotating] = useState(false);
     const classImportRef = useRef<HTMLInputElement>(null);
-    const folderUploadRef = useRef<HTMLInputElement>(null);
 
     const [draggingState, setDraggingState] = useState<DraggingState>(null);
     const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox>(null);
@@ -218,7 +266,6 @@ const FileOperate: React.FC = () => {
     const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
     const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
 
-    // Bedrock Change: New states for netlist data to align with MaskOperate
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
@@ -226,6 +273,49 @@ const FileOperate: React.FC = () => {
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
     }, [initialState?.language]);
+
+    // This effect now triggers when the global currentFilePath changes
+    useEffect(() => {
+        if (currentFilePath && fileTree) {
+            const node = findFileNodeByKey(currentFilePath, fileTree);
+            if (node) {
+                setCurrentPng(node.file);
+                // Load content from path-keyed global state
+                const yoloContent = file_yoloFileContents[currentFilePath] || '';
+                const jsonText = file_jsonFileContents[currentFilePath] || '{}';
+
+                setCurrentYoloContent(yoloContent);
+                try {
+                    const fullData: FullApiResponse = JSON.parse(jsonText);
+                    if (typeof fullData === 'object' && fullData !== null) {
+                        setNetlistScsContent(fullData.netlist_scs || null);
+                        setNetlistCdlContent(fullData.netlist_cdl || null);
+                        const displayData = { ...fullData };
+                        delete displayData.netlist_scs;
+                        delete displayData.netlist_cdl;
+                        setCurrentJsonContent(JSON.stringify(displayData, null, 2));
+                    } else {
+                        setCurrentJsonContent(jsonText);
+                        setNetlistScsContent(null);
+                        setNetlistCdlContent(null);
+                    }
+                } catch (e) {
+                    setCurrentJsonContent(jsonText);
+                    setNetlistScsContent(null);
+                    setNetlistCdlContent(null);
+                }
+            }
+        } else {
+            setCurrentPng(null);
+            setCurrentYoloContent('');
+            setCurrentJsonContent('{}');
+            setNetlistScsContent(null);
+            setNetlistCdlContent(null);
+        }
+        // Reset selection when file changes
+        setSelectedBoxName(null);
+    }, [currentFilePath, fileTree, file_yoloFileContents, file_jsonFileContents]);
+
 
     const parsedYoloData = useMemo(() => {
         return (currentYoloContent || '').split('\n').filter(Boolean).map(line => {
@@ -282,7 +372,6 @@ const FileOperate: React.FC = () => {
                     }
                 });
 
-                // This uses parseJsonContent, which is designed for the stain tool's specific schema.
                 const parsedStainJson = parseJsonContent(currentJsonContent);
                 if (parsedStainJson.local) {
                     Object.values(parsedStainJson.local).forEach(nameMap => {
@@ -381,111 +470,32 @@ const FileOperate: React.FC = () => {
         drawMagnifier();
     }, [canvasMousePos, drawMagnifier]);
 
+    useEffect(() => { redrawCanvas(); }, [redrawTrigger, redrawCanvas, currentYoloContent]);
 
-    const convertStandardYoloToInternal = useCallback((standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
-        const lines = standardYoloContent.split('\n').filter(line => line.trim() !== '');
-        if (lines.length === 0) return '';
-        const firstLineParts = lines[0].split(' ');
-        if (firstLineParts.length !== 5 || isNaN(parseFloat(firstLineParts[0]))) {
-            return standardYoloContent;
-        }
-        const nameCounters: { [key: string]: number } = {};
-        const internalYoloLines = lines.map(line => {
-            const parts = line.split(' ');
-            if (parts.length !== 5) return line;
-            const classIndex = parseInt(parts[0], 10);
-            if (isNaN(classIndex)) return line;
-            const classLabel = classMap[classIndex]?.label || `class_${classIndex}`;
-            const counter = nameCounters[classLabel] || 0;
-            nameCounters[classLabel] = counter + 1;
-            const uniqueName = `${classLabel}_${counter}`;
-            return `${uniqueName} ${line}`;
-        });
-        return internalYoloLines.join('\n');
-    }, []);
-
-    const loadDataForIndex = useCallback(async (index: number, yoloListRef: File[], jsonListRef: File[]) => {
-        if (pngList.length === 0 || index < 0 || index >= pngList.length) {
-            setCurrentPng(null);
-            setCurrentYoloContent('');
-            setCurrentJsonContent('{}');
-            setNetlistScsContent(null);
-            setNetlistCdlContent(null);
-            return;
-        }
-
-        setCurrentPng(pngList[index]);
-        const baseName = getFileNameWithoutExtension(pngList[index].name);
-
-        const yoloFile = yoloListRef.find(f => getFileNameWithoutExtension(f.name) === baseName);
-        if (yoloFile) {
-            const text = await yoloFile.text();
-            const internalFormatContent = convertStandardYoloToInternal(text, classMap);
-            setCurrentYoloContent(internalFormatContent);
-        } else {
-            setCurrentYoloContent('');
-        }
-
-        const jsonFile = jsonListRef.find(f => getFileNameWithoutExtension(f.name) === baseName);
-        if (jsonFile) {
-            const text = await jsonFile.text();
-            try {
-                // Bedrock Change: Robustly parse full JSON and distribute to different views
-                const fullData: FullApiResponse = JSON.parse(text);
-
-                // Check if it's the new API response format or the old internal format
-                if (typeof fullData === 'object' && fullData !== null) {
-                    setNetlistScsContent(fullData.netlist_scs || null);
-                    setNetlistCdlContent(fullData.netlist_cdl || null);
-
-                    // Create a clean JSON object for display, filtering out netlist keys
-                    const displayData: { [key: string]: any } = { ...fullData };
-                    delete displayData.netlist_scs;
-                    delete displayData.netlist_cdl;
-
-                    setCurrentJsonContent(JSON.stringify(displayData, null, 2));
-
-                } else {
-                    // It's likely the old format or something else, use the original logic
-                    setCurrentJsonContent(text); // Display as is
-                    setNetlistScsContent(null);
-                    setNetlistCdlContent(null);
-                }
-            } catch (e) {
-                // If parsing fails, it's likely the old format which might not be perfect JSON
-                setCurrentJsonContent(text);
-                setNetlistScsContent(null);
-                setNetlistCdlContent(null);
-            }
-        } else {
-            // No JSON file exists
-            setCurrentJsonContent('{}');
-            setNetlistScsContent(null);
-            setNetlistCdlContent(null);
-        }
-    }, [pngList, classMap, convertStandardYoloToInternal, setCurrentYoloContent, setCurrentJsonContent, setCurrentPng]);
-
-
-    useEffect(() => {
-        loadDataForIndex(currentIndex, yoloList, jsonList);
-    }, [currentIndex, pngList, yoloList, jsonList, loadDataForIndex]);
-
-
-    useEffect(() => { redrawCanvas(); }, [redrawTrigger, redrawCanvas]);
     useEffect(() => {
         const handleResize = () => setRedrawTrigger(p => p + 1);
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    // Sider resize logic
     useEffect(() => {
         const handleMouseMove = (e: globalThis.MouseEvent) => {
-            if (!isResizingInspector) return;
-            const newWidth = window.innerWidth - e.clientX;
-            if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
+            if (isResizingLeft) {
+                const newWidth = e.clientX;
+                if (newWidth > 150 && newWidth < 600) setLeftSiderWidth(newWidth);
+            }
+            if (isResizingRight) {
+                const newWidth = window.innerWidth - e.clientX;
+                if (newWidth > 200 && newWidth < 800) setRightSiderWidth(newWidth);
+            }
         };
-        const handleMouseUp = () => setIsResizingInspector(false);
-        if (isResizingInspector) {
+        const handleMouseUp = () => {
+            setIsResizingLeft(false);
+            setIsResizingRight(false);
+        };
+
+        if (isResizingLeft || isResizingRight) {
             document.body.style.userSelect = 'none';
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
@@ -495,7 +505,8 @@ const FileOperate: React.FC = () => {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isResizingInspector]);
+    }, [isResizingLeft, isResizingRight]);
+
 
     useEffect(() => {
         const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
@@ -524,27 +535,30 @@ const FileOperate: React.FC = () => {
         };
     }, [draggingState]);
 
-    const handleFolderUpload = (event: ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files; if (!files) return;
-        const newPngList: File[] = [], newYoloList: File[] = [], newJsonList: File[] = [];
-        Array.from(files).forEach(file => {
-            const lowerCaseName = file.name.toLowerCase();
-            if (lowerCaseName.endsWith('.png') || lowerCaseName.endsWith('.jpg') || lowerCaseName.endsWith('.jpeg')) newPngList.push(file);
-            else if (lowerCaseName.endsWith('.txt')) newYoloList.push(file);
-            else if (lowerCaseName.endsWith('.json')) newJsonList.push(file);
-        });
-        const compareFn = (a: File, b: File) => a.name.localeCompare(b.name, undefined, { numeric: true });
-        setPngList(newPngList.sort(compareFn));
-        setYoloList(newYoloList.sort(compareFn));
-        setJsonList(newJsonList.sort(compareFn));
-        setCurrentIndex(0);
-        setOperationHistory({});
-        setRedoHistory({});
-        if (folderUploadRef.current) folderUploadRef.current.value = "";
+    const handleFileSelect = (filePath: string) => {
+        if (!currentFilePath) {
+            setCurrentFilePath(filePath);
+            return;
+        }
+
+        // Save current work before switching
+        setFile_yoloFileContents(prev => ({ ...prev, [currentFilePath]: currentYoloContent || '' }));
+        let jsonToSave = currentJsonContent;
+        if (netlistScsContent || netlistCdlContent) {
+            try {
+                const mainPart = JSON.parse(currentJsonContent || '{}');
+                jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
+            } catch (e) { /* use as is */ }
+        }
+        setFile_jsonFileContents(prev => ({ ...prev, [currentFilePath]: jsonToSave || '{}' }));
+
+        // Switch to new file
+        setCurrentFilePath(filePath);
     };
 
+
     const handleDeleteAnnotationByName = useCallback((boxNameToDelete: string) => {
-        if (!boxNameToDelete) return;
+        if (!boxNameToDelete || !currentFilePath) return;
 
         const previousYoloContentForUndo = currentYoloContent;
         const previousJsonContentForUndo = currentJsonContent;
@@ -580,8 +594,8 @@ const FileOperate: React.FC = () => {
                 previousYoloContent: previousYoloContentForUndo,
                 previousJsonContent: previousJsonContentForUndo,
             };
-            setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-            setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+            setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+            setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
         }
 
         if (selectedBoxName === boxNameToDelete) {
@@ -590,11 +604,11 @@ const FileOperate: React.FC = () => {
 
         message.success(`标注 '${boxNameToDelete}' 已删除`);
         setRedrawTrigger(p => p + 1);
-    }, [currentYoloContent, currentJsonContent, currentIndex, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName]);
+    }, [currentYoloContent, currentJsonContent, currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
-        const canvas = canvasRef.current; if (!canvas || !currentYoloContent) return;
+        const canvas = canvasRef.current; if (!canvas || !currentYoloContent || !currentFilePath) return;
         const { x: mouseX, y: mouseY } = getScaledCoords(e);
 
         const yoloLines = currentYoloContent.split('\n').filter(Boolean);
@@ -624,8 +638,8 @@ const FileOperate: React.FC = () => {
                     })());
                     setCurrentJsonContent(newJson);
                     const newOp: Operation = { type: 'stain', boxName, jsonType: selectedJsonType, jsonName: selectedJsonName, previousJsonContent: previousJson };
-                    setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                    setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                    setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+                    setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
                     setRedrawTrigger(p => p + 1);
                     break;
                 }
@@ -662,7 +676,7 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
-        if (e.button !== 0) return; // Only react to left-click
+        if (e.button !== 0 || !currentFilePath) return;
 
         if (activeTool === 'stain' || activeTool === 'delete') {
             handleCanvasAction(e);
@@ -702,8 +716,8 @@ const FileOperate: React.FC = () => {
                             startFullYoloLine: selectedBoxLine
                         });
                         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-                        setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                        setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                        setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+                        setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
                         return;
                     }
                 }
@@ -739,8 +753,8 @@ const FileOperate: React.FC = () => {
                     startYoloData: clickedYoloData,
                 });
                 const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+                setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
             } else {
                 setDraggingState(null);
             }
@@ -829,7 +843,7 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseUp = (e: MouseEvent<HTMLCanvasElement>) => {
-        if (e.button !== 0) return;
+        if (e.button !== 0 || !currentFilePath) return;
         const canvas = canvasRef.current; if (!canvas) return;
         const upPos = getScaledCoords(e);
 
@@ -859,8 +873,8 @@ const FileOperate: React.FC = () => {
                 setCurrentYoloContent(prev => (prev ? `${prev}\n${yoloFormatData}` : yoloFormatData));
 
                 const newOp: Operation = { type: 'draw', yoloData: [yoloFormatData], previousYoloContent: previousYolo };
-                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+                setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
             }
             setCanvasImageData(null); setRedrawTrigger(prev => prev + 1);
         } else if (draggingState && draggingState.type === 'region-select') {
@@ -943,8 +957,8 @@ const FileOperate: React.FC = () => {
                     previousYoloContent: previousYoloContentForUndo,
                     previousJsonContent: previousJsonContentForUndo,
                 };
-                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+                setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
                 message.success(`删除了 ${boxNamesToDelete.length} 个标注。`);
             }
         }
@@ -954,10 +968,11 @@ const FileOperate: React.FC = () => {
     };
 
     const addUndoRecord = useCallback(() => {
+        if (!currentFilePath) return;
         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-        setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-        setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
-    }, [currentYoloContent, currentIndex, setOperationHistory, setRedoHistory]);
+        setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+        setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+    }, [currentYoloContent, currentFilePath, setOperationHistory, setRedoHistory]);
 
     const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
@@ -980,139 +995,104 @@ const FileOperate: React.FC = () => {
     }, [currentYoloContent, setCurrentYoloContent]);
 
     const handleUndo = () => {
-        const currentImageHistory = operationHistory[currentIndex] || [];
+        if (!currentFilePath) return;
+        const currentImageHistory = operationHistory[currentFilePath] || [];
         if (currentImageHistory.length === 0) { message.info(t.noUndoOperations); return; }
         const lastOperation = currentImageHistory[currentImageHistory.length - 1];
         let redoOp: Operation;
         switch (lastOperation.type) { case 'draw': case 'ai_annotate': case 'move': redoOp = { ...lastOperation, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': redoOp = { ...lastOperation, previousJsonContent: currentJsonContent }; break; case 'delete': redoOp = { ...lastOperation, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
-        setRedoHistory(prev => ({ ...prev, [currentIndex]: [redoOp, ...(prev[currentIndex] || [])] }));
-        setOperationHistory(prev => ({ ...prev, [currentIndex]: currentImageHistory.slice(0, -1) }));
+        setRedoHistory(prev => ({ ...prev, [currentFilePath]: [redoOp, ...(prev[currentFilePath] || [])] }));
+        setOperationHistory(prev => ({ ...prev, [currentFilePath]: currentImageHistory.slice(0, -1) }));
         if ('previousYoloContent' in lastOperation) { setCurrentYoloContent(lastOperation.previousYoloContent); }
         if ('previousJsonContent' in lastOperation) { setCurrentJsonContent(lastOperation.previousJsonContent); }
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
     const handleRedo = () => {
-        const currentImageRedoHistory = redoHistory[currentIndex] || [];
+        if (!currentFilePath) return;
+        const currentImageRedoHistory = redoHistory[currentFilePath] || [];
         if (currentImageRedoHistory.length === 0) { message.info(t.noRedoOperations); return; }
         const operationToRedo = currentImageRedoHistory[0];
         let undoOp: Operation;
         switch (operationToRedo.type) { case 'draw': case 'ai_annotate': case 'move': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': undoOp = { ...operationToRedo, previousJsonContent: currentJsonContent }; break; case 'delete': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
-        setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), undoOp] }));
-        setRedoHistory(prev => ({ ...prev, [currentIndex]: currentImageRedoHistory.slice(1) }));
+        setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), undoOp] }));
+        setRedoHistory(prev => ({ ...prev, [currentFilePath]: currentImageRedoHistory.slice(1) }));
         if ('previousYoloContent' in operationToRedo) { setCurrentYoloContent(operationToRedo.previousYoloContent); }
         if ('previousJsonContent' in operationToRedo) { setCurrentJsonContent(operationToRedo.previousJsonContent); }
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
 
-    const saveAndSwitchIndex = useCallback((newIndex: number) => {
-        if (newIndex < 0 || newIndex >= pngList.length) return;
-        if (currentIndex < 0 || currentIndex >= pngList.length) { // handle case where current index is invalid
-            setCurrentIndex(newIndex);
+    const handleSaveCurrent = () => {
+        if (!currentFilePath) {
+            message.warning(t.noFile);
             return;
         }
-
-        if (currentYoloContent !== null && pngList[currentIndex]) {
-            const yoloFile = new File([currentYoloContent], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.txt`, { type: 'text/plain' });
-            setYoloList(prev => {
-                const newList = [...prev];
-                const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(yoloFile.name));
-                if (idx > -1) newList[idx] = yoloFile;
-                else newList.push(yoloFile);
-                return newList;
-            });
+        setFile_yoloFileContents(prev => ({ ...prev, [currentFilePath]: currentYoloContent || '' }));
+        let jsonToSave = currentJsonContent;
+        if (netlistScsContent || netlistCdlContent) {
+            try {
+                const mainPart = JSON.parse(currentJsonContent || '{}');
+                jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
+            } catch (e) { /* use as is */ }
         }
-        if (currentJsonContent !== null && pngList[currentIndex]) {
-            // Bedrock Change: Reconstruct the full JSON before saving if netlist data exists
-            let jsonToSave = currentJsonContent;
-            if (netlistScsContent || netlistCdlContent) {
-                try {
-                    const mainJsonPart = JSON.parse(currentJsonContent || '{}');
-                    const fullJsonData = {
-                        ...mainJsonPart,
-                        netlist_scs: netlistScsContent,
-                        netlist_cdl: netlistCdlContent
-                    };
-                    jsonToSave = JSON.stringify(fullJsonData, null, 2);
-                } catch (e) {
-                    // Fallback if currentJsonContent is not valid JSON
-                    console.error("Could not reconstruct full JSON for saving, saving display part only.", e);
-                }
-            }
-
-            const jsonFile = new File([jsonToSave], `${getFileNameWithoutExtension(pngList[currentIndex].name)}.json`, { type: 'application/json' });
-            setJsonList(prev => {
-                const newList = [...prev];
-                const idx = newList.findIndex(f => getFileNameWithoutExtension(f.name) === getFileNameWithoutExtension(jsonFile.name));
-                if (idx > -1) newList[idx] = jsonFile;
-                else newList.push(jsonFile);
-                return newList;
-            });
-        }
-
-        setCurrentIndex(newIndex);
-    }, [currentIndex, pngList, currentYoloContent, currentJsonContent, netlistScsContent, netlistCdlContent, setYoloList, setJsonList, setCurrentIndex]);
-
-    const handleNextIndex = () => saveAndSwitchIndex(currentIndex + 1);
-    const handlePrevIndex = () => saveAndSwitchIndex(currentIndex - 1);
+        setFile_jsonFileContents(prev => ({ ...prev, [currentFilePath]: jsonToSave || '{}' }));
+        message.success(`${t.save} ${t.operationSuccessful}`);
+    };
 
     const handleSaveAllToZip = async () => {
-        if (pngList.length === 0) {
+        if (!fileTree) {
             message.warning(t.noFile);
             return;
         }
         message.loading({ content: "正在准备数据并打包...", key: "exporting", duration: 0 });
 
+        // Persist current file's data before exporting all
+        const allYoloContents = { ...file_yoloFileContents };
+        const allJsonContents = { ...file_jsonFileContents };
+
+        if (currentFilePath) {
+            allYoloContents[currentFilePath] = currentYoloContent || '';
+            let jsonToSave = currentJsonContent;
+            if (netlistScsContent || netlistCdlContent) {
+                try {
+                    const mainPart = JSON.parse(currentJsonContent || '{}');
+                    jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
+                } catch (e) { /* use as is */ }
+            }
+            allJsonContents[currentFilePath] = jsonToSave || '{}';
+        }
+
         try {
             const zip = new JSZip();
 
-            const allYoloFiles = new Map(yoloList.map(f => [getFileNameWithoutExtension(f.name), f]));
-            if (currentYoloContent !== null && pngList[currentIndex]) {
-                const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
-                allYoloFiles.set(baseName, new File([currentYoloContent], `${baseName}.txt`, { type: 'text/plain' }));
-            }
+            const addFolderToZip = (node: any, currentZipFolder: JSZip) => {
+                if (!node.isLeaf) { // It's a directory
+                    const folder = currentZipFolder.folder(node.title);
+                    if (folder) {
+                        node.children.forEach((child: any) => addFolderToZip(child, folder));
+                    }
+                } else { // It's a file
+                    const fileNode = node as FileNode;
+                    currentZipFolder.file(fileNode.title, fileNode.file);
 
-            const allJsonFiles = new Map(jsonList.map(f => [getFileNameWithoutExtension(f.name), f]));
-            if (currentJsonContent !== null && pngList[currentIndex]) {
-                const baseName = getFileNameWithoutExtension(pngList[currentIndex].name);
-                let jsonToSave = currentJsonContent;
-                if (netlistScsContent || netlistCdlContent) {
-                    try {
-                        const mainJsonPart = JSON.parse(currentJsonContent || '{}');
-                        const fullJsonData = {
-                            ...mainJsonPart,
-                            netlist_scs: netlistScsContent,
-                            netlist_cdl: netlistCdlContent
-                        };
-                        jsonToSave = JSON.stringify(fullJsonData, null, 2);
-                    } catch (e) { /* use filtered content as fallback */ }
+                    // Add corresponding yolo and json files
+                    const yoloContent = allYoloContents[fileNode.key] || "";
+                    const jsonContent = allJsonContents[fileNode.key] || "{}";
+
+                    const baseName = fileNode.title.substring(0, fileNode.title.lastIndexOf('.'));
+
+                    // Convert to standard YOLO format for export
+                    const standardYoloContent = (yoloContent).split('\n').map(line => {
+                        if (!line.trim()) return '';
+                        const parts = line.split(' ');
+                        return parts.length >= 6 ? parts.slice(1).join(' ') : (parts.length === 5 ? line : '');
+                    }).filter(Boolean).join('\n');
+
+                    currentZipFolder.file(`${baseName}.txt`, standardYoloContent);
+                    currentZipFolder.file(`${baseName}.json`, jsonContent);
                 }
-                allJsonFiles.set(baseName, new File([jsonToSave], `${baseName}.json`, { type: 'application/json' }));
-            }
+            };
 
-            for (const pngFile of pngList) {
-                const baseName = getFileNameWithoutExtension(pngFile.name);
-                zip.file(`images/${pngFile.name}`, pngFile);
-
-                let yoloContentForFile = '';
-                const yoloFile = allYoloFiles.get(baseName);
-                if (yoloFile) {
-                    yoloContentForFile = await yoloFile.text();
-                }
-
-                const finalYoloContent = (yoloContentForFile || "").split('\n').map(line => {
-                    if (!line.trim()) return '';
-                    const parts = line.split(' ');
-                    return parts.length >= 6 ? parts.slice(1).join(' ') : (parts.length === 5 ? line : '');
-                }).filter(Boolean).join('\n');
-                zip.file(`yolo/${baseName}.txt`, finalYoloContent);
-
-                let jsonContentForFile = '{}';
-                const jsonFile = allJsonFiles.get(baseName);
-                if (jsonFile) {
-                    jsonContentForFile = await jsonFile.text();
-                }
-                zip.file(`json/${baseName}.json`, jsonContentForFile); // Save the full/reconstructed JSON
-            }
+            addFolderToZip(fileTree, zip);
 
             const content = await zip.generateAsync({ type: 'blob' });
             saveAs(content, 'fileoperate_annotations.zip');
@@ -1185,21 +1165,21 @@ const FileOperate: React.FC = () => {
                 return;
             }
 
-            // Bedrock Change: Create a clean JSON object for display, filtering keys
             const displayData: { [key: string]: any } = { ...resultData };
             delete displayData.netlist_scs;
             delete displayData.netlist_cdl;
             const displayJsonContent = JSON.stringify(displayData, null, 2);
 
-            // Update local state for immediate display
             setCurrentYoloContent(newYoloContent);
-            setCurrentJsonContent(displayJsonContent); // Use the filtered JSON for the main display
+            setCurrentJsonContent(displayJsonContent);
             setNetlistScsContent(resultData.netlist_scs || null);
             setNetlistCdlContent(resultData.netlist_cdl || null);
 
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
-            setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-            setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+            if (currentFilePath) {
+                setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+                setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+            }
             setRedrawTrigger(p => p + 1);
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
 
@@ -1290,33 +1270,31 @@ const FileOperate: React.FC = () => {
         <Layout className="unified-layout">
             <Header className="unified-top-header">
                 <div className="header-left-controls">
-                    <Button type="primary" onClick={() => folderUploadRef.current?.click()} icon={<FontAwesomeIcon icon={faUpload} />}>{t.uploadFolder}</Button>
-                    <input ref={folderUploadRef} type="file" {...{ webkitdirectory: "true", directory: "true" } as any} multiple onChange={handleFolderUpload} style={{ display: 'none' }} />
+                    <Text className="current-file-text" title={currentPng?.name}>{currentPng ? `${t.currentFile}: ${currentPng.name}` : t.noImages}</Text>
                 </div>
                 <Space className="header-center-controls">
-                    <Button onClick={handlePrevIndex} disabled={currentIndex === 0 || pngList.length === 0} icon={<FontAwesomeIcon icon={faArrowLeft} />} />
-                    <Text className="current-file-text" title={currentPng?.name}>{currentPng ? `${t.currentFile}: ${currentPng.name} (${currentIndex + 1}/${pngList.length})` : t.noImages}</Text>
-                    <Button onClick={handleNextIndex} disabled={currentIndex >= pngList.length - 1 || pngList.length === 0} icon={<FontAwesomeIcon icon={faArrowRight} />} />
+                    <Tooltip title={t.selectTool} placement="bottom"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!currentPng} /></Tooltip>
+                    <Tooltip title={t.magnifier} placement="bottom"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={!currentPng} /></Tooltip>
+                    <Tooltip title={t.drawingMode} placement="bottom"><Button onClick={() => setActiveTool('draw')} type={activeTool === 'draw' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faPen} />} disabled={!currentPng} /></Tooltip>
+                    <Tooltip title={t.coloringMode} placement="bottom"><Button onClick={() => setActiveTool('stain')} type={activeTool === 'stain' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!currentPng} /></Tooltip>
+                    <Tooltip title={t.deleteBox} placement="bottom"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!currentPng} /></Tooltip>
+                    <Tooltip title={t.regionDelete} placement="bottom"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={!currentPng} /></Tooltip>
+                    <Divider type="vertical" />
+                    <Tooltip title={t.aiAnnotation} placement="bottom"><Button onClick={handleAiAnnotation} type="text" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentPng || isAiAnnotating} /></Tooltip>
                 </Space>
                 <div className="header-right-controls">
-                    <Tooltip title={t.undo}><Button onClick={handleUndo} icon={<FontAwesomeIcon icon={faUndo} />} disabled={(operationHistory[currentIndex] || []).length === 0} /></Tooltip>
-                    <Tooltip title={t.redo}><Button onClick={handleRedo} icon={<FontAwesomeIcon icon={faRedo} />} disabled={(redoHistory[currentIndex] || []).length === 0} /></Tooltip>
-                    <Button onClick={handleSaveAllToZip} icon={<FontAwesomeIcon icon={faSave} />} type="primary" ghost disabled={pngList.length === 0}>{t.saveAll}</Button>
+                    <Tooltip title={t.undo}><Button onClick={handleUndo} icon={<FontAwesomeIcon icon={faUndo} />} disabled={(operationHistory[currentFilePath || ''] || []).length === 0} /></Tooltip>
+                    <Tooltip title={t.redo}><Button onClick={handleRedo} icon={<FontAwesomeIcon icon={faRedo} />} disabled={(redoHistory[currentFilePath || ''] || []).length === 0} /></Tooltip>
+                    <Button onClick={handleSaveCurrent} icon={<FontAwesomeIcon icon={faSave} />} disabled={!currentPng}>{t.save}</Button>
+                    <Button onClick={handleSaveAllToZip} icon={<FontAwesomeIcon icon={faFileExport} />} type="primary" ghost disabled={!fileTree}>{t.saveAll}</Button>
                 </div>
             </Header>
             <Layout hasSider>
-                <Sider width={60} className="unified-tool-sider" theme="light">
-                    <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
-                        <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={pngList.length === 0} /></Tooltip>
-                        <Tooltip title={t.magnifier} placement="right"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={pngList.length === 0} /></Tooltip>
-                        <Tooltip title={t.drawingMode} placement="right"><Button onClick={() => setActiveTool('draw')} type={activeTool === 'draw' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPen} />} disabled={pngList.length === 0} /></Tooltip>
-                        <Tooltip title={t.coloringMode} placement="right"><Button onClick={() => setActiveTool('stain')} type={activeTool === 'stain' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={pngList.length === 0} /></Tooltip>
-                        <Tooltip title={t.deleteBox} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={pngList.length === 0} /></Tooltip>
-                        <Tooltip title={t.regionDelete} placement="right"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={pngList.length === 0} /></Tooltip>
-                        <Divider style={{ margin: '8px 0' }} />
-                        <Tooltip title={t.aiAnnotation} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentPng || isAiAnnotating} /></Tooltip>
-                    </Space>
+                <Sider width={leftSiderWidth} className="file-explorer-sider" theme="light">
+                    <FileExplorer onFileSelect={handleFileSelect} />
                 </Sider>
+                <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
+
                 <Layout className="main-content-wrapper">
                     <Content className="canvas-content"
                         onMouseEnter={() => setIsMouseOnCanvas(true)}
@@ -1356,17 +1334,10 @@ const FileOperate: React.FC = () => {
                             </div>
                         )}
                     </Content>
-                    {!isInspectorVisible && (
-                        <Tooltip title={t.showPanel} placement="left">
-                            <Button className="show-inspector-handle" type="primary" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsInspectorVisible(true)} />
-                        </Tooltip>
-                    )}
                 </Layout>
-                <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none', cursor: 'ew-resize' }} />
-                <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsible collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
-                    <Tabs defaultActiveKey="1" className="inspector-tabs"
-                        tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}
-                    >
+                <div className="resizer-horizontal" onMouseDown={() => setIsResizingRight(true)} />
+                <Sider width={rightSiderWidth} className="unified-inspector-sider" theme="light" >
+                    <Tabs defaultActiveKey="1" className="inspector-tabs">
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
                             <div className="tab-pane-content">
                                 <div style={{ flexShrink: 0 }}>

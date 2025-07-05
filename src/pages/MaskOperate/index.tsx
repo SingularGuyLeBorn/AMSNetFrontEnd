@@ -1,6 +1,7 @@
 // START OF FILE src/pages/MaskOperate/index.tsx
+import FileExplorer from "@/components/FileExplorer/index";
+import type { FileNode } from "@/models/fileTree.tsx";
 import {
-  faChevronLeft, faChevronRight,
   faCog,
   faDatabase,
   faDrawPolygon,
@@ -14,12 +15,10 @@ import {
   faPlus,
   faRedo,
   faRobot,
-  faSave,
   faSearchPlus,
   faTags,
   faTrash,
-  faUndo,
-  faUpload
+  faUndo
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useModel } from '@umijs/max';
@@ -27,7 +26,7 @@ import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiKeyPoint, ApiResponse, ApiSegment, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
+import type { ApiKeyPoint, ApiResponse, ApiSegment, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
 import { defaultCategoryColors, RESIZE_HANDLE_SIZE, translations } from './constants';
 import './index.css';
 
@@ -48,7 +47,20 @@ const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
 const DIAGONAL_HANDLE_SIZE = 10;
 
-const getFileNameWithoutExtension = (fileName: string): string => fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+const findFileNodeByKey = (key: string, node: any): FileNode | null => {
+  if (node.key === key && node.isLeaf) {
+    return node;
+  }
+  if (!node.isLeaf) {
+    for (const child of node.children) {
+      const found = findFileNodeByKey(key, child);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return null;
+};
 const generateUniqueId = (): string => `anno_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 const rgbaToHex = (rgba: string): string => {
@@ -63,34 +75,54 @@ const rgbaToHex = (rgba: string): string => {
 };
 
 export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: string]: string }, thickness: number): ViewAnnotation[] => {
-  if (!apiData || !apiData.key_points || !apiData.segments) {
-    return [];
+  const viewAnnotations: ViewAnnotation[] = [];
+  if (!apiData) return viewAnnotations;
+
+  const { key_points, segments, cpnts } = apiData;
+
+  // Convert segments to diagonal lines
+  if (key_points && segments) {
+    const keyPointMap = new Map(key_points.map(p => [p.id, p]));
+    segments.forEach((segment) => {
+      const srcPoint = keyPointMap.get(segment.src_key_point_id);
+      const dstPoint = keyPointMap.get(segment.dst_key_point_id);
+      if (srcPoint && dstPoint && srcPoint.id !== dstPoint.id) {
+        const category = srcPoint.net || 'unknown_net';
+        const color = allCategoryColors[category] || allCategoryColors['unknown_net'] || '#CCCCCC';
+        viewAnnotations.push({
+          id: generateUniqueId(),
+          points: [{ x: srcPoint.x, y: srcPoint.y }, { x: dstPoint.x, y: dstPoint.y }],
+          category, color, thickness,
+        });
+      }
+    });
   }
 
-  const { key_points, segments } = apiData;
-  const keyPointMap = new Map(key_points.map(p => [p.id, p]));
-  const viewAnnotations: ViewDiagonalAnnotation[] = [];
-
-  segments.forEach((segment) => {
-    const srcPoint = keyPointMap.get(segment.src_key_point_id);
-    const dstPoint = keyPointMap.get(segment.dst_key_point_id);
-    if (srcPoint && dstPoint && srcPoint.id !== dstPoint.id) {
-      const category = srcPoint.net || 'unknown_net';
-      const color = allCategoryColors[category] || allCategoryColors['unknown_net'] || '#CCCCCC';
+  // Convert cpnts to rectangles
+  if (cpnts) {
+    cpnts.forEach(cpnt => {
+      const { t, b, l, r, type } = cpnt;
+      const color = allCategoryColors[type] || allCategoryColors['default'] || '#AAAAAA';
       viewAnnotations.push({
         id: generateUniqueId(),
-        points: [{ x: srcPoint.x, y: srcPoint.y }, { x: dstPoint.x, y: dstPoint.y }],
-        category, color, thickness,
+        x: l, y: t,
+        width: r - l,
+        height: b - t,
+        category: type,
+        color,
+        sourceLineWidth: 2, // Default width for converted components
       });
-    }
-  });
+    });
+  }
+
   return viewAnnotations;
 };
 
 
-export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiResponse, 'key_points' | 'segments'> => {
+export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
   const key_points: ApiKeyPoint[] = [];
   const segments: ApiSegment[] = [];
+  const cpnts: any[] = []; // Using 'any' for simplicity, could be typed better
   const pointMap = new Map<string, number>();
   let kptIdCounter = 0;
 
@@ -106,7 +138,7 @@ export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiRes
   };
 
   if (!Array.isArray(viewAnnotations)) {
-    return { key_points: [], segments: [] };
+    return { key_points: [], segments: [], cpnts: [] };
   }
 
   viewAnnotations.forEach(anno => {
@@ -115,38 +147,30 @@ export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiRes
       const dstId = getOrCreateKeyPoint(anno.points[1], anno.category);
       segments.push({ src_key_point_id: srcId, dst_key_point_id: dstId });
     } else if ('width' in anno) {
-      const p1 = { x: anno.x, y: anno.y };
-      const p2 = { x: anno.x + anno.width, y: anno.y };
-      const p3 = { x: anno.x + anno.width, y: anno.y + anno.height };
-      const p4 = { x: anno.x, y: anno.y + anno.height };
-
-      const id1 = getOrCreateKeyPoint(p1, anno.category);
-      const id2 = getOrCreateKeyPoint(p2, anno.category);
-      const id3 = getOrCreateKeyPoint(p3, anno.category);
-      const id4 = getOrCreateKeyPoint(p4, anno.category);
-
-      segments.push({ src_key_point_id: id1, dst_key_point_id: id2 });
-      segments.push({ src_key_point_id: id2, dst_key_point_id: id3 });
-      segments.push({ src_key_point_id: id3, dst_key_point_id: id4 });
-      segments.push({ src_key_point_id: id4, dst_key_point_id: id1 });
+      cpnts.push({
+        l: anno.x,
+        t: anno.y,
+        r: anno.x + anno.width,
+        b: anno.y + anno.height,
+        type: anno.category,
+      });
     }
   });
 
-  return { key_points, segments };
+  return { key_points, segments, cpnts };
 };
 
 
 const MaskOperate = () => {
   const { initialState } = useModel('@@initialState');
   const {
-    mask_currentIndex: currentImageIndex, setMask_currentIndex: setCurrentImageIndex,
+    fileTree, currentFilePath, setCurrentFilePath,
     mask_allImageAnnotations: allImageAnnotations, setMask_allImageAnnotations: setAllImageAnnotations,
     mask_categories: categories, setMask_categories: setCategories,
     mask_categoryColors: categoryColors, setMask_categoryColors: setCategoryColors,
     mask_selectedAnnotationId: selectedAnnotationId, setMask_selectedAnnotationId: setSelectedAnnotationId,
     mask_operationHistory, setMask_operationHistory,
     mask_redoHistory, setMask_redoHistory,
-    file_pngList: images, setFile_pngList: setImages,
   } = useModel('annotationStore');
 
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
@@ -154,37 +178,35 @@ const MaskOperate = () => {
   const [currentImageDetails, setCurrentImageDetails] = useState<ImageDetails | null>(null);
 
   const [localAnnotations, setLocalAnnotations] = useState<ViewAnnotation[]>([]);
-
-  // Bedrock Change: Add state for netlist data
   const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
   const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
-
 
   const [activeTool, setActiveTool] = useState<ActiveTool>('select');
   const [currentCategory, setCurrentCategory] = useState<string>(categories[0] || "");
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(2);
   const [showCategoryInBox, setShowCategoryInBox] = useState<boolean>(true);
-  const [isInspectorVisible, setIsInspectorVisible] = useState<boolean>(true);
-  const [inspectorWidth, setInspectorWidth] = useState<number>(350);
-  const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
+
+  const [leftSiderWidth, setLeftSiderWidth] = useState<number>(250);
+  const [rightSiderWidth, setRightSiderWidth] = useState<number>(350);
+  const [isResizingLeft, setIsResizingLeft] = useState<boolean>(false);
+  const [isResizingRight, setIsResizingRight] = useState<boolean>(false);
+
   const [draggingState, setDraggingState] = useState<DraggingState>(null);
   const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox>(null);
   const [regionDeleteMode, setRegionDeleteMode] = useState<RegionDeleteMode>('contain');
   const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
   const [isAiAnnotating, setIsAiAnnotating] = useState(false);
   const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
-  const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const magnifierCanvasRef = useRef<HTMLCanvasElement>(null);
-  const folderUploadRef = useRef<HTMLInputElement>(null);
   const classesFileRef = useRef<HTMLInputElement>(null);
 
   const [isMagnifierVisible, setIsMagnifierVisible] = useState(false);
   const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
   const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
 
-  const hasActiveImage = images.length > 0 && currentImageIndex >= 0 && currentImageIndex < images.length;
+  const hasActiveImage = !!currentImageDetails;
 
   const currentViewAnnotations: ViewAnnotation[] = localAnnotations;
   const currentApiJson = useMemo(() => {
@@ -194,26 +216,22 @@ const MaskOperate = () => {
     return { ...sourceApi, ...generatedData };
   }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
 
-  // Bedrock Change: Memoized value for Raw Data Tab display, showing only core data.
   const displayApiJson = useMemo(() => {
     if (!currentImageDetails) return {};
     const apiJsonForImage = allImageAnnotations[currentImageDetails.name]?.apiJson;
     if (apiJsonForImage) {
-      // Create a copy and remove netlist data for display purposes
       const displayData = { ...apiJsonForImage };
       delete displayData.netlist_cdl;
       delete displayData.netlist_scs;
       return displayData;
     }
-    // Fallback for purely manual annotations not yet saved
     return convertViewToApi(currentViewAnnotations);
   }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
 
 
-  const currentUndoStackSize = (mask_operationHistory[currentImageIndex] || []).length;
-  const currentRedoStackSize = (mask_redoHistory[currentImageIndex] || []).length;
+  const currentUndoStackSize = (mask_operationHistory[currentFilePath || ''] || []).length;
+  const currentRedoStackSize = (mask_redoHistory[currentFilePath || ''] || []).length;
 
-  // Bedrock Change: Enhanced data loading from global store
   useEffect(() => {
     if (currentImageDetails) {
       const imageData = allImageAnnotations[currentImageDetails.name];
@@ -437,20 +455,27 @@ const MaskOperate = () => {
   useEffect(() => { setCurrentLang(initialState?.language || 'zh'); }, [initialState?.language]);
 
   useEffect(() => {
-    if (!hasActiveImage) { setCurrentImageDetails(null); return; }
-    const currentImageFile = images[currentImageIndex]; const url = URL.createObjectURL(currentImageFile);
-    const img = new Image();
-    img.onload = () => { setCurrentImageDetails({ name: currentImageFile.name, url, width: img.naturalWidth, height: img.naturalHeight, originalFile: currentImageFile }); };
-    img.src = url;
-    return () => { URL.revokeObjectURL(url); };
-  }, [currentImageIndex, hasActiveImage, images]);
+    if (!currentFilePath || !fileTree) {
+      setCurrentImageDetails(null);
+      return;
+    }
+    const node = findFileNodeByKey(currentFilePath, fileTree);
+    if (node) {
+      const url = URL.createObjectURL(node.file);
+      const img = new Image();
+      img.onload = () => { setCurrentImageDetails({ name: node.file.name, url, width: img.naturalWidth, height: img.naturalHeight, originalFile: node.file }); };
+      img.src = url;
+      return () => { URL.revokeObjectURL(url); };
+    }
+  }, [currentFilePath, fileTree]);
+
 
   useEffect(() => {
     if (categories.length > 0 && (!currentCategory || !categories.includes(currentCategory))) { setCurrentCategory(categories[0]); }
     else if (categories.length === 0 && currentCategory !== "") { setCurrentCategory(""); }
   }, [categories, currentCategory]);
 
-  useEffect(() => { redrawCanvas(); }, [redrawCanvas]);
+  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations]);
 
   useEffect(() => {
     const handleResize = () => redrawCanvas();
@@ -460,12 +485,20 @@ const MaskOperate = () => {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizingInspector) return;
-      const newWidth = window.innerWidth - e.clientX;
-      if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
+      if (isResizingLeft) {
+        const newWidth = e.clientX;
+        if (newWidth > 150 && newWidth < 600) setLeftSiderWidth(newWidth);
+      }
+      if (isResizingRight) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 200 && newWidth < 800) setRightSiderWidth(newWidth);
+      }
     };
-    const handleMouseUp = () => setIsResizingInspector(false);
-    if (isResizingInspector) {
+    const handleMouseUp = () => {
+      setIsResizingLeft(false);
+      setIsResizingRight(false);
+    };
+    if (isResizingLeft || isResizingRight) {
       document.body.style.userSelect = 'none';
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
@@ -475,7 +508,7 @@ const MaskOperate = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingInspector]);
+  }, [isResizingLeft, isResizingRight]);
 
   useEffect(() => {
     const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
@@ -504,22 +537,27 @@ const MaskOperate = () => {
   const isPointInRect = (point: Point, rect: { x: number; y: number; width: number; height: number }): boolean => (point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
 
   const addUndoRecord = useCallback(() => {
-    if (!currentImageDetails) return;
-    const operation: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
-    setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: [...(prev[currentImageIndex] || []), operation] }));
-    setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: [] }));
-  }, [currentImageDetails, currentImageIndex, currentViewAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory]);
+    if (!currentFilePath || !currentImageDetails) return;
+    const operation: MaskUndoOperation = { filePath: currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
+    setMask_operationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), operation] }));
+    setMask_redoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+  }, [currentFilePath, currentImageDetails, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory]);
 
   const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
-    if (!currentImageDetails) return;
+    if (!currentFilePath || !currentImageDetails) return;
     setAllImageAnnotations(prev => {
       const sourceApiJson = prev[currentImageDetails.name]?.apiJson || {};
       const generatedApiJson = convertViewToApi(newViewAnnotations);
-      // Combine generated data with existing data, preserving extra fields like 'cpnts' or netlists
+
       const updatedApiJson = { ...sourceApiJson, ...generatedApiJson, ...(newApiJson || {}) };
+
+      // Preserve netlist data if it exists on the source
+      if (sourceApiJson.netlist_cdl) updatedApiJson.netlist_cdl = sourceApiJson.netlist_cdl;
+      if (sourceApiJson.netlist_scs) updatedApiJson.netlist_scs = sourceApiJson.netlist_scs;
+
       return { ...prev, [currentImageDetails.name]: { viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
     });
-  }, [currentImageDetails, setAllImageAnnotations]);
+  }, [currentFilePath, currentImageDetails, setAllImageAnnotations]);
 
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
     const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? { ...a, ...updates } : a);
@@ -553,26 +591,39 @@ const MaskOperate = () => {
   }, [currentImageDetails, currentViewAnnotations, addUndoRecord, updateGlobalAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
 
   const performUndo = useCallback(() => {
-    const history = mask_operationHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
+    if (!currentFilePath) return;
+    const history = mask_operationHistory[currentFilePath] || []; if (history.length === 0 || !currentImageDetails) return;
     const lastOp = history[history.length - 1];
-    const redoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
-    setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: [redoOp, ...(prev[currentImageIndex] || [])] }));
-    setAllImageAnnotations(prev => ({ ...prev, [lastOp.imageId]: { ...prev[lastOp.imageId], viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson } }));
-    setLocalAnnotations(lastOp.previousViewAnnotations); // Also update local state
-    setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: history.slice(0, -1) }));
+    const redoOp: MaskUndoOperation = { filePath: currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
+    setMask_redoHistory(prev => ({ ...prev, [currentFilePath]: [redoOp, ...(prev[currentFilePath] || [])] }));
+
+    setAllImageAnnotations(prev => {
+      const imageName = findFileNodeByKey(lastOp.filePath, fileTree!)?.file.name;
+      if (!imageName) return prev;
+      return { ...prev, [imageName]: { viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson } };
+    });
+
+    setMask_operationHistory(prev => ({ ...prev, [currentFilePath]: history.slice(0, -1) }));
     message.success(t.operationSuccessful);
-  }, [mask_operationHistory, currentImageIndex, currentImageDetails, currentViewAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful]);
+  }, [mask_operationHistory, currentFilePath, currentImageDetails, localAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful, fileTree]);
 
   const performRedo = useCallback(() => {
-    const history = mask_redoHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
+    if (!currentFilePath) return;
+    const history = mask_redoHistory[currentFilePath] || []; if (history.length === 0 || !currentImageDetails) return;
     const redoOp = history[0];
-    const undoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
-    setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: [...(prev[currentImageIndex] || []), undoOp] }));
-    setAllImageAnnotations(prev => ({ ...prev, [redoOp.imageId]: { ...prev[redoOp.imageId], viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson } }));
-    setLocalAnnotations(redoOp.previousViewAnnotations); // Also update local state
-    setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: history.slice(1) }));
+    const undoOp: MaskUndoOperation = { filePath: currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
+    setMask_operationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), undoOp] }));
+
+    setAllImageAnnotations(prev => {
+      const imageName = findFileNodeByKey(redoOp.filePath, fileTree!)?.file.name;
+      if (!imageName) return prev;
+      return { ...prev, [imageName]: { viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson } };
+    });
+
+    setMask_redoHistory(prev => ({ ...prev, [currentFilePath]: history.slice(1) }));
     message.success(t.operationSuccessful);
-  }, [mask_redoHistory, currentImageIndex, currentImageDetails, currentViewAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful]);
+  }, [mask_redoHistory, currentFilePath, currentImageDetails, localAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful, fileTree]);
+
 
   const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -640,7 +691,6 @@ const MaskOperate = () => {
     setCanvasMousePos(currentCanvasMousePos);
 
     if (!draggingState || !currentImageDetails) {
-      setHoveredHandle(null);
       return;
     }
 
@@ -677,6 +727,8 @@ const MaskOperate = () => {
         });
         setLocalAnnotations(updatedAnnos);
       }
+    } else {
+      redrawCanvas();
     }
   };
 
@@ -756,6 +808,7 @@ const MaskOperate = () => {
       }
     }
     setDraggingState(null);
+    redrawCanvas();
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -775,113 +828,52 @@ const MaskOperate = () => {
     }
   };
 
-  const processUploadedFiles = async (uploadedFiles: FileList | null) => {
-    if (!uploadedFiles) return;
-    message.loading({ content: t.uploadFolder, key: 'fileProcessing', duration: 0 });
-    const filesArray = Array.from(uploadedFiles);
-
-    let tempCats = [...categories];
-    let tempColors = { ...categoryColors };
-
-    const imageFiles = filesArray.filter(f => f.type.startsWith('image/'));
-    const jsonFiles = filesArray.filter(f => f.name.endsWith('.json'));
-    const sortedImageFiles = imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    const newAnnotations: { [imageName: string]: ImageAnnotationData } = {};
-
-    for (const imgFile of sortedImageFiles) {
-      const baseName = getFileNameWithoutExtension(imgFile.name);
-      const jsonFile = jsonFiles.find(f => getFileNameWithoutExtension(f.name) === baseName);
-      let apiJson: ApiResponse = { key_points: [], segments: [] };
-
-      if (jsonFile) {
-        try {
-          const parsedData = JSON.parse(await jsonFile.text());
-          // Bedrock Change: accept full API response on load
-          apiJson = parsedData;
-
-          const viewAnnotations = convertApiToView(apiJson, tempColors, currentLineWidth);
-
-          const newCats = [...new Set(viewAnnotations.map(va => va.category))];
-          newCats.forEach(cat => {
-            if (cat && !tempCats.includes(cat)) {
-              tempCats.push(cat);
-              tempColors[cat] = rgbaToHex(Object.values(defaultCategoryColors)[tempCats.length % Object.keys(defaultCategoryColors).length]);
-            }
-          });
-
-        } catch (e) {
-          message.error(`${t.errorParseJsonFile} ${jsonFile.name}: ${e instanceof Error ? e.message : String(e)}`);
-          apiJson = { key_points: [], segments: [] };
-        }
-      }
-
-      const viewAnnotations = convertApiToView(apiJson, tempColors, currentLineWidth);
-      newAnnotations[imgFile.name] = { viewAnnotations, apiJson };
+  const handleFileSelect = (filePath: string) => {
+    if (currentFilePath && currentImageDetails) {
+      updateGlobalAnnotations(localAnnotations, currentApiJson);
     }
-    setCategories(tempCats);
-    setCategoryColors(tempColors);
-    setImages(sortedImageFiles);
-    setAllImageAnnotations(newAnnotations);
-    setCurrentImageIndex(sortedImageFiles.length > 0 ? 0 : -1);
-    setMask_operationHistory({}); setMask_redoHistory({});
-    message.success({ content: `${sortedImageFiles.length} ${t.filesProcessed} ${t.fileProcessingComplete}`, key: 'fileProcessing', duration: 3 });
-    if (folderUploadRef.current) folderUploadRef.current.value = "";
-  };
-
-  const navigateImage = (offset: number) => {
-    const newIndex = currentImageIndex + offset;
-    if (newIndex >= 0 && newIndex < images.length) {
-      if (currentImageDetails) {
-        // Save current state before navigating
-        updateGlobalAnnotations(localAnnotations, currentApiJson);
-      }
-      setCurrentImageIndex(newIndex);
-      setSelectedAnnotationId(null);
-      setDraggingState(null);
-      // Reset netlist content for the new image
-      setNetlistCdlContent(null);
-      setNetlistScsContent(null);
-    }
+    setCurrentFilePath(filePath);
+    setSelectedAnnotationId(null);
+    setDraggingState(null);
+    setNetlistCdlContent(null);
+    setNetlistScsContent(null);
   };
 
   const handleExportAll = async () => {
-    if (images.length === 0) return;
+    if (!fileTree) { message.warning(t.noImages); return; }
     message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
+
+    // Persist current file's data before exporting
+    const finalAllAnnotations = { ...allImageAnnotations };
+    if (currentImageDetails) {
+      finalAllAnnotations[currentImageDetails.name] = {
+        viewAnnotations: localAnnotations,
+        apiJson: currentApiJson,
+      };
+    }
+
     try {
       const zip = new JSZip();
 
-      const exportClassObj: { [key: string]: string } = {};
-      categories.forEach((cat, index) => {
-        exportClassObj[index] = cat;
-      });
-      const classText = `classes = ${JSON.stringify(exportClassObj, null, 4)}`;
-      zip.file("classes.txt", classText);
+      const addFolderToZip = (node: any, currentZipFolder: JSZip) => {
+        if (!node.isLeaf) { // Directory
+          const folder = currentZipFolder.folder(node.title);
+          if (folder) node.children.forEach((child: any) => addFolderToZip(child, folder));
+        } else { // File
+          const fileNode = node as FileNode;
+          currentZipFolder.file(fileNode.title, fileNode.file);
 
-      // Create a final, up-to-date version of all annotations before zipping
-      const finalAllAnnotations = { ...allImageAnnotations };
-      if (currentImageDetails) {
-        const currentGeneratedData = convertViewToApi(localAnnotations);
-        finalAllAnnotations[currentImageDetails.name] = {
-          viewAnnotations: localAnnotations,
-          apiJson: {
-            ...(allImageAnnotations[currentImageDetails.name]?.apiJson || {}),
-            ...currentGeneratedData
-          }
-        };
-      }
+          const annotationsForImage = finalAllAnnotations[fileNode.file.name];
+          const jsonContent = JSON.stringify(annotationsForImage?.apiJson || {}, null, 2);
+          const baseName = fileNode.title.substring(0, fileNode.title.lastIndexOf('.'));
+          currentZipFolder.file(`${baseName}.json`, jsonContent);
+        }
+      };
 
-      for (const imageFile of images) {
-        zip.file(`images/${imageFile.name}`, imageFile);
-        const imageName = imageFile.name;
-        const annotationsForImage = finalAllAnnotations[imageName];
+      addFolderToZip(fileTree, zip);
 
-        const jsonContent = JSON.stringify(annotationsForImage?.apiJson || {}, null, 2);
-
-        const baseName = getFileNameWithoutExtension(imageName);
-        zip.file(`json/${baseName}.json`, jsonContent);
-      }
-      const content = await zip.generateAsync({ type: "blob" });
-      saveAs(content, "maskoperate_annotations.zip");
+      const zipContent = await zip.generateAsync({ type: "blob" });
+      saveAs(zipContent, "maskoperate_annotations.zip");
       message.success({ content: t.exportSuccessMessage, key: 'exporting', duration: 3 });
     } catch (error: any) {
       console.error("Export failed:", error);
@@ -917,19 +909,19 @@ const MaskOperate = () => {
       }
       const apiResult: ApiResponse = await response.json();
 
-      if (!apiResult || !apiResult.key_points || !apiResult.segments) {
-        message.info({ content: "AI 未返回任何有效的连线标注。", key: 'ai-annotation', duration: 3 });
+      if ((!apiResult.key_points || !apiResult.segments) && !apiResult.cpnts) {
+        message.info({ content: "AI 未返回任何有效标注。", key: 'ai-annotation', duration: 3 });
         setIsAiAnnotating(false);
         return;
       }
 
-      // Bedrock Change: Set netlist state from API response
       setNetlistScsContent(apiResult.netlist_scs || null);
       setNetlistCdlContent(apiResult.netlist_cdl || null);
 
-      const newViewAnnotations = convertApiToView(apiResult, categoryColors, currentLineWidth);
+      // We need to use the full apiResult to generate view annotations
+      const allViewAnnotationsFromApi = convertApiToView(apiResult, categoryColors, currentLineWidth);
 
-      const newCatNames = [...new Set(newViewAnnotations.map(a => a.category))];
+      const newCatNames = [...new Set(allViewAnnotationsFromApi.map(a => a.category))];
       const newlyDiscoveredCats = newCatNames.filter(name => !categories.includes(name));
       let updatedCategoryColors = { ...categoryColors };
       if (newlyDiscoveredCats.length > 0) {
@@ -948,7 +940,6 @@ const MaskOperate = () => {
 
       addUndoRecord();
       setLocalAnnotations(finalViewAnnotations);
-      // Persist the full API result (including netlists) to the global store
       updateGlobalAnnotations(finalViewAnnotations, apiResult);
       message.success({ content: `${t.operationSuccessful}: ${finalViewAnnotations.length} annotations loaded.`, key: 'ai-annotation', duration: 3 });
 
@@ -1000,14 +991,29 @@ const MaskOperate = () => {
         const newCategories = categories.filter(c => c !== className);
         const newCategoryColors = { ...categoryColors };
         delete newCategoryColors[className];
+
         const newAllAnnotations = { ...allImageAnnotations };
         Object.keys(newAllAnnotations).forEach(imgName => {
-          const filteredViewAnnos = newAllAnnotations[imgName].viewAnnotations.filter(anno => anno.category !== className);
-          newAllAnnotations[imgName] = { ...newAllAnnotations[imgName], viewAnnotations: filteredViewAnnos, apiJson: convertViewToApi(filteredViewAnnos) };
+          const annotationsForImage = newAllAnnotations[imgName];
+          const filteredViewAnnos = annotationsForImage.viewAnnotations.filter(anno => anno.category !== className);
+
+          // Re-generate API JSON from the filtered view annotations
+          const newApiJson = convertViewToApi(filteredViewAnnos);
+
+          // Preserve other data like netlists from the original API JSON
+          newApiJson.netlist_cdl = annotationsForImage.apiJson.netlist_cdl;
+          newApiJson.netlist_scs = annotationsForImage.apiJson.netlist_scs;
+
+          newAllAnnotations[imgName] = {
+            viewAnnotations: filteredViewAnnos,
+            apiJson: newApiJson
+          };
         });
+
         setCategories(newCategories);
         setCategoryColors(newCategoryColors);
         setAllImageAnnotations(newAllAnnotations);
+
         if (currentCategory === className) setCurrentCategory(newCategories[0] || "");
         message.success(t.classDeleted.replace('%s', className));
       }
@@ -1098,33 +1104,30 @@ const MaskOperate = () => {
     <Layout className="unified-layout">
       <Header className="unified-top-header">
         <div className="header-left-controls">
-          <Button type="primary" icon={<FontAwesomeIcon icon={faUpload} />} onClick={() => folderUploadRef.current?.click()}>{t.uploadFolder}</Button>
-          <input ref={folderUploadRef} type="file" {...{ webkitdirectory: "true", directory: "true" } as any} multiple onChange={(e: ChangeEvent<HTMLInputElement>) => processUploadedFiles(e.target.files)} style={{ display: 'none' }} />
+          <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage}: ${currentImageDetails.name}` : t.noImages}</Text>
         </div>
         <Space className="header-center-controls">
-          <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => navigateImage(-1)} disabled={!hasActiveImage || currentImageIndex === 0} />
-          <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage}: ${currentImageDetails.name} (${currentImageIndex + 1}/${images.length})` : t.noImages}</Text>
-          <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => navigateImage(1)} disabled={!hasActiveImage || currentImageIndex >= images.length - 1} />
+          <Tooltip title={t.selectTool} placement="bottom"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.magnifier} placement="bottom"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.rectTool} placement="bottom"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.diagonalTool} placement="bottom"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.deleteTool} placement="bottom"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
+          <Tooltip title={t.regionDelete} placement="bottom"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={!hasActiveImage} /></Tooltip>
+          <Divider type="vertical" />
+          <Tooltip title={t.aiAnnotate} placement="bottom"><Button onClick={handleAiAnnotation} type="text" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!hasActiveImage || isAiAnnotating} /></Tooltip>
         </Space>
         <div className="header-right-controls">
           <Tooltip title={t.undo}><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={currentUndoStackSize === 0} /></Tooltip>
           <Tooltip title={t.redo}><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={currentRedoStackSize === 0} /></Tooltip>
-          <Button type="primary" icon={<FontAwesomeIcon icon={faSave} />} onClick={handleExportAll} ghost disabled={images.length === 0}>{t.exportAll}</Button>
+          <Button type="primary" icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportAll} ghost disabled={!fileTree}>{t.exportAll}</Button>
         </div>
       </Header>
       <Layout hasSider>
-        <Sider width={60} className="unified-tool-sider" theme="light">
-          <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
-            <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.magnifier} placement="right"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasActiveImage} /></Tooltip>
-            <Tooltip title={t.regionDelete} placement="right"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={!hasActiveImage} /></Tooltip>
-            <Divider style={{ margin: '8px 0' }} />
-            <Tooltip title={t.aiAnnotate} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!hasActiveImage || isAiAnnotating} /></Tooltip>
-          </Space>
+        <Sider width={leftSiderWidth} className="file-explorer-sider" theme="light">
+          <FileExplorer onFileSelect={handleFileSelect} />
         </Sider>
+        <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
+
         <Layout className="main-content-wrapper">
           <Content className="canvas-content"
             onMouseEnter={() => setIsMouseOnCanvas(true)}
@@ -1158,11 +1161,11 @@ const MaskOperate = () => {
               </div>
             )}
           </Content>
-          {!isInspectorVisible && (<Tooltip title={t.showPanel} placement="left"><Button className="show-inspector-handle" type="primary" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsInspectorVisible(true)} /></Tooltip>)}
         </Layout>
-        <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none', cursor: 'ew-resize' }} />
-        <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
-          <Tabs defaultActiveKey="1" className="inspector-tabs" tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}>
+
+        <div className="resizer-horizontal" onMouseDown={() => setIsResizingRight(true)} />
+        <Sider width={rightSiderWidth} className="unified-inspector-sider" theme="light">
+          <Tabs defaultActiveKey="1" className="inspector-tabs">
             <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
               <div className="tab-pane-content">
                 {hasActiveImage && currentViewAnnotations.length > 0 ? (
