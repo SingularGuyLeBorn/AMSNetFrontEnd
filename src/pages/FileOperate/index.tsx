@@ -224,6 +224,8 @@ const FileOperate: React.FC = () => {
         file_jsonFileContents, setFile_jsonFileContents,
         file_operationHistory: operationHistory, setFile_operationHistory: setOperationHistory,
         file_redoHistory: redoHistory, setFile_redoHistory: setRedoHistory,
+        modifiedFiles,
+        markFileAsModified,
     } = useModel('annotationStore');
 
     const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
@@ -269,6 +271,32 @@ const FileOperate: React.FC = () => {
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
+    // Bedrock Change V4: Centralized state saving logic
+    const saveCurrentState = useCallback(() => {
+        if (!currentFilePath) return;
+
+        setFile_yoloFileContents(prev => ({ ...prev, [currentFilePath]: currentYoloContent || '' }));
+
+        let jsonToSave = currentJsonContent;
+        if (netlistScsContent || netlistCdlContent) {
+            try {
+                const mainPart = JSON.parse(currentJsonContent || '{}');
+                jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
+            } catch (e) { /* use as is if parsing fails */ }
+        }
+        setFile_jsonFileContents(prev => ({ ...prev, [currentFilePath]: jsonToSave || '{}' }));
+    }, [currentFilePath, currentYoloContent, currentJsonContent, netlistScsContent, netlistCdlContent, setFile_yoloFileContents, setFile_jsonFileContents]);
+
+    // Bedrock Change V4: Effect for auto-saving on component unmount (page switch)
+    const saveFuncRef = useRef(saveCurrentState);
+    saveFuncRef.current = saveCurrentState; // Keep the ref pointing to the latest save function to avoid stale state in cleanup
+
+    useEffect(() => {
+        // This cleanup function will be called when the component unmounts.
+        return () => {
+            saveFuncRef.current();
+        };
+    }, []); // Empty dependency array ensures this runs only on mount and unmount.
 
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
@@ -535,24 +563,14 @@ const FileOperate: React.FC = () => {
         };
     }, [draggingState]);
 
+    // Bedrock Change V4: Refactored to be transactional.
     const handleFileSelect = (filePath: string) => {
-        if (!currentFilePath) {
-            setCurrentFilePath(filePath);
+        if (filePath === currentFilePath) {
             return;
         }
-
-        // Save current work before switching
-        setFile_yoloFileContents(prev => ({ ...prev, [currentFilePath]: currentYoloContent || '' }));
-        let jsonToSave = currentJsonContent;
-        if (netlistScsContent || netlistCdlContent) {
-            try {
-                const mainPart = JSON.parse(currentJsonContent || '{}');
-                jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
-            } catch (e) { /* use as is */ }
-        }
-        setFile_jsonFileContents(prev => ({ ...prev, [currentFilePath]: jsonToSave || '{}' }));
-
-        // Switch to new file
+        // 1. Save current state before switching
+        saveCurrentState();
+        // 2. Set the new file path
         setCurrentFilePath(filePath);
     };
 
@@ -602,9 +620,10 @@ const FileOperate: React.FC = () => {
             setSelectedBoxName(null);
         }
 
+        markFileAsModified(currentFilePath);
         message.success(`标注 '${boxNameToDelete}' 已删除`);
         setRedrawTrigger(p => p + 1);
-    }, [currentYoloContent, currentJsonContent, currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName]);
+    }, [currentYoloContent, currentJsonContent, currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName, markFileAsModified]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
@@ -640,6 +659,7 @@ const FileOperate: React.FC = () => {
                     const newOp: Operation = { type: 'stain', boxName, jsonType: selectedJsonType, jsonName: selectedJsonName, previousJsonContent: previousJson };
                     setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
                     setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+                    markFileAsModified(currentFilePath);
                     setRedrawTrigger(p => p + 1);
                     break;
                 }
@@ -875,6 +895,7 @@ const FileOperate: React.FC = () => {
                 const newOp: Operation = { type: 'draw', yoloData: [yoloFormatData], previousYoloContent: previousYolo };
                 setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
                 setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+                markFileAsModified(currentFilePath);
             }
             setCanvasImageData(null); setRedrawTrigger(prev => prev + 1);
         } else if (draggingState && draggingState.type === 'region-select') {
@@ -959,8 +980,12 @@ const FileOperate: React.FC = () => {
                 };
                 setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
                 setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+                markFileAsModified(currentFilePath);
                 message.success(`删除了 ${boxNamesToDelete.length} 个标注。`);
             }
+        }
+        if (draggingState) { // Any drag operation should mark file as modified
+            markFileAsModified(currentFilePath);
         }
         setDraggingState(null);
         setRegionSelectBox(null);
@@ -972,7 +997,8 @@ const FileOperate: React.FC = () => {
         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
         setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
         setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
-    }, [currentYoloContent, currentFilePath, setOperationHistory, setRedoHistory]);
+        markFileAsModified(currentFilePath);
+    }, [currentYoloContent, currentFilePath, setOperationHistory, setRedoHistory, markFileAsModified]);
 
     const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
@@ -982,7 +1008,7 @@ const FileOperate: React.FC = () => {
     }, [isCurrentlyEditingId, addUndoRecord]);
 
     const handleAnnotationPropertyUpdate = useCallback((boxName: string, propIndex: number, value: number | null) => {
-        if (value === null) return;
+        if (value === null || !currentFilePath) return;
         const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
             const parts = line.split(' ');
             if (parts[0] === boxName) {
@@ -992,7 +1018,8 @@ const FileOperate: React.FC = () => {
             return line;
         }).join('\n');
         setCurrentYoloContent(newYoloContent);
-    }, [currentYoloContent, setCurrentYoloContent]);
+        markFileAsModified(currentFilePath);
+    }, [currentYoloContent, setCurrentYoloContent, currentFilePath, markFileAsModified]);
 
     const handleUndo = () => {
         if (!currentFilePath) return;
@@ -1005,6 +1032,7 @@ const FileOperate: React.FC = () => {
         setOperationHistory(prev => ({ ...prev, [currentFilePath]: currentImageHistory.slice(0, -1) }));
         if ('previousYoloContent' in lastOperation) { setCurrentYoloContent(lastOperation.previousYoloContent); }
         if ('previousJsonContent' in lastOperation) { setCurrentJsonContent(lastOperation.previousJsonContent); }
+        markFileAsModified(currentFilePath);
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
     const handleRedo = () => {
@@ -1018,6 +1046,7 @@ const FileOperate: React.FC = () => {
         setRedoHistory(prev => ({ ...prev, [currentFilePath]: currentImageRedoHistory.slice(1) }));
         if ('previousYoloContent' in operationToRedo) { setCurrentYoloContent(operationToRedo.previousYoloContent); }
         if ('previousJsonContent' in operationToRedo) { setCurrentJsonContent(operationToRedo.previousJsonContent); }
+        markFileAsModified(currentFilePath);
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
 
@@ -1026,15 +1055,8 @@ const FileOperate: React.FC = () => {
             message.warning(t.noFile);
             return;
         }
-        setFile_yoloFileContents(prev => ({ ...prev, [currentFilePath]: currentYoloContent || '' }));
-        let jsonToSave = currentJsonContent;
-        if (netlistScsContent || netlistCdlContent) {
-            try {
-                const mainPart = JSON.parse(currentJsonContent || '{}');
-                jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
-            } catch (e) { /* use as is */ }
-        }
-        setFile_jsonFileContents(prev => ({ ...prev, [currentFilePath]: jsonToSave || '{}' }));
+        saveCurrentState(); // Use the centralized save function
+        markFileAsModified(currentFilePath);
         message.success(`${t.save} ${t.operationSuccessful}`);
     };
 
@@ -1046,23 +1068,25 @@ const FileOperate: React.FC = () => {
         message.loading({ content: "正在准备数据并打包...", key: "exporting", duration: 0 });
 
         // Persist current file's data before exporting all
-        const allYoloContents = { ...file_yoloFileContents };
-        const allJsonContents = { ...file_jsonFileContents };
-
-        if (currentFilePath) {
-            allYoloContents[currentFilePath] = currentYoloContent || '';
-            let jsonToSave = currentJsonContent;
-            if (netlistScsContent || netlistCdlContent) {
-                try {
-                    const mainPart = JSON.parse(currentJsonContent || '{}');
-                    jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
-                } catch (e) { /* use as is */ }
-            }
-            allJsonContents[currentFilePath] = jsonToSave || '{}';
-        }
+        saveCurrentState();
 
         try {
             const zip = new JSZip();
+
+            // The global state is now guaranteed to be up-to-date.
+            const allYoloContents = { ...file_yoloFileContents, [currentFilePath || '']: currentYoloContent || '' };
+            const allJsonContents = { ...file_jsonFileContents };
+            if (currentFilePath) {
+                let jsonToSave = currentJsonContent;
+                if (netlistScsContent || netlistCdlContent) {
+                    try {
+                        const mainPart = JSON.parse(currentJsonContent || '{}');
+                        jsonToSave = JSON.stringify({ ...mainPart, netlist_scs: netlistScsContent, netlist_cdl: netlistCdlContent }, null, 2);
+                    } catch (e) { /* use as is */ }
+                }
+                allJsonContents[currentFilePath] = jsonToSave || '{}';
+            }
+
 
             const addFolderToZip = (node: any, currentZipFolder: JSZip) => {
                 if (!node.isLeaf) { // It's a directory
@@ -1103,7 +1127,7 @@ const FileOperate: React.FC = () => {
     };
 
     const handleAiAnnotation = async () => {
-        if (!currentPng || !canvasRef.current) { message.warning(t.noFile); return; }
+        if (!currentPng || !canvasRef.current || !currentFilePath) { message.warning(t.noFile); return; }
 
         setIsAiAnnotating(true);
         message.loading({ content: t.aiAnnotating, key: 'ai-annotation', duration: 0 });
@@ -1151,7 +1175,7 @@ const FileOperate: React.FC = () => {
                 let lastIndex = Object.keys(classMap).length > 0 ? Math.max(...Object.keys(classMap).map(Number)) : -1;
                 newlyDiscovered.forEach(label => {
                     lastIndex++;
-                    newClassMap[lastIndex] = { label, color: generateRandomColor() };
+                    newClassMap[lastIndex] = { label: generateRandomColor(), color: generateRandomColor() };
                 });
                 setClassMap(newClassMap);
                 currentClassMap = newClassMap;
@@ -1176,10 +1200,10 @@ const FileOperate: React.FC = () => {
             setNetlistCdlContent(resultData.netlist_cdl || null);
 
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
-            if (currentFilePath) {
-                setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
-            }
+            setOperationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), newOp] }));
+            setRedoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
+
+            markFileAsModified(currentFilePath);
             setRedrawTrigger(p => p + 1);
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
 
@@ -1291,7 +1315,7 @@ const FileOperate: React.FC = () => {
             </Header>
             <Layout hasSider>
                 <Sider width={leftSiderWidth} className="file-explorer-sider" theme="light">
-                    <FileExplorer onFileSelect={handleFileSelect} />
+                    <FileExplorer onFileSelect={handleFileSelect} modifiedFiles={modifiedFiles} />
                 </Sider>
                 <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
 

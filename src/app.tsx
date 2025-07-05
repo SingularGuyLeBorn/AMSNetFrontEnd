@@ -20,6 +20,42 @@ import { requestConfig } from './requestConfig';
 
 const loginPath = '/user/login';
 
+// Bedrock Change V4: Add a robust natural sort function for filenames.
+/**
+ * @description Performs a natural sort on two strings, correctly handling numbers within the string.
+ * e.g., "item_2" comes before "item_10".
+ * @param {string} a - The first string.
+ * @param {string} b - The second string.
+ * @returns {number} - A negative, zero, or positive value.
+ */
+const naturalSort = (a: string, b: string): number => {
+  // Regex to split strings into alternating string and number parts
+  const re = /(\d+)/g;
+  const aParts = a.split(re);
+  const bParts = b.split(re);
+
+  for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+    const partA = aParts[i];
+    const partB = bParts[i];
+
+    // If the part is a number (it will be at odd indices of the array)
+    if (i % 2 === 1) {
+      const numA = parseInt(partA, 10);
+      const numB = parseInt(partB, 10);
+      if (numA !== numB) {
+        return numA - numB;
+      }
+    } else { // It's a string part
+      if (partA !== partB) {
+        return partA.localeCompare(partB);
+      }
+    }
+  }
+
+  // If all parts are equal, the shorter string should come first
+  return a.length - b.length;
+};
+
 
 // 全局文件上传组件
 const GlobalUploader: React.FC = () => {
@@ -35,6 +71,7 @@ const GlobalUploader: React.FC = () => {
     setMask_redoHistory,
     setMask_categories,
     setMask_categoryColors,
+    setModifiedFiles,
     mask_categoryColors,
     file_classMap,
   } = useModel('annotationStore');
@@ -55,7 +92,8 @@ const GlobalUploader: React.FC = () => {
     const nodeMap = new Map<string, DirectoryNode>([['root', root]]);
     let firstImageFile: FileNode | null = null;
 
-    const allFiles = files.filter(f => f.size > 0).sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
+    // Bedrock Change V4: Sort files by their full relative path using natural sort.
+    const allFiles = files.filter(f => f.size > 0).sort((a, b) => naturalSort(a.webkitRelativePath, b.webkitRelativePath));
 
     // 1. Build the file tree
     for (const file of allFiles) {
@@ -151,11 +189,12 @@ const GlobalUploader: React.FC = () => {
     setMask_allImageAnnotations(maskAnnotations);
     setMask_categories(Array.from(tempCategories));
 
-    // Reset histories
+    // Reset histories and modification state
     setFile_operationHistory({});
     setFile_redoHistory({});
     setMask_operationHistory({});
     setMask_redoHistory({});
+    setModifiedFiles({});
 
     // Set initial file
     if (firstImageFile) {

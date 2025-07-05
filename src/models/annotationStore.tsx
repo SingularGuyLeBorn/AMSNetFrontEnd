@@ -59,6 +59,10 @@ export default function useAnnotationStore() {
   // 【核心导航】全局当前激活的文件路径
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
 
+  // Bedrock Change V4: Track file modification status and timestamp.
+  // The key is the file path, and the value is the timestamp of the last modification.
+  const [modifiedFiles, setModifiedFiles] = useState<Record<string, number>>({});
+
   // ===================================================================
   // FileOperate 页面状态
   // ===================================================================
@@ -96,10 +100,20 @@ export default function useAnnotationStore() {
   // MaskOperate 页面的重做历史，用于恢复 (以路径为键)
   const [mask_redoHistory, setMask_redoHistory] = useState<Record<string, MaskUndoOperation[]>>({});
 
+  // Bedrock Change V4: Centralized function to mark a file as modified.
+  // This ensures consistent timestamping across the application.
+  const markFileAsModified = (filePath: string | null) => {
+    if (filePath) {
+      setModifiedFiles(prev => ({ ...prev, [filePath]: Date.now() }));
+    }
+  };
+
   return {
     // Shared State Exports
     fileTree, setFileTree,
     currentFilePath, setCurrentFilePath,
+    modifiedFiles, setModifiedFiles, // Export new state
+    markFileAsModified, // Export new function
 
     // FileOperate Exports
     file_yoloFileContents, setFile_yoloFileContents,

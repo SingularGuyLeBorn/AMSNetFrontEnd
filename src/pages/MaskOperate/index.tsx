@@ -26,7 +26,7 @@ import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiKeyPoint, ApiResponse, ApiSegment, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
+import type { ApiKeyPoint, ApiResponse, ApiSegment, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
 import { defaultCategoryColors, RESIZE_HANDLE_SIZE, translations } from './constants';
 import './index.css';
 
@@ -78,7 +78,7 @@ export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key
   const viewAnnotations: ViewAnnotation[] = [];
   if (!apiData) return viewAnnotations;
 
-  const { key_points, segments, cpnts } = apiData;
+  const { key_points, segments } = apiData;
 
   // Convert segments to diagonal lines
   if (key_points && segments) {
@@ -98,22 +98,12 @@ export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key
     });
   }
 
-  // Convert cpnts to rectangles
-  if (cpnts) {
-    cpnts.forEach(cpnt => {
-      const { t, b, l, r, type } = cpnt;
-      const color = allCategoryColors[type] || allCategoryColors['default'] || '#AAAAAA';
-      viewAnnotations.push({
-        id: generateUniqueId(),
-        x: l, y: t,
-        width: r - l,
-        height: b - t,
-        category: type,
-        color,
-        sourceLineWidth: 2, // Default width for converted components
-      });
-    });
-  }
+  /*
+   * BEDROCK CHANGE V4:
+   * This block is intentionally removed. MaskOperate's responsibility is now
+   * specialized to key_points and segments (wires/masks), not components (boxes).
+   * The cpnts data will be preserved in the raw apiJson but not visualized here.
+   */
 
   return viewAnnotations;
 };
@@ -122,7 +112,7 @@ export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key
 export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
   const key_points: ApiKeyPoint[] = [];
   const segments: ApiSegment[] = [];
-  const cpnts: any[] = []; // Using 'any' for simplicity, could be typed better
+  const cpnts: any[] = [];
   const pointMap = new Map<string, number>();
   let kptIdCounter = 0;
 
@@ -171,6 +161,8 @@ const MaskOperate = () => {
     mask_selectedAnnotationId: selectedAnnotationId, setMask_selectedAnnotationId: setSelectedAnnotationId,
     mask_operationHistory, setMask_operationHistory,
     mask_redoHistory, setMask_redoHistory,
+    modifiedFiles,
+    markFileAsModified,
   } = useModel('annotationStore');
 
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
@@ -208,17 +200,50 @@ const MaskOperate = () => {
 
   const hasActiveImage = !!currentImageDetails;
 
+  // Bedrock Change V4: Centralized state saving logic
+  const saveCurrentState = useCallback(() => {
+    if (!currentFilePath) return;
+
+    setAllImageAnnotations(prev => {
+      const sourceApiJson = prev[currentFilePath]?.apiJson || {};
+      const generatedApiJson = convertViewToApi(localAnnotations);
+      const updatedApiJson = { ...sourceApiJson, ...generatedApiJson };
+
+      // Ensure non-visualized data (like netlists or cpnts) is preserved from the original source
+      if (sourceApiJson.netlist_cdl) updatedApiJson.netlist_cdl = sourceApiJson.netlist_cdl;
+      if (sourceApiJson.netlist_scs) updatedApiJson.netlist_scs = sourceApiJson.netlist_scs;
+      if (sourceApiJson.cpnts) updatedApiJson.cpnts = sourceApiJson.cpnts;
+
+      const newImageData: ImageAnnotationData = {
+        viewAnnotations: localAnnotations,
+        apiJson: updatedApiJson,
+      };
+
+      return { ...prev, [currentFilePath]: newImageData };
+    });
+  }, [currentFilePath, localAnnotations, setAllImageAnnotations]);
+
+  // Bedrock Change V4: Effect for auto-saving on component unmount (page switch)
+  const saveFuncRef = useRef(saveCurrentState);
+  saveFuncRef.current = saveCurrentState;
+
+  useEffect(() => {
+    return () => {
+      saveFuncRef.current();
+    };
+  }, []);
+
   const currentViewAnnotations: ViewAnnotation[] = localAnnotations;
   const currentApiJson = useMemo(() => {
-    if (!currentImageDetails) return {};
-    const sourceApi = allImageAnnotations[currentImageDetails.name]?.apiJson || {};
+    if (!currentFilePath) return {};
+    const sourceApi = allImageAnnotations[currentFilePath]?.apiJson || {};
     const generatedData = convertViewToApi(currentViewAnnotations);
     return { ...sourceApi, ...generatedData };
-  }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
+  }, [currentFilePath, allImageAnnotations, currentViewAnnotations]);
 
   const displayApiJson = useMemo(() => {
-    if (!currentImageDetails) return {};
-    const apiJsonForImage = allImageAnnotations[currentImageDetails.name]?.apiJson;
+    if (!currentFilePath) return {};
+    const apiJsonForImage = allImageAnnotations[currentFilePath]?.apiJson;
     if (apiJsonForImage) {
       const displayData = { ...apiJsonForImage };
       delete displayData.netlist_cdl;
@@ -226,15 +251,15 @@ const MaskOperate = () => {
       return displayData;
     }
     return convertViewToApi(currentViewAnnotations);
-  }, [currentImageDetails, allImageAnnotations, currentViewAnnotations]);
+  }, [currentFilePath, allImageAnnotations, currentViewAnnotations]);
 
 
   const currentUndoStackSize = (mask_operationHistory[currentFilePath || ''] || []).length;
   const currentRedoStackSize = (mask_redoHistory[currentFilePath || ''] || []).length;
 
   useEffect(() => {
-    if (currentImageDetails) {
-      const imageData = allImageAnnotations[currentImageDetails.name];
+    if (currentFilePath) {
+      const imageData = allImageAnnotations[currentFilePath];
       if (imageData) {
         setLocalAnnotations(imageData.viewAnnotations || []);
         setNetlistScsContent(imageData.apiJson?.netlist_scs || null);
@@ -249,7 +274,7 @@ const MaskOperate = () => {
       setNetlistScsContent(null);
       setNetlistCdlContent(null);
     }
-  }, [currentImageDetails, allImageAnnotations]);
+  }, [currentFilePath, allImageAnnotations]);
 
 
   const getResizeHandles = (box: ViewBoxAnnotation): { [key in ResizeHandle]?: { x: number, y: number, size: number, cursor: string } } => {
@@ -463,7 +488,7 @@ const MaskOperate = () => {
     if (node) {
       const url = URL.createObjectURL(node.file);
       const img = new Image();
-      img.onload = () => { setCurrentImageDetails({ name: node.file.name, url, width: img.naturalWidth, height: img.naturalHeight, originalFile: node.file }); };
+      img.onload = () => { setCurrentImageDetails({ name: node.key, url, width: img.naturalWidth, height: img.naturalHeight, originalFile: node.file }); };
       img.src = url;
       return () => { URL.revokeObjectURL(url); };
     }
@@ -537,27 +562,28 @@ const MaskOperate = () => {
   const isPointInRect = (point: Point, rect: { x: number; y: number; width: number; height: number }): boolean => (point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
 
   const addUndoRecord = useCallback(() => {
-    if (!currentFilePath || !currentImageDetails) return;
+    if (!currentFilePath) return;
     const operation: MaskUndoOperation = { filePath: currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
     setMask_operationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), operation] }));
     setMask_redoHistory(prev => ({ ...prev, [currentFilePath]: [] }));
-  }, [currentFilePath, currentImageDetails, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory]);
+    markFileAsModified(currentFilePath);
+  }, [currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory, markFileAsModified]);
 
   const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
-    if (!currentFilePath || !currentImageDetails) return;
+    if (!currentFilePath) return;
     setAllImageAnnotations(prev => {
-      const sourceApiJson = prev[currentImageDetails.name]?.apiJson || {};
+      const sourceApiJson = prev[currentFilePath]?.apiJson || {};
       const generatedApiJson = convertViewToApi(newViewAnnotations);
 
       const updatedApiJson = { ...sourceApiJson, ...generatedApiJson, ...(newApiJson || {}) };
 
-      // Preserve netlist data if it exists on the source
       if (sourceApiJson.netlist_cdl) updatedApiJson.netlist_cdl = sourceApiJson.netlist_cdl;
       if (sourceApiJson.netlist_scs) updatedApiJson.netlist_scs = sourceApiJson.netlist_scs;
 
-      return { ...prev, [currentImageDetails.name]: { viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
+      return { ...prev, [currentFilePath]: { viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
     });
-  }, [currentFilePath, currentImageDetails, setAllImageAnnotations]);
+    markFileAsModified(currentFilePath);
+  }, [currentFilePath, setAllImageAnnotations, markFileAsModified]);
 
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
     const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? { ...a, ...updates } : a);
@@ -573,56 +599,54 @@ const MaskOperate = () => {
   }, [isCurrentlyEditingId, addUndoRecord]);
 
   const addAnnotation = useCallback((newAnnotation: ViewAnnotation) => {
-    if (!currentImageDetails) return;
     addUndoRecord();
     const newAnnos = [...currentViewAnnotations, newAnnotation];
     setLocalAnnotations(newAnnos);
     updateGlobalAnnotations(newAnnos);
-  }, [currentImageDetails, addUndoRecord, updateGlobalAnnotations, currentViewAnnotations]);
+  }, [addUndoRecord, updateGlobalAnnotations, currentViewAnnotations]);
 
   const removeAnnotationById = useCallback((idToRemove: string) => {
-    if (!currentImageDetails) return;
     addUndoRecord();
     const updatedAnnotations = currentViewAnnotations.filter(a => a.id !== idToRemove);
     setLocalAnnotations(updatedAnnotations);
     updateGlobalAnnotations(updatedAnnotations);
     if (selectedAnnotationId === idToRemove) setSelectedAnnotationId(null);
     message.success(`${t.deleteAnnotationTooltip} ${t.operationSuccessful}`);
-  }, [currentImageDetails, currentViewAnnotations, addUndoRecord, updateGlobalAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
+  }, [currentViewAnnotations, addUndoRecord, updateGlobalAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
 
   const performUndo = useCallback(() => {
     if (!currentFilePath) return;
-    const history = mask_operationHistory[currentFilePath] || []; if (history.length === 0 || !currentImageDetails) return;
+    const history = mask_operationHistory[currentFilePath] || []; if (history.length === 0) return;
     const lastOp = history[history.length - 1];
     const redoOp: MaskUndoOperation = { filePath: currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
     setMask_redoHistory(prev => ({ ...prev, [currentFilePath]: [redoOp, ...(prev[currentFilePath] || [])] }));
 
     setAllImageAnnotations(prev => {
-      const imageName = findFileNodeByKey(lastOp.filePath, fileTree!)?.file.name;
-      if (!imageName) return prev;
-      return { ...prev, [imageName]: { viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson } };
+      if (!lastOp.filePath) return prev;
+      return { ...prev, [lastOp.filePath]: { viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson } };
     });
 
     setMask_operationHistory(prev => ({ ...prev, [currentFilePath]: history.slice(0, -1) }));
+    markFileAsModified(currentFilePath);
     message.success(t.operationSuccessful);
-  }, [mask_operationHistory, currentFilePath, currentImageDetails, localAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful, fileTree]);
+  }, [mask_operationHistory, currentFilePath, localAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful, markFileAsModified]);
 
   const performRedo = useCallback(() => {
     if (!currentFilePath) return;
-    const history = mask_redoHistory[currentFilePath] || []; if (history.length === 0 || !currentImageDetails) return;
+    const history = mask_redoHistory[currentFilePath] || []; if (history.length === 0) return;
     const redoOp = history[0];
     const undoOp: MaskUndoOperation = { filePath: currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
     setMask_operationHistory(prev => ({ ...prev, [currentFilePath]: [...(prev[currentFilePath] || []), undoOp] }));
 
     setAllImageAnnotations(prev => {
-      const imageName = findFileNodeByKey(redoOp.filePath, fileTree!)?.file.name;
-      if (!imageName) return prev;
-      return { ...prev, [imageName]: { viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson } };
+      if (!redoOp.filePath) return prev;
+      return { ...prev, [redoOp.filePath]: { viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson } };
     });
 
     setMask_redoHistory(prev => ({ ...prev, [currentFilePath]: history.slice(1) }));
+    markFileAsModified(currentFilePath);
     message.success(t.operationSuccessful);
-  }, [mask_redoHistory, currentFilePath, currentImageDetails, localAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful, fileTree]);
+  }, [mask_redoHistory, currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful, markFileAsModified]);
 
 
   const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -829,9 +853,10 @@ const MaskOperate = () => {
   };
 
   const handleFileSelect = (filePath: string) => {
-    if (currentFilePath && currentImageDetails) {
-      updateGlobalAnnotations(localAnnotations, currentApiJson);
+    if (filePath === currentFilePath) {
+      return;
     }
+    saveCurrentState();
     setCurrentFilePath(filePath);
     setSelectedAnnotationId(null);
     setDraggingState(null);
@@ -843,17 +868,13 @@ const MaskOperate = () => {
     if (!fileTree) { message.warning(t.noImages); return; }
     message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
 
-    // Persist current file's data before exporting
-    const finalAllAnnotations = { ...allImageAnnotations };
-    if (currentImageDetails) {
-      finalAllAnnotations[currentImageDetails.name] = {
-        viewAnnotations: localAnnotations,
-        apiJson: currentApiJson,
-      };
-    }
+    saveCurrentState();
 
     try {
       const zip = new JSZip();
+
+      // The global state is now guaranteed to be up-to-date.
+      const finalAllAnnotations = allImageAnnotations;
 
       const addFolderToZip = (node: any, currentZipFolder: JSZip) => {
         if (!node.isLeaf) { // Directory
@@ -863,7 +884,7 @@ const MaskOperate = () => {
           const fileNode = node as FileNode;
           currentZipFolder.file(fileNode.title, fileNode.file);
 
-          const annotationsForImage = finalAllAnnotations[fileNode.file.name];
+          const annotationsForImage = finalAllAnnotations[fileNode.key];
           const jsonContent = JSON.stringify(annotationsForImage?.apiJson || {}, null, 2);
           const baseName = fileNode.title.substring(0, fileNode.title.lastIndexOf('.'));
           currentZipFolder.file(`${baseName}.json`, jsonContent);
@@ -882,7 +903,7 @@ const MaskOperate = () => {
   };
 
   const handleAiAnnotation = async () => {
-    if (!currentImageDetails) { message.warning(t.noImages); return; }
+    if (!currentImageDetails || !currentFilePath) { message.warning(t.noImages); return; }
 
     setIsAiAnnotating(true);
     message.loading({ content: t.aiAnnotating, key: 'ai-annotation', duration: 0 });
@@ -918,7 +939,6 @@ const MaskOperate = () => {
       setNetlistScsContent(apiResult.netlist_scs || null);
       setNetlistCdlContent(apiResult.netlist_cdl || null);
 
-      // We need to use the full apiResult to generate view annotations
       const allViewAnnotationsFromApi = convertApiToView(apiResult, categoryColors, currentLineWidth);
 
       const newCatNames = [...new Set(allViewAnnotationsFromApi.map(a => a.category))];
@@ -965,22 +985,24 @@ const MaskOperate = () => {
     setCategoryColors(prev => { const newColors = { ...prev }; newColors[newNameTrimmed] = newColors[oldName]; delete newColors[oldName]; return newColors; });
 
     const newAllAnnos = { ...allImageAnnotations };
-    Object.keys(newAllAnnos).forEach(imgName => {
-      const updatedViewAnnos = newAllAnnos[imgName].viewAnnotations.map(anno => anno.category === oldName ? { ...anno, category: newNameTrimmed } : anno);
-      newAllAnnos[imgName] = { ...newAllAnnos[imgName], viewAnnotations: updatedViewAnnos };
+    Object.keys(newAllAnnos).forEach(filePath => {
+      const updatedViewAnnos = newAllAnnos[filePath].viewAnnotations.map(anno => anno.category === oldName ? { ...anno, category: newNameTrimmed } : anno);
+      newAllAnnos[filePath] = { ...newAllAnnos[filePath], viewAnnotations: updatedViewAnnos };
     });
     setAllImageAnnotations(newAllAnnos);
 
     if (currentCategory === oldName) setCurrentCategory(newNameTrimmed);
+    markFileAsModified(currentFilePath);
   };
   const handleUpdateColor = (catName: string, newColor: string) => {
     setCategoryColors(prev => ({ ...prev, [catName]: newColor }));
     const newAllAnnos = { ...allImageAnnotations };
-    Object.keys(newAllAnnos).forEach(imgName => {
-      const updatedViewAnnos = newAllAnnos[imgName].viewAnnotations.map(anno => anno.category === catName ? { ...anno, color: newColor } : anno);
-      newAllAnnos[imgName] = { ...newAllAnnos[imgName], viewAnnotations: updatedViewAnnos };
+    Object.keys(newAllAnnos).forEach(filePath => {
+      const updatedViewAnnos = newAllAnnos[filePath].viewAnnotations.map(anno => anno.category === catName ? { ...anno, color: newColor } : anno);
+      newAllAnnos[filePath] = { ...newAllAnnos[filePath], viewAnnotations: updatedViewAnnos };
     });
     setAllImageAnnotations(newAllAnnos);
+    markFileAsModified(currentFilePath);
   };
   const handleDeleteClass = (className: string) => {
     const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', className) : `确认删除类别 ${className}?`;
@@ -993,18 +1015,16 @@ const MaskOperate = () => {
         delete newCategoryColors[className];
 
         const newAllAnnotations = { ...allImageAnnotations };
-        Object.keys(newAllAnnotations).forEach(imgName => {
-          const annotationsForImage = newAllAnnotations[imgName];
+        Object.keys(newAllAnnotations).forEach(filePath => {
+          const annotationsForImage = newAllAnnotations[filePath];
           const filteredViewAnnos = annotationsForImage.viewAnnotations.filter(anno => anno.category !== className);
 
-          // Re-generate API JSON from the filtered view annotations
           const newApiJson = convertViewToApi(filteredViewAnnos);
 
-          // Preserve other data like netlists from the original API JSON
           newApiJson.netlist_cdl = annotationsForImage.apiJson.netlist_cdl;
           newApiJson.netlist_scs = annotationsForImage.apiJson.netlist_scs;
 
-          newAllAnnotations[imgName] = {
+          newAllAnnotations[filePath] = {
             viewAnnotations: filteredViewAnnos,
             apiJson: newApiJson
           };
@@ -1013,6 +1033,8 @@ const MaskOperate = () => {
         setCategories(newCategories);
         setCategoryColors(newCategoryColors);
         setAllImageAnnotations(newAllAnnotations);
+
+        Object.keys(newAllAnnotations).forEach(filePath => markFileAsModified(filePath));
 
         if (currentCategory === className) setCurrentCategory(newCategories[0] || "");
         message.success(t.classDeleted.replace('%s', className));
@@ -1124,7 +1146,7 @@ const MaskOperate = () => {
       </Header>
       <Layout hasSider>
         <Sider width={leftSiderWidth} className="file-explorer-sider" theme="light">
-          <FileExplorer onFileSelect={handleFileSelect} />
+          <FileExplorer onFileSelect={handleFileSelect} modifiedFiles={modifiedFiles} />
         </Sider>
         <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
 
