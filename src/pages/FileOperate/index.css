@@ -63,6 +63,7 @@
   flex-direction: column;
 }
 
+
 /* --- Main Content & Canvas --- */
 .main-content-wrapper {
   position: relative;
@@ -74,31 +75,41 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: auto;
+  overflow: hidden;
+  /* Changed from auto to hidden to control panning manually */
   height: calc(100vh - 60px);
-  padding: 16px;
+  padding: 0;
+  /* Removed padding to allow canvas to fill area */
+  background-color: var(--layout-background-color);
+  cursor: grab;
+}
+
+.canvas-content.panning {
+  cursor: grabbing;
 }
 
 .canvas-wrapper {
   display: flex;
   justify-content: center;
   align-items: center;
-  max-width: 100%;
-  max-height: 100%;
-  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
-  background-color: var(--background-color);
+  width: 100%;
+  height: 100%;
+  box-shadow: none;
+  /* Shadow is less useful on a pannable surface */
+  background-color: transparent;
 }
 
 .canvas-wrapper canvas {
-  max-width: 100%;
-  max-height: calc(100vh - 92px);
-  /* 60px header + 32px padding */
+  max-width: none;
+  /* Allow canvas to be larger than container */
+  max-height: none;
+  /* Allow canvas to be larger than container */
   display: block;
   object-fit: contain;
   background-color: var(--background-color);
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
 }
 
-/* --- Cursors --- */
 .draw-cursor {
   cursor: crosshair;
 }
@@ -106,27 +117,6 @@
 .delete-cursor {
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ff4d4f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'), auto;
 }
-
-.canvas-wrapper canvas.resize-nwse {
-  cursor: nwse-resize;
-}
-
-.canvas-wrapper canvas.resize-nesw {
-  cursor: nesw-resize;
-}
-
-.canvas-wrapper canvas.resize-ns {
-  cursor: ns-resize;
-}
-
-.canvas-wrapper canvas.resize-ew {
-  cursor: ew-resize;
-}
-
-.canvas-wrapper canvas.move {
-  cursor: move;
-}
-
 
 /* --- Inspector Sider (Right) --- */
 .resizer-horizontal {
@@ -143,14 +133,12 @@
   background: var(--primary-color);
 }
 
-
 .unified-inspector-sider {
   background-color: var(--background-color) !important;
   box-shadow: -1px 0 4px rgba(0, 21, 41, 0.05);
   display: flex;
   flex-direction: column;
 }
-
 
 .inspector-tabs {
   height: 100%;
@@ -182,24 +170,45 @@
   flex-direction: column;
   height: 100%;
   gap: 16px;
-  overflow-y: auto;
+  overflow-y: hidden;
+  /* Let the inner container handle scrolling */
+  align-items: center;
+  /* Center the new wrapper */
+  justify-content: center;
+  /* Center the new wrapper */
 }
 
 .class-list-container {
-  max-height: calc(100vh - 350px);
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;
+  width: 100%;
+  /* Take full width inside its parent */
+  flex-grow: 1;
+  /* Take available space */
+}
+
+/* New layout rule for annotation list */
+.annotation-list-wrapper {
+  width: 90%;
+  height: 70%;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+  display: flex;
+  /* Added to contain the collapse properly */
+  flex-direction: column;
 }
 
 .annotation-collapse-container {
+  overflow-y: visible;
+  /* Let the wrapper handle scrolling */
+  border: none;
+  min-height: auto;
   flex-grow: 1;
-  overflow-y: auto;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  min-height: 50px;
+  /* Make collapse take available space */
 }
-
 
 .class-management-item {
   display: flex;
@@ -223,6 +232,8 @@
   flex-direction: column;
   gap: 16px;
   height: 100%;
+  width: 90%;
+  height: 70%;
 }
 
 .data-view-item {
@@ -232,7 +243,6 @@
   flex: 1;
   min-height: 0;
 }
-
 
 .data-content-textarea {
   width: 100%;

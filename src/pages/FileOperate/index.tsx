@@ -16,6 +16,7 @@ import {
     faRobot,
     faSave,
     faSearchPlus,
+    faSync,
     faTags,
     faTrash,
     faUndo
@@ -37,6 +38,7 @@ import {
     Radio,
     RadioChangeEvent,
     Select,
+    Slider,
     Space,
     Tabs,
     Tooltip,
@@ -62,9 +64,10 @@ type Point = { x: number; y: number };
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
 type RegionSelectBox = { start: Point; end: Point; } | null;
 type RegionDeleteMode = 'contain' | 'intersect';
+interface CanvasTransform { scale: number; translateX: number; translateY: number; };
 
 type DraggingState = {
-    type: 'move' | 'resize' | 'region-select' | 'magnifier-drag';
+    type: 'move' | 'resize' | 'region-select' | 'magnifier-drag' | 'pan';
     boxName?: string;
     handle?: ResizeHandle;
     startMousePos: Point;
@@ -72,6 +75,7 @@ type DraggingState = {
     startAbsBox?: { x: number; y: number; w: number; h: number; };
     startFullYoloLine?: string;
     offset?: Point; // for magnifier drag
+    startTransform?: CanvasTransform;
 } | null;
 
 
@@ -89,6 +93,10 @@ type FullApiResponse = ApiResponse;
 const RESIZE_HANDLE_SIZE = 8;
 const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 5.0;
+const ZOOM_STEP = 0.1;
+
 
 /**
  * @description Recursively searches for a file node by its path (key) in the file tree.
@@ -273,6 +281,10 @@ const FileOperate: React.FC = () => {
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
+    const [transform, setTransform] = useState<CanvasTransform>({ scale: 1, translateX: 0, translateY: 0 });
+    const isSpacePressed = useRef(false);
+    const hasActiveImage = !!currentPng;
+
     const saveCurrentState = useCallback(() => {
         if (!file_currentFilePath) return;
 
@@ -330,6 +342,7 @@ const FileOperate: React.FC = () => {
                     setNetlistCdlContent(null);
                 }
             }
+            setTransform({ scale: 1, translateX: 0, translateY: 0 });
         } else {
             setCurrentPng(null);
             setCurrentYoloContent('');
@@ -351,7 +364,8 @@ const FileOperate: React.FC = () => {
     }, [currentYoloContent]);
 
     const getResizeHandles = (box: { x: number, y: number, width: number, height: number }): { [key in ResizeHandle]: { x: number, y: number, size: number } } => {
-        const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
+        const s = RESIZE_HANDLE_SIZE / transform.scale;
+        const { x, y, width, height } = box;
         return { topLeft: { x: x - s / 2, y: y - s / 2, size: s }, top: { x: x + width / 2 - s / 2, y: y - s / 2, size: s }, topRight: { x: x + width - s / 2, y: y - s / 2, size: s }, left: { x: x - s / 2, y: y + height / 2 - s / 2, size: s }, right: { x: x + width - s / 2, y: y + height / 2 - s / 2, size: s }, bottomLeft: { x: x - s / 2, y: y + height - s / 2, size: s }, bottom: { x: x + width / 2 - s / 2, y: y + height - s / 2, size: s }, bottomRight: { x: x + width - s / 2, y: y + height - s / 2, size: s }, };
     };
 
@@ -368,11 +382,19 @@ const FileOperate: React.FC = () => {
         const canvas = canvasRef.current; if (!canvas) return;
         const ctx = canvas.getContext('2d'); if (!ctx) return;
 
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
         if (currentPng) {
             const img = new Image();
             img.onload = () => {
                 canvas.width = img.width; canvas.height = img.height;
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                ctx.save();
+                ctx.translate(transform.translateX, transform.translateY);
+                ctx.scale(transform.scale, transform.scale);
+
                 ctx.drawImage(img, 0, 0);
                 const yoloDataForStain: { name: string, data: number[] }[] = [];
                 parsedYoloData.forEach(item => {
@@ -380,13 +402,13 @@ const FileOperate: React.FC = () => {
                     const { name, classIdx, x: relX, y: relY, w: relW, h: relH } = item;
                     const absW = relW * canvas.width;
                     const absH = relH * canvas.height;
-                    const absLeft = (relX - relW / 2) * canvas.width;
-                    const absTop = (relY - relH / 2) * canvas.height;
+                    const absLeft = (relX * canvas.width) - absW / 2;
+                    const absTop = (relY * canvas.height) - absH / 2;
                     const isSelected = selectedBoxName === name;
                     const color = classMap[classIdx]?.color || '#808080';
                     ctx.beginPath();
                     ctx.strokeStyle = isSelected ? '#0958d9' : color;
-                    ctx.lineWidth = isSelected ? 3 : 2;
+                    ctx.lineWidth = (isSelected ? 3 : 2) / transform.scale;
                     ctx.rect(absLeft, absTop, absW, absH);
                     ctx.stroke();
                     if (isSelected) {
@@ -419,7 +441,7 @@ const FileOperate: React.FC = () => {
                 if (regionSelectBox) {
                     ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
                     ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
-                    ctx.lineWidth = 1;
+                    ctx.lineWidth = 1 / transform.scale;
                     const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
                     const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
                     const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
@@ -427,11 +449,12 @@ const FileOperate: React.FC = () => {
                     ctx.fillRect(x, y, w, h);
                     ctx.strokeRect(x, y, w, h);
                 }
+                ctx.restore();
             };
             img.src = URL.createObjectURL(currentPng);
             return () => URL.revokeObjectURL(img.src);
         } else {
-            const parent = canvas.parentElement;
+            const parent = canvas.parentElement?.parentElement;
             if (!parent) return;
             const { offsetWidth, offsetHeight } = parent;
             canvas.width = offsetWidth > 0 ? offsetWidth : 800;
@@ -441,19 +464,22 @@ const FileOperate: React.FC = () => {
             ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
-    }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox]);
+        ctx.restore();
+    }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform]);
 
-    const getScaledCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
+    const getVirtualCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
         if (!canvas) return { x: 0, y: 0 };
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        return {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY,
-        };
-    }, []);
+
+        const intrinsicX = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const intrinsicY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+        const virtualX = (intrinsicX - transform.translateX) / transform.scale;
+        const virtualY = (intrinsicY - transform.translateY) / transform.scale;
+
+        return { x: virtualX, y: virtualY };
+    }, [transform]);
 
     const drawMagnifier = useCallback(() => {
         if (!isMagnifierVisible || !isMouseOnCanvas) return;
@@ -469,37 +495,66 @@ const FileOperate: React.FC = () => {
 
         const sx = canvasMousePos.x - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
         const sy = canvasMousePos.y - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
-        const sWidth = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
-        const sHeight = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
 
-        magCtx.drawImage(
-            mainCanvas,
-            sx, sy, sWidth, sHeight,
-            0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE
-        );
+        magCtx.save();
+        // We need to draw the transformed image onto the magnifier
+        magCtx.scale(MAGNIFIER_ZOOM, MAGNIFIER_ZOOM); // Zoom in
+        magCtx.translate(-sx, -sy); // Center on the virtual mouse position
 
-        // Draw crosshair
-        magCtx.strokeStyle = 'red';
-        magCtx.lineWidth = 1;
-        magCtx.beginPath();
-        magCtx.moveTo(MAGNIFIER_SIZE / 2, 0);
-        magCtx.lineTo(MAGNIFIER_SIZE / 2, MAGNIFIER_SIZE);
-        magCtx.moveTo(0, MAGNIFIER_SIZE / 2);
-        magCtx.lineTo(MAGNIFIER_SIZE, MAGNIFIER_SIZE / 2);
-        magCtx.stroke();
+        // Apply the main canvas's transform
+        magCtx.translate(transform.translateX, transform.translateY);
+        magCtx.scale(transform.scale, transform.scale);
 
-    }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos]);
+        // Draw the main canvas content
+        const img = new Image();
+        img.src = mainCanvas.toDataURL(); // This can be slow, but is simplest.
+        img.onload = () => {
+            magCtx.drawImage(img, 0, 0);
+            magCtx.restore();
+
+            // Draw crosshair
+            magCtx.strokeStyle = 'red';
+            magCtx.lineWidth = 1;
+            magCtx.beginPath();
+            magCtx.moveTo(MAGNIFIER_SIZE / 2, 0);
+            magCtx.lineTo(MAGNIFIER_SIZE / 2, MAGNIFIER_SIZE);
+            magCtx.moveTo(0, MAGNIFIER_SIZE / 2);
+            magCtx.lineTo(MAGNIFIER_SIZE, MAGNIFIER_SIZE / 2);
+            magCtx.stroke();
+        };
+
+    }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos, transform]);
 
     useEffect(() => {
         drawMagnifier();
-    }, [canvasMousePos, drawMagnifier]);
+    }, [canvasMousePos, redrawTrigger]);
 
-    useEffect(() => { redrawCanvas(); }, [redrawTrigger, redrawCanvas, currentYoloContent]);
+    useEffect(() => { redrawCanvas(); }, [redrawTrigger, redrawCanvas, currentYoloContent, transform]);
 
     useEffect(() => {
         const handleResize = () => setRedrawTrigger(p => p + 1);
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === ' ') {
+                isSpacePressed.current = true;
+                e.preventDefault();
+            }
+        };
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if (e.key === ' ') {
+                isSpacePressed.current = false;
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
     }, []);
 
     // Sider resize logic
@@ -623,7 +678,7 @@ const FileOperate: React.FC = () => {
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current; if (!canvas || !currentYoloContent || !file_currentFilePath) return;
-        const { x: mouseX, y: mouseY } = getScaledCoords(e);
+        const { x: mouseX, y: mouseY } = getVirtualCoords(e);
 
         const yoloLines = currentYoloContent.split('\n').filter(Boolean);
 
@@ -635,7 +690,8 @@ const FileOperate: React.FC = () => {
                 const boxName = parts[0];
                 const [, relX, relY, relW, relH] = parts.slice(1).map(parseFloat);
                 if (isNaN(relX) || isNaN(relY) || isNaN(relW) || isNaN(relH)) continue;
-                const boxX = (relX - relW / 2) * canvas.width; const boxY = (relY - relH / 2) * canvas.height;
+                const boxX = (relX * canvas.width) - (relW * canvas.width) / 2;
+                const boxY = (relY * canvas.height) - (relH * canvas.height) / 2;
                 const boxW = relW * canvas.width; const boxH = relH * canvas.height;
                 if (mouseX >= boxX && mouseX <= boxX + boxW && mouseY >= boxY && mouseY <= boxY + boxH) {
                     const previousJson = currentJsonContent;
@@ -668,7 +724,8 @@ const FileOperate: React.FC = () => {
                 const parts = line.split(' ');
                 if (parts.length < 6) continue;
                 const [, relX, relY, relW, relH] = parts.slice(1).map(parseFloat);
-                const absLeft = (relX - relW / 2) * canvas.width; const absTop = (relY - relH / 2) * canvas.height;
+                const absLeft = (relX * canvas.width) - (relW * canvas.width) / 2;
+                const absTop = (relY * canvas.height) - (relH * canvas.height) / 2;
                 const absW = relW * canvas.width; const absH = relH * canvas.height;
                 if (mouseX >= absLeft && mouseX <= absLeft + absW && mouseY >= absTop && mouseY <= absTop + absH) {
                     boxNameToDelete = parts[0];
@@ -693,7 +750,17 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
-        if (e.button !== 0 || !file_currentFilePath) return;
+        if (e.button !== 0 && e.button !== 1 || !file_currentFilePath) return;
+
+        if (e.button === 1 || isSpacePressed.current) {
+            setDraggingState({
+                type: 'pan',
+                startMousePos: { x: e.clientX, y: e.clientY },
+                startTransform: { ...transform },
+            });
+            e.preventDefault();
+            return;
+        }
 
         if (activeTool === 'stain' || activeTool === 'delete') {
             handleCanvasAction(e);
@@ -701,7 +768,7 @@ const FileOperate: React.FC = () => {
         }
 
         const canvas = canvasRef.current; if (!canvas) return;
-        const startPos = getScaledCoords(e);
+        const startPos = getVirtualCoords(e);
 
         if (activeTool === 'draw') {
             setMouseDownCoords(startPos);
@@ -718,7 +785,7 @@ const FileOperate: React.FC = () => {
                 const parts = selectedBoxLine.split(' ').slice(1).map(parseFloat);
                 const [, relX, relY, relW, relH] = parts;
                 const absW = relW * canvas.width, absH = relH * canvas.height;
-                const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
+                const absLeft = (relX * canvas.width) - absW / 2, absTop = (relY * canvas.height) - absH / 2;
                 const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
 
                 for (const handleKey of Object.keys(handles) as ResizeHandle[]) {
@@ -749,8 +816,8 @@ const FileOperate: React.FC = () => {
                 if (parts.length < 6) continue;
                 const name = parts[0];
                 const [, relX, relY, relW, relH] = parts.slice(1).map(parseFloat);
-                const absLeft = (relX - relW / 2) * canvas.width;
-                const absTop = (relY - relH / 2) * canvas.height;
+                const absLeft = (relX * canvas.width) - (relW * canvas.width) / 2;
+                const absTop = (relY * canvas.height) - (relH * canvas.height) / 2;
                 const absW = relW * canvas.width;
                 const absH = relH * canvas.height;
 
@@ -780,17 +847,37 @@ const FileOperate: React.FC = () => {
 
     const handleMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current; if (!canvas) return;
-        const currentPos = getScaledCoords(e);
-        setCanvasMousePos(currentPos); // update canvas mouse pos for magnifier
+        const currentPos = getVirtualCoords(e);
+        setCanvasMousePos(currentPos);
+
+        if (draggingState?.type === 'pan' && draggingState.startTransform) {
+            const dx = (e.clientX - draggingState.startMousePos.x); // No scaling here, it's screen space
+            const dy = (e.clientY - draggingState.startMousePos.y);
+            setTransform({
+                scale: draggingState.startTransform.scale,
+                translateX: draggingState.startTransform.translateX + dx,
+                translateY: draggingState.startTransform.translateY + dy,
+            });
+            return;
+        }
 
         if (isDrawing && activeTool === 'draw') {
             const ctx = canvas.getContext('2d');
             if (ctx && canvasImageData) {
-                ctx.putImageData(canvasImageData, 0, 0); ctx.beginPath();
+                ctx.putImageData(canvasImageData, 0, 0);
+
+                ctx.save();
+                ctx.translate(transform.translateX, transform.translateY);
+                ctx.scale(transform.scale, transform.scale);
+
+                ctx.beginPath();
                 ctx.strokeStyle = classMap[currentClassIndex]?.color || '#262626';
-                ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
+                ctx.lineWidth = 2 / transform.scale;
+                ctx.setLineDash([6 / transform.scale, 3 / transform.scale]);
                 ctx.rect(mouseDownCoords.x, mouseDownCoords.y, currentPos.x - mouseDownCoords.x, currentPos.y - mouseDownCoords.y);
-                ctx.stroke(); ctx.setLineDash([]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
             }
         } else if (draggingState) {
             if (draggingState.type === 'region-select') {
@@ -798,10 +885,13 @@ const FileOperate: React.FC = () => {
                 setRedrawTrigger(p => p + 1);
             } else if (activeTool === 'select') {
                 if (draggingState.type === 'move' && draggingState.startYoloData) {
-                    const dx = (currentPos.x - draggingState.startMousePos.x) / canvas.width;
-                    const dy = (currentPos.y - draggingState.startMousePos.y) / canvas.height;
-                    const newRelX = draggingState.startYoloData.relX + dx;
-                    const newRelY = draggingState.startYoloData.relY + dy;
+                    const dx = (currentPos.x - draggingState.startMousePos.x) / (canvas.width);
+                    const dy = (currentPos.y - draggingState.startMousePos.y) / (canvas.height);
+
+                    // The startYoloData is already relative, but the diff needs to be calculated in virtual space and converted to relative.
+                    const newRelX = draggingState.startYoloData.relX + (currentPos.x - draggingState.startMousePos.x) / canvas.width;
+                    const newRelY = draggingState.startYoloData.relY + (currentPos.y - draggingState.startMousePos.y) / canvas.height;
+
 
                     const newYoloContent = (currentYoloContent || '').split('\n').map(line => {
                         const parts = line.split(' ');
@@ -811,7 +901,6 @@ const FileOperate: React.FC = () => {
                         return line;
                     }).join('\n');
                     setCurrentYoloContent(newYoloContent);
-                    setRedrawTrigger(p => p + 1);
                 } else if (draggingState.type === 'resize' && draggingState.startAbsBox && draggingState.handle && draggingState.startFullYoloLine) {
                     const dx = currentPos.x - draggingState.startMousePos.x;
                     const dy = currentPos.y - draggingState.startMousePos.y;
@@ -842,7 +931,7 @@ const FileOperate: React.FC = () => {
                 if (selectedLine) {
                     const [, relX, relY, relW, relH] = selectedLine.split(' ').slice(1).map(parseFloat);
                     const absW = relW * canvas.width, absH = relH * canvas.height;
-                    const absLeft = (relX - relW / 2) * canvas.width, absTop = (relY - relH / 2) * canvas.height;
+                    const absLeft = (relX * canvas.width) - absW / 2, absTop = (relY * canvas.height) - absH / 2;
                     const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
                     for (const handleKey of Object.keys(handles) as ResizeHandle[]) {
                         const handle = handles[handleKey];
@@ -860,9 +949,16 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseUp = (e: MouseEvent<HTMLCanvasElement>) => {
-        if (e.button !== 0 || !file_currentFilePath) return;
+        if (e.button !== 0 && e.button !== 1 || !file_currentFilePath) return;
+
+        if (draggingState?.type === 'pan') {
+            setDraggingState(null);
+            e.preventDefault();
+            return;
+        }
+
         const canvas = canvasRef.current; if (!canvas) return;
-        const upPos = getScaledCoords(e);
+        const upPos = getVirtualCoords(e);
 
         if (isDrawing && activeTool === 'draw') {
             setIsDrawing(false);
@@ -912,8 +1008,8 @@ const FileOperate: React.FC = () => {
                 const boxRect = {
                     width: item.w * canvas.width,
                     height: item.h * canvas.height,
-                    x: (item.x - item.w / 2) * canvas.width,
-                    y: (item.y - item.h / 2) * canvas.height
+                    x: (item.x * canvas.width) - (item.w * canvas.width) / 2,
+                    y: (item.y * canvas.height) - (item.h * canvas.height) / 2
                 };
 
                 let shouldDelete = false;
@@ -995,6 +1091,32 @@ const FileOperate: React.FC = () => {
         setRedrawTrigger(p => p + 1);
     };
 
+    const handleZoomChange = (newScale: number) => {
+        if (!canvasRef.current) return;
+        const viewport = canvasRef.current.parentElement?.parentElement; // canvas -> wrapper -> content
+        if (!viewport) {
+            setTransform(prev => ({ ...prev, scale: newScale }));
+            return;
+        }
+        setTransform(prev => {
+            const viewportCenterX = viewport.offsetWidth / 2;
+            const viewportCenterY = viewport.offsetHeight / 2;
+
+            const newTranslateX = viewportCenterX - (viewportCenterX - prev.translateX) * (newScale / prev.scale);
+            const newTranslateY = viewportCenterY - (viewportCenterY - prev.translateY) * (newScale / prev.scale);
+
+            return {
+                scale: newScale,
+                translateX: newTranslateX,
+                translateY: newTranslateY,
+            };
+        });
+    };
+
+    const handleResetZoom = () => {
+        setTransform({ scale: 1, translateX: 0, translateY: 0 });
+    };
+
     const addUndoRecord = useCallback(() => {
         if (!file_currentFilePath) return;
         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
@@ -1050,7 +1172,8 @@ const FileOperate: React.FC = () => {
         if (currentImageRedoHistory.length === 0) { message.info(t.noRedoOperations); return; }
         const operationToRedo = currentImageRedoHistory[0];
         let undoOp: Operation;
-        switch (operationToRedo.type) { case 'draw': case 'ai_annotate': case 'move': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': undoOp = { ...operationToRedo, previousJsonContent: currentJsonContent }; break; case 'delete': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
+        let redoOp: Operation;
+        switch (operationToRedo.type) { case 'draw': case 'ai_annotate': case 'move': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': undoOp = { ...operationToRedo, previousJsonContent: currentJsonContent }; break; case 'delete': redoOp = { ...operationToRedo, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
         setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), undoOp] }));
         setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: currentImageRedoHistory.slice(1) }));
         if ('previousYoloContent' in operationToRedo) { setCurrentYoloContent(operationToRedo.previousYoloContent); }
@@ -1293,13 +1416,14 @@ const FileOperate: React.FC = () => {
     const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName;
 
     const getCanvasCursor = () => {
-        if (isMagnifierVisible) return 'none'; // Hide system cursor when magnifier is active
+        if (draggingState?.type === 'pan' || isSpacePressed.current) return 'panning';
+        if (isMagnifierVisible) return 'none';
         switch (activeTool) {
             case 'delete': return 'delete-cursor';
             case 'draw': return 'draw-cursor';
-            case 'region-delete': return 'draw-cursor'; // crosshair
+            case 'region-delete': return 'draw-cursor';
             case 'select': return getCursorForHandle(hoveredHandle);
-            default: return 'default';
+            default: return 'grab';
         }
     }
 
@@ -1307,6 +1431,26 @@ const FileOperate: React.FC = () => {
         <Layout className="unified-layout">
             <Header className="unified-top-header">
                 <div className="header-left-controls">
+                    <Space>
+                        <Tooltip title={`缩放: ${Math.round(transform.scale * 100)}%`}>
+                            <Slider
+                                min={ZOOM_MIN}
+                                max={ZOOM_MAX}
+                                step={ZOOM_STEP}
+                                value={transform.scale}
+                                onChange={handleZoomChange}
+                                style={{ width: 150 }}
+                                disabled={!hasActiveImage}
+                            />
+                        </Tooltip>
+                        <Tooltip title="重置视图">
+                            <Button
+                                icon={<FontAwesomeIcon icon={faSync} />}
+                                onClick={handleResetZoom}
+                                disabled={!hasActiveImage}
+                            />
+                        </Tooltip>
+                    </Space>
                     <Text className="current-file-text" title={currentPng?.name}>{currentPng ? `${t.currentFile}: ${currentPng.name}` : t.noImages}</Text>
                 </div>
                 <Space className="header-center-controls">
@@ -1333,7 +1477,8 @@ const FileOperate: React.FC = () => {
                 <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
 
                 <Layout className="main-content-wrapper">
-                    <Content className="canvas-content"
+                    <Content
+                        className={`canvas-content ${draggingState?.type === 'pan' || isSpacePressed.current ? 'panning' : ''}`}
                         onMouseEnter={() => setIsMouseOnCanvas(true)}
                         onMouseLeave={() => setIsMouseOnCanvas(false)}
                     >
@@ -1377,7 +1522,7 @@ const FileOperate: React.FC = () => {
                     <Tabs defaultActiveKey="1" className="inspector-tabs">
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
                             <div className="tab-pane-content">
-                                <div style={{ flexShrink: 0 }}>
+                                <div style={{ flexShrink: 0, width: '100%' }}>
                                     <Form layout="vertical">
                                         <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
                                             <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
@@ -1392,11 +1537,11 @@ const FileOperate: React.FC = () => {
                                         </Form.Item>
                                     </Form>
                                     <Divider />
-                                    <Title level={5} style={{ marginBottom: 8 }}>{t.annotations}</Title>
+                                    <Title level={5} style={{ marginBottom: 8, width: '100%', textAlign: 'left' }}>{t.annotations}</Title>
                                 </div>
                                 {parsedYoloData.length > 0 ? (
-                                    <div className="annotation-collapse-container">
-                                        <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost>
+                                    <div className="annotation-list-wrapper">
+                                        <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
                                             {parsedYoloData.map((item) => (
                                                 <Panel
                                                     key={item.name}
@@ -1437,41 +1582,45 @@ const FileOperate: React.FC = () => {
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-                            <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                <TabPane tab="YOLO (.txt)" key="yolo-data">
-                                    <div className="data-view-item" style={{ height: '100%' }}>
-                                        <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
-                                    </div>
-                                </TabPane>
-                                <TabPane tab="Annotation Data (.json)" key="json-data">
-                                    <div className="data-view-item" style={{ height: '100%' }}>
-                                        <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
-                                    </div>
-                                </TabPane>
-                                <TabPane tab="Netlist (.scs)" key="scs-data">
-                                    <div className="data-view-item" style={{ height: '100%' }}>
-                                        <textarea value={netlistScsContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (SCS format) will be shown here after processing." />
-                                    </div>
-                                </TabPane>
-                                <TabPane tab="Netlist (.cdl)" key="cdl-data">
-                                    <div className="data-view-item" style={{ height: '100%' }}>
-                                        <textarea value={netlistCdlContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (CDL format) will be shown here after processing." />
-                                    </div>
-                                </TabPane>
-                            </Tabs>
+                            <div className="tab-pane-content">
+                                <div className="data-view-container">
+                                    <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', width: '100%' }}>
+                                        <TabPane tab="YOLO (.txt)" key="yolo-data">
+                                            <div className="data-view-item" style={{ height: '100%' }}>
+                                                <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
+                                            </div>
+                                        </TabPane>
+                                        <TabPane tab="Annotation Data (.json)" key="json-data">
+                                            <div className="data-view-item" style={{ height: '100%' }}>
+                                                <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
+                                            </div>
+                                        </TabPane>
+                                        <TabPane tab="Netlist (.scs)" key="scs-data">
+                                            <div className="data-view-item" style={{ height: '100%' }}>
+                                                <textarea value={netlistScsContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (SCS format) will be shown here after processing." />
+                                            </div>
+                                        </TabPane>
+                                        <TabPane tab="Netlist (.cdl)" key="cdl-data">
+                                            <div className="data-view-item" style={{ height: '100%' }}>
+                                                <textarea value={netlistCdlContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (CDL format) will be shown here after processing." />
+                                            </div>
+                                        </TabPane>
+                                    </Tabs>
+                                </div>
+                            </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
-                            <div className="tab-pane-content">
-                                <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
+                            <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
+                                <Flex justify="space-between" align="center" style={{ marginBottom: 16, width: '100%' }}><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
                                 <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
                                 <div className="class-list-container">
                                     <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
                                 </div>
-                                <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16 }}>{t.addClass}</Button>
+                                <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16, width: '100%' }}>{t.addClass}</Button>
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCogs} /></Tooltip>} key="3">
-                            <div className="tab-pane-content">
+                            <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
                                 <Title level={5}>{t.settings}</Title>
                                 <p>此页面暂无特定设置。</p>
                             </div>

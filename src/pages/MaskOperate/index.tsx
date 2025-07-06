@@ -15,13 +15,14 @@ import {
   faRedo,
   faRobot,
   faSearchPlus,
+  faSync,
   faTags,
   faTrash,
   faUndo
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useModel } from '@umijs/max';
-import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber, Layout, List, message, Modal, Radio, RadioChangeEvent, Select, Space, Switch, Tabs, Tooltip, Typography } from 'antd';
+import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber, Layout, List, message, Modal, Radio, RadioChangeEvent, Select, Slider, Space, Switch, Tabs, Tooltip, Typography } from 'antd';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,14 +38,19 @@ const { Sider, Content, Header } = Layout;
 
 type ActiveTool = 'select' | 'rectangle' | 'diagonal' | 'delete' | 'region-delete';
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight' | 'start' | 'end';
-type DraggingState = { type: 'move' | 'resize' | 'region-select' | 'magnifier-drag'; handle?: ResizeHandle; startMousePos: Point; startAnnotationState?: ViewAnnotation; offset?: Point; } | null;
+type DraggingState = { type: 'move' | 'resize' | 'region-select' | 'magnifier-drag' | 'pan'; handle?: ResizeHandle; startMousePos: Point; startAnnotationState?: ViewAnnotation; offset?: Point; startTransform?: CanvasTransform; } | null;
 type RegionSelectBox = { start: Point; end: Point; } | null;
 type RegionDeleteMode = 'contain' | 'intersect';
 type ImageDetails = { name: string; url: string; width: number; height: number; originalFile: File; };
+interface CanvasTransform { scale: number; translateX: number; translateY: number; };
 
 const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
 const DIAGONAL_HANDLE_SIZE = 10;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 5.0;
+const ZOOM_STEP = 0.1;
+
 
 const findFileNodeByKey = (key: string, node: FileTreeNode): FileNode | null => {
   if (node.key === key && node.isLeaf) {
@@ -181,6 +187,9 @@ const MaskOperate = () => {
   const [isAiAnnotating, setIsAiAnnotating] = useState(false);
   const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
 
+  const [transform, setTransform] = useState<CanvasTransform>({ scale: 1, translateX: 0, translateY: 0 });
+  const isSpacePressed = useRef(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const magnifierCanvasRef = useRef<HTMLCanvasElement>(null);
   const classesFileRef = useRef<HTMLInputElement>(null);
@@ -257,6 +266,7 @@ const MaskOperate = () => {
         setNetlistScsContent(null);
         setNetlistCdlContent(null);
       }
+      setTransform({ scale: 1, translateX: 0, translateY: 0 }); // Reset view on file change
     } else {
       setLocalAnnotations([]);
       setNetlistScsContent(null);
@@ -266,7 +276,8 @@ const MaskOperate = () => {
 
 
   const getResizeHandles = (box: ViewBoxAnnotation): { [key in ResizeHandle]?: { x: number, y: number, size: number, cursor: string } } => {
-    const s = RESIZE_HANDLE_SIZE; const { x, y, width, height } = box;
+    const s = RESIZE_HANDLE_SIZE / transform.scale; // Scale handle size
+    const { x, y, width, height } = box;
     return { topLeft: { x: x - s / 2, y: y - s / 2, size: s, cursor: 'nwse-resize' }, top: { x: x + width / 2 - s / 2, y: y - s / 2, size: s, cursor: 'ns-resize' }, topRight: { x: x + width - s / 2, y: y - s / 2, size: s, cursor: 'nesw-resize' }, left: { x: x - s / 2, y: y + height / 2 - s / 2, size: s, cursor: 'ew-resize' }, right: { x: x + width - s / 2, y: y + height / 2 - s / 2, size: s, cursor: 'ew-resize' }, bottomLeft: { x: x - s / 2, y: y + height - s / 2, size: s, cursor: 'nesw-resize' }, bottom: { x: x + width / 2 - s / 2, y: y + height - s / 2, size: s, cursor: 'ns-resize' }, bottomRight: { x: x + width - s / 2, y: y + height - s / 2, size: s, cursor: 'nwse-resize' }, };
   };
   const getDiagonalParameters = (points: [Point, Point]) => { const dx = points[1].x - points[0].x; const dy = points[1].y - points[0].y; return { angleRad: Math.atan2(dy, dx), length: Math.sqrt(dx * dx + dy * dy), centerX: (points[0].x + points[1].x) / 2, centerY: (points[0].y + points[1].y) / 2, }; };
@@ -274,21 +285,24 @@ const MaskOperate = () => {
   const renderRectangle = useCallback((box: ViewBoxAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     ctx.save();
     if (isPreview) {
-      ctx.setLineDash([8, 4]); ctx.strokeStyle = "#4096ff"; ctx.lineWidth = 1.5;
+      ctx.setLineDash([8 / transform.scale, 4 / transform.scale]);
+      ctx.strokeStyle = "#4096ff"; ctx.lineWidth = 1.5 / transform.scale;
       ctx.strokeRect(box.x, box.y, box.width, box.height);
     } else {
       const color = isSelected ? '#4096ff' : box.color;
       ctx.globalAlpha = isSelected ? 1.0 : 0.75;
       ctx.fillStyle = color;
       ctx.strokeStyle = isSelected ? "#0958d9" : "rgba(0,0,0,0.8)";
-      ctx.lineWidth = isSelected ? 3 : 1.5;
+      ctx.lineWidth = (isSelected ? 3 : 1.5) / transform.scale;
       ctx.fillRect(box.x, box.y, box.width, box.height);
       ctx.strokeRect(box.x, box.y, box.width, box.height);
 
       ctx.globalAlpha = 1.0;
       if (showCategoryInBox) {
-        ctx.fillStyle = "#262626"; ctx.font = "bold 12px Arial"; ctx.textBaseline = "top";
-        ctx.fillText(box.category, box.x + 4, box.y + 4, box.width - 8);
+        ctx.fillStyle = "#262626";
+        ctx.font = `bold ${12 / transform.scale}px Arial`;
+        ctx.textBaseline = "top";
+        ctx.fillText(box.category, box.x + 4 / transform.scale, box.y + 4 / transform.scale, box.width - 8 / transform.scale);
       }
       if (isSelected) {
         const handles = getResizeHandles(box); ctx.fillStyle = '#0958d9';
@@ -296,7 +310,7 @@ const MaskOperate = () => {
       }
     }
     ctx.restore();
-  }, [showCategoryInBox]);
+  }, [showCategoryInBox, transform.scale]);
 
   const renderDiagonal = useCallback((diag: ViewDiagonalAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points); if (length === 0) return;
@@ -305,15 +319,15 @@ const MaskOperate = () => {
     ctx.rotate(angleRad);
 
     const color = isSelected ? '#4096ff' : diag.color;
-    const lineWidth = isSelected ? 3 : 1;
+    const lineWidth = (isSelected ? 3 : 1) / transform.scale;
 
     ctx.globalAlpha = isSelected ? 1.0 : 0.8;
     ctx.fillStyle = color;
     ctx.strokeStyle = isSelected ? "#0958d9" : "rgba(0,0,0,0.6)";
 
     if (isPreview) {
-      ctx.setLineDash([8, 4]);
-      ctx.lineWidth = 2;
+      ctx.setLineDash([8 / transform.scale, 4 / transform.scale]);
+      ctx.lineWidth = 2 / transform.scale;
     } else {
       ctx.lineWidth = lineWidth;
     }
@@ -328,10 +342,11 @@ const MaskOperate = () => {
       ctx.save();
       ctx.fillStyle = '#0958d9';
       ctx.strokeStyle = 'white';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 / transform.scale;
+      const handleRadius = (DIAGONAL_HANDLE_SIZE / 2) / transform.scale;
       [diag.points[0], diag.points[1]].forEach(p => {
         ctx.beginPath();
-        ctx.arc(p.x, p.y, DIAGONAL_HANDLE_SIZE / 2, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, handleRadius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       });
@@ -341,27 +356,39 @@ const MaskOperate = () => {
     if (!isPreview && showCategoryInBox) {
       ctx.save();
       ctx.fillStyle = "#262626";
-      ctx.font = "bold 12px Arial";
+      ctx.font = `bold ${12 / transform.scale}px Arial`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
-      ctx.fillText(diag.category, centerX, centerY - diag.thickness / 2 - 5);
+      ctx.fillText(diag.category, centerX, centerY - diag.thickness / 2 - 5 / transform.scale);
       ctx.restore();
     }
-  }, [showCategoryInBox]);
+  }, [showCategoryInBox, transform.scale]);
 
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
+
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (currentImageDetails) {
       const img = new Image();
       img.crossOrigin = "Anonymous";
       img.src = currentImageDetails.url;
       img.onload = () => {
-        canvas.width = currentImageDetails.width;
-        canvas.height = currentImageDetails.height;
+        if (canvas.width !== currentImageDetails.width || canvas.height !== currentImageDetails.height) {
+          canvas.width = currentImageDetails.width;
+          canvas.height = currentImageDetails.height;
+        }
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(transform.translateX, transform.translateY);
+        ctx.scale(transform.scale, transform.scale);
+
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const currentVirtualMousePos = canvasMousePos;
 
         currentViewAnnotations.forEach((anno: ViewAnnotation) => {
           if (anno.id !== selectedAnnotationId) {
@@ -379,10 +406,10 @@ const MaskOperate = () => {
         if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
           const { startMousePos } = draggingState;
           if (activeTool === 'rectangle') {
-            const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, canvasMousePos.x), y: Math.min(startMousePos.y, canvasMousePos.y), width: Math.abs(startMousePos.x - canvasMousePos.x), height: Math.abs(startMousePos.y - canvasMousePos.y), category: currentCategory, color: 'preview', sourceLineWidth: currentLineWidth };
+            const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, currentVirtualMousePos.x), y: Math.min(startMousePos.y, currentVirtualMousePos.y), width: Math.abs(startMousePos.x - currentVirtualMousePos.x), height: Math.abs(startMousePos.y - currentVirtualMousePos.y), category: currentCategory, color: 'preview', sourceLineWidth: currentLineWidth };
             renderRectangle(previewRect, ctx, true);
           } else {
-            const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, canvasMousePos], category: currentCategory, color: 'preview', thickness: currentLineWidth };
+            const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, currentVirtualMousePos], category: currentCategory, color: 'preview', thickness: currentLineWidth };
             renderDiagonal(previewDiag, ctx, true);
           }
         }
@@ -390,7 +417,7 @@ const MaskOperate = () => {
         if (regionSelectBox) {
           ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
           ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
-          ctx.lineWidth = 1;
+          ctx.lineWidth = 1 / transform.scale;
           const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
           const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
           const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
@@ -398,10 +425,11 @@ const MaskOperate = () => {
           ctx.fillRect(x, y, w, h);
           ctx.strokeRect(x, y, w, h);
         }
+        ctx.restore(); // Restore from pan/zoom transform
       };
       if (img.complete) img.onload(new Event('load'));
     } else {
-      const parent = canvas.parentElement;
+      const parent = canvas.parentElement?.parentElement; // canvas-wrapper -> canvas-content
       if (!parent) return;
       const { offsetWidth, offsetHeight } = parent;
       canvas.width = offsetWidth > 0 ? offsetWidth : 800;
@@ -411,19 +439,19 @@ const MaskOperate = () => {
       ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
       ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
-  }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox]);
+    ctx.restore();
+  }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox, transform]);
 
-  const getScaledCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement> | { clientX: number, clientY: number }): Point => {
+  const getVirtualCoords = useCallback((e: React.MouseEvent | { clientX: number, clientY: number }): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const invScale = 1 / transform.scale;
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
+      x: (e.clientX - rect.left - transform.translateX) * invScale,
+      y: (e.clientY - rect.top - transform.translateY) * invScale,
     };
-  }, []);
+  }, [transform]);
 
   const drawMagnifier = useCallback(() => {
     if (!isMagnifierVisible || !isMouseOnCanvas) return;
@@ -437,16 +465,27 @@ const MaskOperate = () => {
     magCtx.clearRect(0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
     magCtx.imageSmoothingEnabled = false;
 
+    // Use virtual coordinates for the source
     const sx = canvasMousePos.x - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
     const sy = canvasMousePos.y - (MAGNIFIER_SIZE / MAGNIFIER_ZOOM / 2);
-    const sWidth = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
-    const sHeight = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
 
-    magCtx.drawImage(
-      mainCanvas,
-      sx, sy, sWidth, sHeight,
-      0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE
-    );
+    // We need to draw the transformed image onto the magnifier
+    magCtx.save();
+    magCtx.scale(MAGNIFIER_ZOOM, MAGNIFIER_ZOOM);
+    magCtx.translate(-sx, -sy);
+
+    // Create a temporary canvas with the transformed main canvas content
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = mainCanvas.width;
+    tempCanvas.height = mainCanvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (tempCtx) {
+      tempCtx.drawImage(mainCanvas, 0, 0);
+    }
+
+    magCtx.drawImage(tempCanvas, 0, 0);
+    magCtx.restore();
+
 
     // Draw crosshair
     magCtx.strokeStyle = 'red';
@@ -457,11 +496,11 @@ const MaskOperate = () => {
     magCtx.moveTo(0, MAGNIFIER_SIZE / 2);
     magCtx.lineTo(MAGNIFIER_SIZE, MAGNIFIER_SIZE / 2);
     magCtx.stroke();
-  }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos]);
+  }, [isMagnifierVisible, isMouseOnCanvas, canvasMousePos, transform]);
 
   useEffect(() => {
     drawMagnifier();
-  }, [canvasMousePos, drawMagnifier]);
+  }, [canvasMousePos, redrawCanvas]); // Redraw magnifier when canvas updates
 
 
   useEffect(() => { setCurrentLang(initialState?.language || 'zh'); }, [initialState?.language]);
@@ -487,13 +526,33 @@ const MaskOperate = () => {
     else if (categories.length === 0 && currentCategory !== "") { setCurrentCategory(""); }
   }, [categories, currentCategory]);
 
-  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations]);
+  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations, transform]);
 
   useEffect(() => {
     const handleResize = () => redrawCanvas();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [redrawCanvas]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ') {
+        isSpacePressed.current = true;
+        e.preventDefault();
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ') {
+        isSpacePressed.current = false;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -656,26 +715,38 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!currentImageDetails || !canvasRef.current || e.button !== 0) return;
+    if (!currentImageDetails || !canvasRef.current || e.button !== 0 && e.button !== 1) return;
 
-    const mousePos = getScaledCoords(e);
+    if (e.button === 1 || isSpacePressed.current) {
+      setDraggingState({
+        type: 'pan',
+        startMousePos: { x: e.clientX, y: e.clientY },
+        startTransform: { ...transform },
+      });
+      e.preventDefault();
+      return;
+    }
+
+    const mousePos = getVirtualCoords(e);
     if (activeTool === 'select') {
       const selectedAnno = currentViewAnnotations.find(a => a.id === selectedAnnotationId);
       if (selectedAnno) {
         if ('width' in selectedAnno) {
           const handles = getResizeHandles(selectedAnno);
+          const handleSize = RESIZE_HANDLE_SIZE / transform.scale;
           for (const handleKey of Object.keys(handles) as (keyof typeof handles)[]) {
-            const handle = handles[handleKey]; if (handle && isPointInRect(mousePos, { x: handle.x, y: handle.y, width: handle.size, height: handle.size })) {
+            const handle = handles[handleKey]; if (handle && isPointInRect(mousePos, { x: handle.x, y: handle.y, width: handleSize, height: handleSize })) {
               addUndoRecord(); setDraggingState({ type: 'resize', handle: handleKey, startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
             }
           }
         } else if ('points' in selectedAnno) {
+          const handleRadius = DIAGONAL_HANDLE_SIZE / transform.scale;
           const distToStart = Math.hypot(mousePos.x - selectedAnno.points[0].x, mousePos.y - selectedAnno.points[0].y);
           const distToEnd = Math.hypot(mousePos.x - selectedAnno.points[1].x, mousePos.y - selectedAnno.points[1].y);
-          if (distToStart < DIAGONAL_HANDLE_SIZE) {
+          if (distToStart < handleRadius) {
             addUndoRecord(); setDraggingState({ type: 'resize', handle: 'start', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
           }
-          if (distToEnd < DIAGONAL_HANDLE_SIZE) {
+          if (distToEnd < handleRadius) {
             addUndoRecord(); setDraggingState({ type: 'resize', handle: 'end', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
           }
         }
@@ -706,19 +777,29 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const currentCanvasMousePos = getScaledCoords(e);
-    setCanvasMousePos(currentCanvasMousePos);
+    const currentVirtualMousePos = getVirtualCoords(e);
+    setCanvasMousePos(currentVirtualMousePos);
 
     if (!draggingState || !currentImageDetails) {
       return;
     }
 
+    if (draggingState.type === 'pan' && draggingState.startTransform) {
+      const dx = e.clientX - draggingState.startMousePos.x;
+      const dy = e.clientY - draggingState.startMousePos.y;
+      setTransform({
+        scale: draggingState.startTransform.scale,
+        translateX: draggingState.startTransform.translateX + dx,
+        translateY: draggingState.startTransform.translateY + dy,
+      });
+      return;
+    }
+
     if (draggingState.type === 'region-select') {
-      setRegionSelectBox({ start: draggingState.startMousePos, end: currentCanvasMousePos });
-      redrawCanvas();
+      setRegionSelectBox({ start: draggingState.startMousePos, end: currentVirtualMousePos });
     } else if (activeTool === 'select') {
       if (draggingState.startAnnotationState?.id) {
-        const dx = currentCanvasMousePos.x - draggingState.startMousePos.x; const dy = currentCanvasMousePos.y - draggingState.startMousePos.y;
+        const dx = currentVirtualMousePos.x - draggingState.startMousePos.x; const dy = currentVirtualMousePos.y - draggingState.startMousePos.y;
         const startState = draggingState.startAnnotationState;
         const updatedAnnos = currentViewAnnotations.map(anno => {
           if (anno.id === startState.id) {
@@ -736,8 +817,8 @@ const MaskOperate = () => {
                 if (handle.includes('bottom')) newAnno.height = Math.max(1, startBox.height + dy);
                 if (handle.includes('top')) { newAnno.y = startBox.y + dy; newAnno.height = Math.max(1, startBox.height - dy); }
               } else if ('points' in newAnno && (draggingState.handle === 'start' || draggingState.handle === 'end')) { // Diagonal resize/rotate
-                if (draggingState.handle === 'start') newAnno.points[0] = currentCanvasMousePos;
-                else newAnno.points[1] = currentCanvasMousePos;
+                if (draggingState.handle === 'start') newAnno.points[0] = currentVirtualMousePos;
+                else newAnno.points[1] = currentVirtualMousePos;
               }
             }
             return newAnno;
@@ -752,8 +833,14 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!draggingState || e.button !== 0) return;
-    const end = getScaledCoords(e);
+    if (!draggingState || e.button !== 0 && e.button !== 1) return;
+    if (draggingState.type === 'pan') {
+      setDraggingState(null);
+      e.preventDefault();
+      return;
+    }
+
+    const end = getVirtualCoords(e);
 
     if (activeTool === 'select') {
       updateGlobalAnnotations(localAnnotations);
@@ -832,7 +919,7 @@ const MaskOperate = () => {
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentImageDetails || draggingState || e.button !== 0) return;
-    const clickPos = getScaledCoords(e);
+    const clickPos = getVirtualCoords(e);
 
     if (activeTool === 'delete') {
       const annoToDelete = [...currentViewAnnotations].reverse().find((anno: ViewAnnotation) => {
@@ -846,6 +933,33 @@ const MaskOperate = () => {
       if (annoToDelete) removeAnnotationById(annoToDelete.id);
     }
   };
+
+  const handleZoomChange = (newScale: number) => {
+    if (!canvasRef.current) return;
+    const viewport = canvasRef.current.parentElement?.parentElement; // canvas -> wrapper -> content
+    if (!viewport) {
+      setTransform(prev => ({ ...prev, scale: newScale }));
+      return;
+    }
+    setTransform(prev => {
+      const viewportCenterX = viewport.offsetWidth / 2;
+      const viewportCenterY = viewport.offsetHeight / 2;
+
+      const newTranslateX = viewportCenterX - (viewportCenterX - prev.translateX) * (newScale / prev.scale);
+      const newTranslateY = viewportCenterY - (viewportCenterY - prev.translateY) * (newScale / prev.scale);
+
+      return {
+        scale: newScale,
+        translateX: newTranslateX,
+        translateY: newTranslateY,
+      };
+    });
+  };
+
+  const handleResetZoom = () => {
+    setTransform({ scale: 1, translateX: 0, translateY: 0 });
+  };
+
 
   const handleFileSelect = (filePath: string) => {
     if (filePath === mask_currentFilePath) {
@@ -1116,13 +1230,14 @@ const MaskOperate = () => {
   const isSelectedForEdit = (item: ViewAnnotation) => activeTool === 'select' && item.id === selectedAnnotationId;
 
   const getCanvasCursor = () => {
-    if (isMagnifierVisible) return 'none'; // Hide system cursor
+    if (draggingState?.type === 'pan' || isSpacePressed.current) return 'panning';
+    if (isMagnifierVisible) return 'none';
     switch (activeTool) {
       case 'delete': return 'delete-cursor';
       case 'rectangle':
       case 'diagonal':
-      case 'region-delete': return 'draw-cursor'; // crosshair
-      default: return 'default';
+      case 'region-delete': return 'draw-cursor';
+      default: return 'grab';
     }
   }
 
@@ -1130,6 +1245,26 @@ const MaskOperate = () => {
     <Layout className="unified-layout">
       <Header className="unified-top-header">
         <div className="header-left-controls">
+          <Space>
+            <Tooltip title={`缩放: ${Math.round(transform.scale * 100)}%`}>
+              <Slider
+                min={ZOOM_MIN}
+                max={ZOOM_MAX}
+                step={ZOOM_STEP}
+                value={transform.scale}
+                onChange={handleZoomChange}
+                style={{ width: 150 }}
+                disabled={!hasActiveImage}
+              />
+            </Tooltip>
+            <Tooltip title="重置视图">
+              <Button
+                icon={<FontAwesomeIcon icon={faSync} />}
+                onClick={handleResetZoom}
+                disabled={!hasActiveImage}
+              />
+            </Tooltip>
+          </Space>
           <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage}: ${currentImageDetails.name}` : t.noImages}</Text>
         </div>
         <Space className="header-center-controls">
@@ -1155,7 +1290,8 @@ const MaskOperate = () => {
         <div className="resizer-horizontal" onMouseDown={() => setIsResizingLeft(true)} />
 
         <Layout className="main-content-wrapper">
-          <Content className="canvas-content"
+          <Content
+            className={`canvas-content ${draggingState?.type === 'pan' || isSpacePressed.current ? 'panning' : ''}`}
             onMouseEnter={() => setIsMouseOnCanvas(true)}
             onMouseLeave={() => setIsMouseOnCanvas(false)}
           >
@@ -1195,8 +1331,8 @@ const MaskOperate = () => {
             <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
               <div className="tab-pane-content">
                 {hasActiveImage && currentViewAnnotations.length > 0 ? (
-                  <div className="annotation-collapse-container">
-                    <Collapse accordion activeKey={selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost>
+                  <div className="annotation-list-wrapper">
+                    <Collapse accordion activeKey={selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
                       {currentViewAnnotations.map((item) => (
                         <Panel key={item.id} className="annotation-panel-item" header={
                           <Flex justify="space-between" align="center" style={{ width: '100%' }}>
@@ -1234,42 +1370,46 @@ const MaskOperate = () => {
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
-              <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <TabPane tab="Core Data (.json)" key="json-data">
-                  <div className="data-view-item" style={{ height: '100%' }}>
-                    <textarea
-                      className="data-content-textarea"
-                      readOnly
-                      value={JSON.stringify(displayApiJson, null, 2)}
-                      placeholder="Key points and segments data will be shown here."
-                    />
-                  </div>
-                </TabPane>
-                <TabPane tab="Netlist (.scs)" key="scs-data">
-                  <div className="data-view-item" style={{ height: '100%' }}>
-                    <textarea
-                      className="data-content-textarea"
-                      readOnly
-                      value={netlistScsContent || ""}
-                      placeholder="Netlist (SCS format) will be shown here after processing."
-                    />
-                  </div>
-                </TabPane>
-                <TabPane tab="Netlist (.cdl)" key="cdl-data">
-                  <div className="data-view-item" style={{ height: '100%' }}>
-                    <textarea
-                      className="data-content-textarea"
-                      readOnly
-                      value={netlistCdlContent || ""}
-                      placeholder="Netlist (CDL format) will be shown here after processing."
-                    />
-                  </div>
-                </TabPane>
-              </Tabs>
+              <div className="tab-pane-content">
+                <div className="data-view-container">
+                  <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', width: '100%' }}>
+                    <TabPane tab="Core Data (.json)" key="json-data">
+                      <div className="data-view-item" style={{ height: '100%' }}>
+                        <textarea
+                          className="data-content-textarea"
+                          readOnly
+                          value={JSON.stringify(displayApiJson, null, 2)}
+                          placeholder="Key points and segments data will be shown here."
+                        />
+                      </div>
+                    </TabPane>
+                    <TabPane tab="Netlist (.scs)" key="scs-data">
+                      <div className="data-view-item" style={{ height: '100%' }}>
+                        <textarea
+                          className="data-content-textarea"
+                          readOnly
+                          value={netlistScsContent || ""}
+                          placeholder="Netlist (SCS format) will be shown here after processing."
+                        />
+                      </div>
+                    </TabPane>
+                    <TabPane tab="Netlist (.cdl)" key="cdl-data">
+                      <div className="data-view-item" style={{ height: '100%' }}>
+                        <textarea
+                          className="data-content-textarea"
+                          readOnly
+                          value={netlistCdlContent || ""}
+                          placeholder="Netlist (CDL format) will be shown here after processing."
+                        />
+                      </div>
+                    </TabPane>
+                  </Tabs>
+                </div>
+              </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
-              <div className="tab-pane-content">
-                <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
+              <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
+                <Flex justify="space-between" align="center" style={{ marginBottom: 16, width: '100%' }}>
                   <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
                   <Space.Compact>
                     <Tooltip title={t.importClasses || "Import Classes"}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
@@ -1288,12 +1428,12 @@ const MaskOperate = () => {
                     </List.Item>
                   )} />
                 </div>
-                <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ marginTop: 16 }}>{t.addClass}</Button>
+                <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ marginTop: 16, width: '100%' }}>{t.addClass}</Button>
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCog} /></Tooltip>} key="3">
-              <div className="tab-pane-content">
-                <Form layout="vertical">
+              <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
+                <Form layout="vertical" style={{ width: '100%' }}>
                   <Title level={5}>{t.viewSettings || 'View & Annotation Settings'}</Title>
                   <Form.Item label={t.category}>
                     <Select
