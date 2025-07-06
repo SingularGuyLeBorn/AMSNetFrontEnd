@@ -181,6 +181,47 @@ export const stringifyJsonContent = (jsonObj: JsonData | null): string => {
     return JSON.stringify(jsonObj, null, 2);
 };
 
+const convertYoloToApi = (
+    yoloContent: string | null,
+    classMap: { [key: number]: ClassInfo },
+    imageWidth: number,
+    imageHeight: number
+): { cpnts: ApiComponent[] } => {
+    if (!yoloContent || !imageWidth || !imageHeight) {
+        return { cpnts: [] };
+    }
+
+    const cpnts = (yoloContent || '').split('\n').filter(Boolean).map(line => {
+        const parts = line.split(' ');
+        if (parts.length < 6) return null;
+        const name = parts[0];
+        const classIdx = parseInt(parts[1], 10);
+        const relX = parseFloat(parts[2]);
+        const relY = parseFloat(parts[3]);
+        const relW = parseFloat(parts[4]);
+        const relH = parseFloat(parts[5]);
+
+        if ([name, classIdx, relX, relY, relW, relH].some(val => val === null || val === undefined || (typeof val === 'number' && isNaN(val)))) {
+            return null;
+        }
+
+        const absW = relW * imageWidth;
+        const absH = relH * imageHeight;
+        const l = (relX * imageWidth) - absW / 2;
+        const t = (relY * imageHeight) - absH / 2;
+
+        return {
+            l,
+            t,
+            r: l + absW,
+            b: t + absH,
+            type: classMap[classIdx]?.label || `unknown_class_${classIdx}`,
+            name: name,
+        };
+    }).filter((item): item is ApiComponent => item !== null);
+
+    return { cpnts };
+};
 
 const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeight: number, classMap: { [key: number]: ClassInfo }): string => {
     if (!Array.isArray(cpnts) || imageWidth === 0 || imageHeight === 0) {
@@ -245,6 +286,7 @@ const FileOperate: React.FC = () => {
     const [currentYoloContent, setCurrentYoloContent] = useState<string | null>(null);
     const [currentJsonContent, setCurrentJsonContent] = useState<string | null>(null);
     const [currentPng, setCurrentPng] = useState<File | null>(null);
+    const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const magnifierCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -256,7 +298,6 @@ const FileOperate: React.FC = () => {
     const [selectedJsonName, setSelectedJsonName] = useState<string | null>(null);
     const [selectedJsonType, setSelectedJsonType] = useState<'buildingBlocks' | 'constants' | null>(null);
     const [activeTool, setActiveTool] = useState<ActiveTool>('select');
-    const [redrawTrigger, setRedrawTrigger] = useState(0);
     const [leftSiderWidth, setLeftSiderWidth] = useState<number>(250);
     const [rightSiderWidth, setRightSiderWidth] = useState<number>(350);
     const [isResizingLeft, setIsResizingLeft] = useState<boolean>(false);
@@ -309,15 +350,52 @@ const FileOperate: React.FC = () => {
         };
     }, []);
 
+    const displayApiJson = useMemo(() => {
+        if (!loadedImage) {
+            return {};
+        }
+        const { width, height } = loadedImage;
+        const generatedData = convertYoloToApi(currentYoloContent, classMap, width, height);
+
+        let sourceApiData: Partial<ApiResponse> = {};
+        try {
+            sourceApiData = JSON.parse(currentJsonContent || '{}');
+        } catch (e) {
+            // Silently ignore parsing errors for the display object,
+            // as the source data might be temporarily invalid during user edits.
+        }
+
+        const finalDisplayData: Partial<ApiResponse> = { ...sourceApiData, ...generatedData };
+
+        // Remove internal-only fields before displaying to the user.
+        delete (finalDisplayData as any).local;
+        delete (finalDisplayData as any).global;
+        delete finalDisplayData.netlist_scs;
+        delete finalDisplayData.netlist_cdl;
+
+        return finalDisplayData;
+    }, [currentYoloContent, currentJsonContent, classMap, loadedImage]);
+
+
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
     }, [initialState?.language]);
 
     useEffect(() => {
+        // Reset states to prevent displaying stale data from the previous file.
+        setCurrentPng(null);
+        setLoadedImage(null);
+        setCurrentYoloContent('');
+        setCurrentJsonContent('{}');
+        setNetlistScsContent(null);
+        setNetlistCdlContent(null);
+        setSelectedBoxName(null);
+
         if (file_currentFilePath && fileTree) {
             const node = findFileNodeByKey(file_currentFilePath, fileTree);
             if (node) {
                 setCurrentPng(node.file);
+
                 const yoloContent = file_yoloFileContents[file_currentFilePath] || '';
                 const jsonText = file_jsonFileContents[file_currentFilePath] || '{}';
 
@@ -333,24 +411,21 @@ const FileOperate: React.FC = () => {
                         setCurrentJsonContent(JSON.stringify(displayData, null, 2));
                     } else {
                         setCurrentJsonContent(jsonText);
-                        setNetlistScsContent(null);
-                        setNetlistCdlContent(null);
                     }
                 } catch (e) {
                     setCurrentJsonContent(jsonText);
-                    setNetlistScsContent(null);
-                    setNetlistCdlContent(null);
                 }
+
+                const url = URL.createObjectURL(node.file);
+                const img = new Image();
+                img.onload = () => {
+                    setLoadedImage(img);
+                };
+                img.src = url;
+                return () => URL.revokeObjectURL(url);
             }
             setTransform({ scale: 1, translateX: 0, translateY: 0 });
-        } else {
-            setCurrentPng(null);
-            setCurrentYoloContent('');
-            setCurrentJsonContent('{}');
-            setNetlistScsContent(null);
-            setNetlistCdlContent(null);
         }
-        setSelectedBoxName(null);
     }, [file_currentFilePath, fileTree, file_yoloFileContents, file_jsonFileContents]);
 
 
@@ -385,74 +460,69 @@ const FileOperate: React.FC = () => {
         ctx.save();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (currentPng) {
-            const img = new Image();
-            img.onload = () => {
-                canvas.width = img.width; canvas.height = img.height;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (loadedImage) {
+            canvas.width = loadedImage.width; canvas.height = loadedImage.height;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                ctx.save();
-                ctx.translate(transform.translateX, transform.translateY);
-                ctx.scale(transform.scale, transform.scale);
+            ctx.save();
+            ctx.translate(transform.translateX, transform.translateY);
+            ctx.scale(transform.scale, transform.scale);
 
-                ctx.drawImage(img, 0, 0);
-                const yoloDataForStain: { name: string, data: number[] }[] = [];
-                parsedYoloData.forEach(item => {
-                    yoloDataForStain.push({ name: item.name, data: [item.classIdx, item.x, item.y, item.w, item.h] });
-                    const { name, classIdx, x: relX, y: relY, w: relW, h: relH } = item;
-                    const absW = relW * canvas.width;
-                    const absH = relH * canvas.height;
-                    const absLeft = (relX * canvas.width) - absW / 2;
-                    const absTop = (relY * canvas.height) - absH / 2;
-                    const isSelected = selectedBoxName === name;
-                    const color = classMap[classIdx]?.color || '#808080';
-                    ctx.beginPath();
-                    ctx.strokeStyle = isSelected ? '#0958d9' : color;
-                    ctx.lineWidth = (isSelected ? 3 : 2) / transform.scale;
-                    ctx.rect(absLeft, absTop, absW, absH);
-                    ctx.stroke();
-                    if (isSelected) {
-                        const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
-                        ctx.fillStyle = '#0958d9';
-                        Object.values(handles).forEach(handle => ctx.fillRect(handle.x, handle.y, handle.size, handle.size));
+            ctx.drawImage(loadedImage, 0, 0);
+            const yoloDataForStain: { name: string, data: number[] }[] = [];
+            parsedYoloData.forEach(item => {
+                yoloDataForStain.push({ name: item.name, data: [item.classIdx, item.x, item.y, item.w, item.h] });
+                const { name, classIdx, x: relX, y: relY, w: relW, h: relH } = item;
+                const absW = relW * canvas.width;
+                const absH = relH * canvas.height;
+                const absLeft = (relX * canvas.width) - absW / 2;
+                const absTop = (relY * canvas.height) - absH / 2;
+                const isSelected = selectedBoxName === name;
+                const color = classMap[classIdx]?.color || '#808080';
+                ctx.beginPath();
+                ctx.strokeStyle = isSelected ? '#0958d9' : color;
+                ctx.lineWidth = (isSelected ? 3 : 2) / transform.scale;
+                ctx.rect(absLeft, absTop, absW, absH);
+                ctx.stroke();
+                if (isSelected) {
+                    const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
+                    ctx.fillStyle = '#0958d9';
+                    Object.values(handles).forEach(handle => ctx.fillRect(handle.x, handle.y, handle.size, handle.size));
+                }
+            });
+
+            const parsedStainJson = parseJsonContent(currentJsonContent);
+            if (parsedStainJson.local) {
+                Object.values(parsedStainJson.local).forEach(nameMap => {
+                    if (nameMap && typeof nameMap === 'object') {
+                        Object.entries(nameMap).forEach(([name, boxNamesArray]) => {
+                            const color = jsonNameColorMap[name]; if (!color || !Array.isArray(boxNamesArray)) return;
+                            boxNamesArray.forEach(boxName => {
+                                const yoloEntry = yoloDataForStain.find(y => y.name === boxName);
+                                if (!yoloEntry) return;
+                                const [, relX, relY, relW, relH] = yoloEntry.data;
+                                const absW = relW * canvas.width; const absH = relH * canvas.height;
+                                const absX = (relX * canvas.width) - absW / 2; const absY = (relY * canvas.height) - absH / 2;
+                                ctx.fillStyle = color; ctx.globalAlpha = 0.35;
+                                ctx.fillRect(absX, absY, absW, absH); ctx.globalAlpha = 1.0;
+                            });
+                        });
                     }
                 });
+            }
 
-                const parsedStainJson = parseJsonContent(currentJsonContent);
-                if (parsedStainJson.local) {
-                    Object.values(parsedStainJson.local).forEach(nameMap => {
-                        if (nameMap && typeof nameMap === 'object') {
-                            Object.entries(nameMap).forEach(([name, boxNamesArray]) => {
-                                const color = jsonNameColorMap[name]; if (!color || !Array.isArray(boxNamesArray)) return;
-                                boxNamesArray.forEach(boxName => {
-                                    const yoloEntry = yoloDataForStain.find(y => y.name === boxName);
-                                    if (!yoloEntry) return;
-                                    const [, relX, relY, relW, relH] = yoloEntry.data;
-                                    const absW = relW * canvas.width; const absH = relH * canvas.height;
-                                    const absX = (relX * canvas.width) - absW / 2; const absY = (relY * canvas.height) - absH / 2;
-                                    ctx.fillStyle = color; ctx.globalAlpha = 0.35;
-                                    ctx.fillRect(absX, absY, absW, absH); ctx.globalAlpha = 1.0;
-                                });
-                            });
-                        }
-                    });
-                }
-
-                if (regionSelectBox) {
-                    ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
-                    ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
-                    ctx.lineWidth = 1 / transform.scale;
-                    const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
-                    const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
-                    const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
-                    const h = Math.abs(regionSelectBox.start.y - regionSelectBox.end.y);
-                    ctx.fillRect(x, y, w, h);
-                    ctx.strokeRect(x, y, w, h);
-                }
-                ctx.restore();
-            };
-            img.src = URL.createObjectURL(currentPng);
-            return () => URL.revokeObjectURL(img.src);
+            if (regionSelectBox) {
+                ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
+                ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
+                ctx.lineWidth = 1 / transform.scale;
+                const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
+                const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
+                const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
+                const h = Math.abs(regionSelectBox.start.y - regionSelectBox.end.y);
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeRect(x, y, w, h);
+            }
+            ctx.restore();
         } else {
             const parent = canvas.parentElement?.parentElement;
             if (!parent) return;
@@ -465,7 +535,7 @@ const FileOperate: React.FC = () => {
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
         ctx.restore();
-    }, [currentPng, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform]);
+    }, [loadedImage, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform]);
 
     const getVirtualCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
@@ -527,15 +597,15 @@ const FileOperate: React.FC = () => {
 
     useEffect(() => {
         drawMagnifier();
-    }, [canvasMousePos, redrawTrigger]);
+    }, [canvasMousePos, redrawCanvas, loadedImage]);
 
-    useEffect(() => { redrawCanvas(); }, [redrawTrigger, redrawCanvas, currentYoloContent, transform]);
+    useEffect(() => { redrawCanvas(); }, [redrawCanvas, currentYoloContent, transform, loadedImage]);
 
     useEffect(() => {
-        const handleResize = () => setRedrawTrigger(p => p + 1);
+        const handleResize = () => redrawCanvas();
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
-    }, []);
+    }, [redrawCanvas]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -672,7 +742,6 @@ const FileOperate: React.FC = () => {
             setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
         }
         message.success(`标注 '${boxNameToDelete}' 已删除`);
-        setRedrawTrigger(p => p + 1);
     }, [currentYoloContent, currentJsonContent, file_currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName, setFile_modifiedFiles]);
 
 
@@ -713,7 +782,6 @@ const FileOperate: React.FC = () => {
                     if (file_currentFilePath) {
                         setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
                     }
-                    setRedrawTrigger(p => p + 1);
                     break;
                 }
             }
@@ -882,7 +950,6 @@ const FileOperate: React.FC = () => {
         } else if (draggingState) {
             if (draggingState.type === 'region-select') {
                 setRegionSelectBox({ start: draggingState.startMousePos, end: currentPos });
-                setRedrawTrigger(p => p + 1);
             } else if (activeTool === 'select') {
                 if (draggingState.type === 'move' && draggingState.startYoloData) {
                     const dx = (currentPos.x - draggingState.startMousePos.x) / (canvas.width);
@@ -992,7 +1059,7 @@ const FileOperate: React.FC = () => {
                     setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
                 }
             }
-            setCanvasImageData(null); setRedrawTrigger(prev => prev + 1);
+            setCanvasImageData(null);
         } else if (draggingState && draggingState.type === 'region-select') {
             const start = draggingState.startMousePos;
             const end = upPos;
@@ -1088,7 +1155,6 @@ const FileOperate: React.FC = () => {
         }
         setDraggingState(null);
         setRegionSelectBox(null);
-        setRedrawTrigger(p => p + 1);
     };
 
     const handleZoomChange = (newScale: number) => {
@@ -1164,7 +1230,7 @@ const FileOperate: React.FC = () => {
         if (file_currentFilePath) {
             setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
         }
-        setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
+        message.success(t.operationSuccessful);
     };
     const handleRedo = () => {
         if (!file_currentFilePath) return;
@@ -1181,7 +1247,7 @@ const FileOperate: React.FC = () => {
         if (file_currentFilePath) {
             setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
         }
-        setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
+        message.success(t.operationSuccessful);
     };
 
     const handleSaveCurrent = () => {
@@ -1340,7 +1406,6 @@ const FileOperate: React.FC = () => {
             if (file_currentFilePath) {
                 setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
             }
-            setRedrawTrigger(p => p + 1);
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
 
         } catch (error: any) {
@@ -1353,7 +1418,85 @@ const FileOperate: React.FC = () => {
 
     const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomColor() } })); };
     const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setClassMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
-    const handleDeleteClass = (indexToDelete: number) => { const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${classMap[indexToDelete]?.label}`) : `确认删除类别 [${indexToDelete}] ${classMap[indexToDelete]?.label}?`; Modal.confirm({ title: title, content: t.deleteClassConfirmContent, okText: t.confirmDelete, cancelText: t.cancel, okType: 'danger', onOk: () => { const newClassMap = { ...classMap }; delete newClassMap[indexToDelete]; setClassMap(newClassMap); if (currentClassIndex === indexToDelete) { const firstKey = Object.keys(newClassMap)[0]; setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0); } message.success(t.classDeleted.replace('%s', classMap[indexToDelete]?.label || '')); } }); };
+
+    const handleDeleteClass = (indexToDelete: number) => {
+        const className = classMap[indexToDelete]?.label;
+        if (!className) return;
+
+        const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${className}`) : `确认删除类别 [${indexToDelete}] ${className}?`;
+        Modal.confirm({
+            title: title,
+            content: t.deleteClassConfirmContent,
+            okText: t.confirmDelete,
+            cancelText: t.cancel,
+            okType: 'danger',
+            onOk: () => {
+                const newYoloContents: Record<string, string> = { ...file_yoloFileContents };
+                const newJsonContents: Record<string, string> = { ...file_jsonFileContents };
+                const modifiedFilePaths = new Set<string>();
+                const now = Date.now();
+
+                for (const filePath in newYoloContents) {
+                    const yoloContent = newYoloContents[filePath];
+                    if (!yoloContent) continue;
+
+                    const lines = yoloContent.split('\n');
+                    const boxNamesToDeleteInFile = new Set(
+                        lines
+                            .filter(line => line.split(' ')[1] === String(indexToDelete))
+                            .map(line => line.split(' ')[0])
+                    );
+
+                    if (boxNamesToDeleteInFile.size === 0) {
+                        continue;
+                    }
+
+                    modifiedFilePaths.add(filePath);
+                    const updatedYoloLines = lines.filter(line => line.split(' ')[1] !== String(indexToDelete));
+                    newYoloContents[filePath] = updatedYoloLines.join('\n');
+
+                    const jsonContent = newJsonContents[filePath];
+                    if (jsonContent) {
+                        const parsedJson = parseJsonContent(jsonContent);
+                        Object.keys(parsedJson.local).forEach(typeKey => {
+                            const type = typeKey as keyof typeof parsedJson.local;
+                            Object.keys(parsedJson.local[type]).forEach(nameKey => {
+                                parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
+                                    (bName: string) => !boxNamesToDeleteInFile.has(bName)
+                                );
+                            });
+                        });
+                        newJsonContents[filePath] = stringifyJsonContent(parsedJson);
+                    }
+                }
+
+                setFile_yoloFileContents(newYoloContents);
+                setFile_jsonFileContents(newJsonContents);
+
+                setFile_modifiedFiles(prev => {
+                    const updated = { ...prev };
+                    modifiedFilePaths.forEach(path => (updated[path] = now));
+                    return updated;
+                });
+
+                if (file_currentFilePath && modifiedFilePaths.has(file_currentFilePath)) {
+                    setCurrentYoloContent(newYoloContents[file_currentFilePath]);
+                    setCurrentJsonContent(newJsonContents[file_currentFilePath]);
+                }
+
+                const newClassMap = { ...classMap };
+                delete newClassMap[indexToDelete];
+                setClassMap(newClassMap);
+
+                if (currentClassIndex === indexToDelete) {
+                    const firstKey = Object.keys(newClassMap)[0];
+                    setCurrentClassIndex(firstKey ? parseInt(firstKey, 10) : 0);
+                }
+
+                message.success(t.classDeleted.replace('%s', className));
+            }
+        });
+    };
 
     const handleExportClasses = () => {
         const exportObj: { [key: string]: string } = {};
@@ -1594,7 +1737,7 @@ const FileOperate: React.FC = () => {
                                         </TabPane>
                                         <TabPane tab="Annotation Data (.json)" key="json-data">
                                             <div className="data-view-item" style={{ height: '100%' }}>
-                                                <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
+                                                <textarea value={JSON.stringify(displayApiJson, null, 2)} className="data-content-textarea" readOnly />
                                             </div>
                                         </TabPane>
                                         <TabPane tab="Netlist (.scs)" key="scs-data">
@@ -1643,3 +1786,4 @@ const FileOperate: React.FC = () => {
 };
 
 export default FileOperate;
+// File: src/pages/FileOperate/index.tsx

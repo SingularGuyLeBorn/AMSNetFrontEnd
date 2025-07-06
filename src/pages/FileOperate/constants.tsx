@@ -15,6 +15,7 @@ export interface ApiComponent {
   r: number; // right
   t: number; // top
   type: string;
+  name: string; // The unique identifier for the component instance, derived from YOLO data.
   // Allows for other potential fields from the API
   [key: string]: any;
 }

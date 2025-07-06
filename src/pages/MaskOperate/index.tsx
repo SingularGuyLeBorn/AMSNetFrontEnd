@@ -1,3 +1,4 @@
+
 import FileExplorer from "@/components/FileExplorer/index";
 import type { FileNode, FileTreeNode } from "@/models/fileTree.tsx";
 import {
@@ -68,22 +69,11 @@ const findFileNodeByKey = (key: string, node: FileTreeNode): FileNode | null => 
 };
 const generateUniqueId = (): string => `anno_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-const rgbaToHex = (rgba: string): string => {
-  if (!rgba) return '#000000';
-  if (rgba.startsWith('#')) return rgba;
-  const parts = rgba.match(/(\d+(\.\d+)?)/g);
-  if (!parts || parts.length < 3) return '#000000';
-  const r = parseInt(parts[0], 10);
-  const g = parseInt(parts[1], 10);
-  const b = parseInt(parts[2], 10);
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
-};
-
 export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: string]: string }, thickness: number): ViewAnnotation[] => {
   const viewAnnotations: ViewAnnotation[] = [];
   if (!apiData) return viewAnnotations;
 
-  const { key_points, segments } = apiData;
+  const { key_points, segments, cpnts } = apiData;
 
   // Convert segments to diagonal lines
   if (key_points && segments) {
@@ -98,10 +88,30 @@ export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key
           id: generateUniqueId(),
           points: [{ x: srcPoint.x, y: srcPoint.y }, { x: dstPoint.x, y: dstPoint.y }],
           category, color, thickness,
-        });
+        } as ViewDiagonalAnnotation);
       }
     });
   }
+
+  // Convert components to rectangle boxes
+  if (cpnts) {
+    cpnts.forEach((component) => {
+      if (component.l === undefined || component.r === undefined || component.t === undefined || component.b === undefined) return;
+      const category = component.type || 'default';
+      const color = allCategoryColors[category] || allCategoryColors['default'] || '#CCCCCC';
+      viewAnnotations.push({
+        id: generateUniqueId(),
+        x: component.l,
+        y: component.t,
+        width: component.r - component.l,
+        height: component.b - component.t,
+        category,
+        color,
+        sourceLineWidth: 2, // A sensible default
+      } as ViewBoxAnnotation);
+    });
+  }
+
   return viewAnnotations;
 };
 
@@ -165,6 +175,7 @@ const MaskOperate = () => {
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang];
   const [currentImageDetails, setCurrentImageDetails] = useState<ImageDetails | null>(null);
+  const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
 
   const [localAnnotations, setLocalAnnotations] = useState<ViewAnnotation[]>([]);
   const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
@@ -181,7 +192,7 @@ const MaskOperate = () => {
   const [isResizingRight, setIsResizingRight] = useState<boolean>(false);
 
   const [draggingState, setDraggingState] = useState<DraggingState>(null);
-  const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox>(null);
+  const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox | null>(null);
   const [regionDeleteMode, setRegionDeleteMode] = useState<RegionDeleteMode>('contain');
   const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
   const [isAiAnnotating, setIsAiAnnotating] = useState(false);
@@ -289,9 +300,16 @@ const MaskOperate = () => {
       ctx.strokeStyle = "#4096ff"; ctx.lineWidth = 1.5 / transform.scale;
       ctx.strokeRect(box.x, box.y, box.width, box.height);
     } else {
-      const color = isSelected ? '#4096ff' : box.color;
+      const hexColor = isSelected ? '#4096ff' : box.color;
+      const originalRgbaDef = defaultCategoryColors[box.category] || defaultCategoryColors['default'];
+      const alpha = originalRgbaDef.match(/, ([\d.]+)\)/)?.[1] || '0.75';
+      const r = parseInt(hexColor.slice(1, 3), 16);
+      const g = parseInt(hexColor.slice(3, 5), 16);
+      const b = parseInt(hexColor.slice(5, 7), 16);
+      const fillRgba = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+
       ctx.globalAlpha = isSelected ? 1.0 : 0.75;
-      ctx.fillStyle = color;
+      ctx.fillStyle = fillRgba;
       ctx.strokeStyle = isSelected ? "#0958d9" : "rgba(0,0,0,0.8)";
       ctx.lineWidth = (isSelected ? 3 : 1.5) / transform.scale;
       ctx.fillRect(box.x, box.y, box.width, box.height);
@@ -318,11 +336,18 @@ const MaskOperate = () => {
     ctx.translate(centerX, centerY);
     ctx.rotate(angleRad);
 
-    const color = isSelected ? '#4096ff' : diag.color;
+    const hexColor = isSelected ? '#4096ff' : diag.color;
+    const originalRgbaDef = defaultCategoryColors[diag.category] || defaultCategoryColors['default'];
+    const alpha = originalRgbaDef.match(/, ([\d.]+)\)/)?.[1] || '0.8';
+    const r = parseInt(hexColor.slice(1, 3), 16);
+    const g = parseInt(hexColor.slice(3, 5), 16);
+    const b = parseInt(hexColor.slice(5, 7), 16);
+    const fillRgba = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+
     const lineWidth = (isSelected ? 3 : 1) / transform.scale;
 
     ctx.globalAlpha = isSelected ? 1.0 : 0.8;
-    ctx.fillStyle = color;
+    ctx.fillStyle = fillRgba;
     ctx.strokeStyle = isSelected ? "#0958d9" : "rgba(0,0,0,0.6)";
 
     if (isPreview) {
@@ -371,63 +396,57 @@ const MaskOperate = () => {
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (currentImageDetails) {
-      const img = new Image();
-      img.crossOrigin = "Anonymous";
-      img.src = currentImageDetails.url;
-      img.onload = () => {
-        if (canvas.width !== currentImageDetails.width || canvas.height !== currentImageDetails.height) {
-          canvas.width = currentImageDetails.width;
-          canvas.height = currentImageDetails.height;
+    if (loadedImage) {
+      if (canvas.width !== loadedImage.width || canvas.height !== loadedImage.height) {
+        canvas.width = loadedImage.width;
+        canvas.height = loadedImage.height;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.translate(transform.translateX, transform.translateY);
+      ctx.scale(transform.scale, transform.scale);
+
+      ctx.drawImage(loadedImage, 0, 0, canvas.width, canvas.height);
+
+      const currentVirtualMousePos = canvasMousePos;
+
+      currentViewAnnotations.forEach((anno: ViewAnnotation) => {
+        if (anno.id !== selectedAnnotationId) {
+          if ('points' in anno) renderDiagonal(anno, ctx, false, false);
+          else renderRectangle(anno, ctx, false, false);
         }
+      });
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.save();
-        ctx.translate(transform.translateX, transform.translateY);
-        ctx.scale(transform.scale, transform.scale);
+      const selectedAnno = currentViewAnnotations.find(a => a.id === selectedAnnotationId);
+      if (selectedAnno) {
+        if ('points' in selectedAnno) renderDiagonal(selectedAnno, ctx, false, true);
+        else renderRectangle(selectedAnno, ctx, false, true);
+      }
 
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        const currentVirtualMousePos = canvasMousePos;
-
-        currentViewAnnotations.forEach((anno: ViewAnnotation) => {
-          if (anno.id !== selectedAnnotationId) {
-            if ('points' in anno) renderDiagonal(anno, ctx, false, false);
-            else renderRectangle(anno, ctx, false, false);
-          }
-        });
-
-        const selectedAnno = currentViewAnnotations.find(a => a.id === selectedAnnotationId);
-        if (selectedAnno) {
-          if ('points' in selectedAnno) renderDiagonal(selectedAnno, ctx, false, true);
-          else renderRectangle(selectedAnno, ctx, false, true);
+      if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
+        const { startMousePos } = draggingState;
+        if (activeTool === 'rectangle') {
+          const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, currentVirtualMousePos.x), y: Math.min(startMousePos.y, currentVirtualMousePos.y), width: Math.abs(startMousePos.x - currentVirtualMousePos.x), height: Math.abs(startMousePos.y - currentVirtualMousePos.y), category: currentCategory, color: 'preview', sourceLineWidth: currentLineWidth };
+          renderRectangle(previewRect, ctx, true);
+        } else {
+          const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, currentVirtualMousePos], category: currentCategory, color: 'preview', thickness: currentLineWidth };
+          renderDiagonal(previewDiag, ctx, true);
         }
+      }
 
-        if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
-          const { startMousePos } = draggingState;
-          if (activeTool === 'rectangle') {
-            const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, currentVirtualMousePos.x), y: Math.min(startMousePos.y, currentVirtualMousePos.y), width: Math.abs(startMousePos.x - currentVirtualMousePos.x), height: Math.abs(startMousePos.y - currentVirtualMousePos.y), category: currentCategory, color: 'preview', sourceLineWidth: currentLineWidth };
-            renderRectangle(previewRect, ctx, true);
-          } else {
-            const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, currentVirtualMousePos], category: currentCategory, color: 'preview', thickness: currentLineWidth };
-            renderDiagonal(previewDiag, ctx, true);
-          }
-        }
-
-        if (regionSelectBox) {
-          ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
-          ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
-          ctx.lineWidth = 1 / transform.scale;
-          const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
-          const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
-          const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
-          const h = Math.abs(regionSelectBox.start.y - regionSelectBox.end.y);
-          ctx.fillRect(x, y, w, h);
-          ctx.strokeRect(x, y, w, h);
-        }
-        ctx.restore(); // Restore from pan/zoom transform
-      };
-      if (img.complete) img.onload(new Event('load'));
+      if (regionSelectBox) {
+        ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
+        ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
+        ctx.lineWidth = 1 / transform.scale;
+        const x = Math.min(regionSelectBox.start.x, regionSelectBox.end.x);
+        const y = Math.min(regionSelectBox.start.y, regionSelectBox.end.y);
+        const w = Math.abs(regionSelectBox.start.x - regionSelectBox.end.x);
+        const h = Math.abs(regionSelectBox.start.y - regionSelectBox.end.y);
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
+      }
+      ctx.restore(); // Restore from pan/zoom transform
     } else {
       const parent = canvas.parentElement?.parentElement; // canvas-wrapper -> canvas-content
       if (!parent) return;
@@ -440,7 +459,7 @@ const MaskOperate = () => {
       ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
     ctx.restore();
-  }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox, transform]);
+  }, [loadedImage, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox, transform]);
 
   const getVirtualCoords = useCallback((e: React.MouseEvent | { clientX: number, clientY: number }): Point => {
     const canvas = canvasRef.current;
@@ -506,16 +525,26 @@ const MaskOperate = () => {
   useEffect(() => { setCurrentLang(initialState?.language || 'zh'); }, [initialState?.language]);
 
   useEffect(() => {
+    // Reset state when file path changes to avoid showing stale data.
+    setCurrentImageDetails(null);
+    setLoadedImage(null);
+
     if (!mask_currentFilePath || !fileTree) {
-      setCurrentImageDetails(null);
       return;
     }
+
     const node = findFileNodeByKey(mask_currentFilePath, fileTree);
     if (node) {
       const url = URL.createObjectURL(node.file);
       const img = new Image();
-      img.onload = () => { setCurrentImageDetails({ name: node.key, url, width: img.naturalWidth, height: img.naturalHeight, originalFile: node.file }); };
+      img.crossOrigin = "Anonymous";
+      img.onload = () => {
+        setCurrentImageDetails({ name: node.key, url, width: img.naturalWidth, height: img.naturalHeight, originalFile: node.file });
+        setLoadedImage(img); // Store the fully loaded image object in state.
+      };
       img.src = url;
+
+      // Crucial for memory management: revoke the object URL when the component unmounts or the file changes.
       return () => { URL.revokeObjectURL(url); };
     }
   }, [mask_currentFilePath, fileTree]);
@@ -526,7 +555,7 @@ const MaskOperate = () => {
     else if (categories.length === 0 && currentCategory !== "") { setCurrentCategory(""); }
   }, [categories, currentCategory]);
 
-  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations, transform]);
+  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations, transform, loadedImage]);
 
   useEffect(() => {
     const handleResize = () => redrawCanvas();
@@ -1057,7 +1086,9 @@ const MaskOperate = () => {
         newlyDiscoveredCats.forEach((cat) => {
           if (!updatedCategoryColors[cat]) {
             const colorPool = Object.values(defaultCategoryColors);
-            updatedCategoryColors[cat] = rgbaToHex(colorPool[newCategories.indexOf(cat) % colorPool.length]);
+            const tempRgba = colorPool[newCategories.indexOf(cat) % colorPool.length];
+            const r = tempRgba.match(/\d+/g);
+            if (r) updatedCategoryColors[cat] = `#${((1 << 24) + (+r[0] << 16) + (+r[1] << 8) + +r[2]).toString(16).slice(1).padStart(6, '0')}`;
           }
         });
         setCategories(newCategories);
@@ -1082,8 +1113,11 @@ const MaskOperate = () => {
   const handleAddClass = () => {
     const newClassName = `new_class_${categories.filter(c => c.startsWith('new_class')).length}`; if (categories.includes(newClassName)) return;
     const newCategories = [...categories, newClassName];
-    const newColor = Object.values(defaultCategoryColors)[newCategories.length % Object.keys(defaultCategoryColors).length];
-    const newCategoryColors = { ...categoryColors, [newClassName]: rgbaToHex(newColor) };
+    const newColorRgba = Object.values(defaultCategoryColors)[newCategories.length % Object.keys(defaultCategoryColors).length];
+    const r = newColorRgba.match(/\d+/g);
+    let newColorHex = '#cccccc';
+    if (r) newColorHex = `#${((1 << 24) + (+r[0] << 16) + (+r[1] << 8) + +r[2]).toString(16).slice(1).padStart(6, '0')}`;
+    const newCategoryColors = { ...categoryColors, [newClassName]: newColorHex };
     setCategories(newCategories); setCategoryColors(newCategoryColors); setCurrentCategory(newClassName);
   };
   const handleUpdateClass = (oldName: string, newName: string) => {
@@ -1176,15 +1210,21 @@ const MaskOperate = () => {
   };
 
   const handleImportClasses = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const text = await file.text();
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     try {
+      const text = await file.text();
       const jsonStringMatch = text.match(/=\s*({[\s\S]*})/);
-      if (!jsonStringMatch || !jsonStringMatch[1]) throw new Error("Invalid format: Could not find object literal '{...}'.");
+      if (!jsonStringMatch || !jsonStringMatch[1]) {
+        throw new Error("Invalid format: Could not find object literal '{...}'.");
+      }
 
       const jsonString = jsonStringMatch[1];
       const parsedObject = new Function(`return ${jsonString}`)();
-      if (typeof parsedObject !== 'object' || parsedObject === null) throw new Error("Parsed content is not a valid object.");
+      if (typeof parsedObject !== 'object' || parsedObject === null) {
+        throw new Error("Parsed content is not a valid object.");
+      }
 
       const importedCats: { index: number; label: string }[] = [];
       for (const key in parsedObject) {
@@ -1196,14 +1236,22 @@ const MaskOperate = () => {
           }
         }
       }
-      if (importedCats.length === 0) throw new Error("No valid class entries found in the file.");
+      if (importedCats.length === 0) {
+        throw new Error("No valid class entries found in the file.");
+      }
 
       importedCats.sort((a, b) => a.index - b.index);
       const newCatNames = importedCats.map(c => c.label);
       const newCatColors: { [key: string]: string } = {};
-      const defaultColorValues = Object.values(defaultCategoryColors).map(rgbaToHex);
+      const defaultColorValues = Object.values(defaultCategoryColors);
       newCatNames.forEach((cat, i) => {
-        newCatColors[cat] = categoryColors[cat] || defaultColorValues[i % defaultColorValues.length];
+        const rgba = categoryColors[cat] || defaultColorValues[i % defaultColorValues.length];
+        const r = rgba.match(/\d+/g);
+        let hex = '#cccccc';
+        if (r) {
+          hex = `#${((1 << 24) + (parseInt(r[0], 10) << 16) + (parseInt(r[1], 10) << 8) + parseInt(r[2], 10)).toString(16).slice(1).padStart(6, '0')}`;
+        }
+        newCatColors[cat] = hex;
       });
 
       setCategories(newCatNames);

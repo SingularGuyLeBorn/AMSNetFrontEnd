@@ -6,8 +6,12 @@ import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/
 import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
 import { useState } from 'react';
 
-// Bedrock Change: Add a robust RGBA to HEX conversion helper function.
-// This is critical for ensuring the color picker input works correctly, as it requires HEX values.
+/**
+ * @description A robust utility to convert an RGBA color string to a 6-digit HEX string.
+ *              This is critical for UI components like `<input type="color">` which only accept HEX format.
+ * @param rgba - The input color string, e.g., 'rgba(255, 159, 64, 0.4)'.
+ * @returns The HEX color string, e.g., '#ff9f40'. Returns black for invalid input.
+ */
 const rgbaToHex = (rgba: string): string => {
   // Return early if the value is already a valid HEX color or is invalid.
   if (!rgba || typeof rgba !== 'string') return '#000000';
@@ -26,8 +30,8 @@ const rgbaToHex = (rgba: string): string => {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
 };
 
-// Bedrock Change: Pre-process the default RGBA colors into HEX format upon initialization.
-// This ensures that the state starts with the correct data type, preventing downstream bugs.
+// Pre-process the default RGBA colors into HEX format upon module initialization.
+// This ensures that the state starts with the correct data type for UI components, preventing downstream bugs.
 const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduce(
   (acc, [key, value]) => {
     acc[key] = rgbaToHex(value);
