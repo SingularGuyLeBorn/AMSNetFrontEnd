@@ -1,6 +1,9 @@
 // START OF FILE src/pages/MaskOperate/constants.tsx
 // MaskOperate/constants.tsx
 
+// Bedrock V4.3 Change: Import and reuse the unified ClassInfo types
+import type { ClassInfo, FileClassInfo } from '@/pages/FileOperate/constants';
+
 export const RESIZE_HANDLE_SIZE = 8;
 
 // ===================================================================
@@ -8,10 +11,12 @@ export const RESIZE_HANDLE_SIZE = 8;
 // ===================================================================
 export type Point = { x: number; y: number };
 
+// Bedrock V4.3 Change: Unified class info definition (re-export for clarity)
+export type { ClassInfo, FileClassInfo };
+
 export interface BaseAnnotation {
   id: string;
-  category: string;
-  color: string;
+  classIndex: number;
 }
 
 export interface ViewBoxAnnotation extends BaseAnnotation {
@@ -78,6 +83,9 @@ export type ImageAnnotationData = {
 };
 
 // --- 撤销/重做操作定义 ---
+// Note: Class map changes are considered significant, destructive operations
+// and are not included in the standard annotation undo/redo stack.
+// They are guarded by modals instead.
 export type UndoOperation = {
   filePath: string;
   previousViewAnnotations: ViewAnnotation[];
@@ -85,7 +93,7 @@ export type UndoOperation = {
 };
 
 
-// 定义默认的类别颜色映射 (RGBA for default alpha values)
+// 定义默认的类别颜色映射
 export const defaultCategoryColors: { [key: string]: string } = {
   'capacitor': 'rgba(255, 159, 64, 0.4)',
   'pmos': 'rgba(255, 99, 132, 0.4)',
@@ -125,11 +133,11 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     category: '当前类别',
     lineWidth: '线宽/厚度',
     toggleCategoryInBox: '框内显示类别名',
-    clearAnnotationsButton: '清空当前标注',
+    clearAnnotationsButton: '清空当前JSON标注',
     deleteAnnotationTooltip: "删除此标注",
     thicknessLabel: "厚度",
     noAnnotations: "当前图片无标注",
-    noCategoriesFound: "未找到类别，请先在“类别管理”中添加",
+    noCategoriesFound: "未找到类别，请先上传或添加",
     errorParseJsonFile: "解析JSON文件失败:",
     filesProcessed: "个文件已处理。",
     fileProcessingComplete: "文件处理完成。",
@@ -144,15 +152,17 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     importClasses: "导入类别",
     exportClasses: "导出类别",
     className: "类别名称",
-    delete: "删除",
     hidePanel: '隐藏面板',
     showPanel: '显示面板',
-    viewSettings: '视图与工具设置',
-    deleteClassConfirmTitle: '确认删除类别 %s?',
-    deleteClassConfirmContent: '此操作不可恢复，将删除所有图片中属于该类别的标注。',
+    viewSettings: '视图设置',
+    deleteClassConfirmTitle: '确认删除类别 “%s” ?',
+    deleteClassConfirmContent: '此操作不可恢复，将删除所有图片中属于该类别的标注，并重新排列后续类别的索引。',
+    importClassConfirmTitle: '确认导入类别?',
+    importClassConfirmContent: '此操作将覆盖您当前的类别列表，请确认您已保存任何需要保留的设置。',
     confirmDelete: '确认删除',
+    confirmImport: '确认导入',
     cancel: '取消',
-    classDeleted: '类别 %s 已删除',
+    classDeleted: '类别 “%s” 已删除',
     rawData: '原始数据',
     magnifier: '放大镜',
     regionDelete: '区域删除',
@@ -176,11 +186,11 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     category: 'Current Category',
     lineWidth: 'Line Width/Thickness',
     toggleCategoryInBox: 'Show Category in Box',
-    clearAnnotationsButton: 'Clear Current Annotations',
+    clearAnnotationsButton: 'Clear Current JSON Annotations',
     deleteAnnotationTooltip: "Delete this annotation",
     thicknessLabel: "Thickness",
     noAnnotations: "No annotations for this image",
-    noCategoriesFound: "No categories found, please add one in 'Class Management'",
+    noCategoriesFound: "No categories found, please upload or add one",
     errorParseJsonFile: "Failed to parse JSON file:",
     filesProcessed: "files processed.",
     fileProcessingComplete: "File processing complete.",
@@ -195,15 +205,17 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     importClasses: "Import Classes",
     exportClasses: "Export Classes",
     className: "Class Name",
-    delete: "Delete",
     hidePanel: 'Hide Panel',
     showPanel: 'Show Panel',
-    viewSettings: 'View & Tool Settings',
-    deleteClassConfirmTitle: 'Confirm deletion of class %s?',
-    deleteClassConfirmContent: 'This action cannot be undone and will remove all annotations of this class from all images.',
+    viewSettings: 'View Settings',
+    deleteClassConfirmTitle: 'Confirm deletion of class "%s"?',
+    deleteClassConfirmContent: 'This action cannot be undone. It will remove all annotations of this class from all images and re-index subsequent classes.',
+    importClassConfirmTitle: 'Confirm Class Import?',
+    importClassConfirmContent: 'This will overwrite your current list of classes. Please ensure you have saved any settings you wish to keep.',
     confirmDelete: 'Confirm Delete',
+    confirmImport: 'Confirm Import',
     cancel: 'Cancel',
-    classDeleted: 'Class %s has been deleted',
+    classDeleted: 'Class "%s" has been deleted',
     rawData: 'Raw Data',
     magnifier: 'Magnifier',
     regionDelete: 'Region Delete',
@@ -212,4 +224,3 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     intersecting: 'Intersecting',
   },
 };
-// END OF FILE src/pages/MaskOperate/constants.tsx

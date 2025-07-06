@@ -1,11 +1,12 @@
 // START OF FILE src/app.tsx
 import Footer from '@/components/Footer';
 import type { DirectoryNode, FileNode, FileTreeNode } from '@/models/fileTree';
-import type { ApiResponse as MaskApiResponse, ImageAnnotationData as MaskImageAnnotationData } from '@/pages/MaskOperate/constants';
+import type { ClassInfo } from '@/pages/FileOperate/constants';
 // Bedrock Change: Import helpers with specific aliases to avoid name collisions between pages.
 import { convertStandardYoloToInternal as fileOperateConvertYolo } from '@/pages/FileOperate/index';
+import type { ApiResponse as MaskApiResponse, ImageAnnotationData as MaskImageAnnotationData } from '@/pages/MaskOperate/constants';
 
-import { convertApiToView as maskConvertApiToView, convertViewToApi as maskConvertViewToApi } from '@/pages/MaskOperate/index';
+import { convertApiToView, convertApiToView as maskConvertApiToView } from '@/pages/MaskOperate/index';
 import { getLoginUserUsingGet } from '@/services/backend/userController';
 import { FileZipOutlined, GlobalOutlined, UploadOutlined } from '@ant-design/icons';
 import type { RunTimeLayoutConfig } from '@umijs/max';
@@ -67,14 +68,13 @@ const GlobalUploader: React.FC = () => {
     setFile_jsonFileContents,
     setFile_operationHistory,
     setFile_redoHistory,
-    setFile_modifiedFiles, // Bedrock V4.1 Change
+    setFile_modifiedFiles,
     setMask_allImageAnnotations,
     setMask_operationHistory,
     setMask_redoHistory,
-    setMask_categories,
-    setMask_categoryColors,
-    setMask_modifiedFiles, // Bedrock V4.1 Change
-    mask_categoryColors,
+    setMask_classMap,
+    setMask_modifiedFiles,
+    mask_classMap,
     file_classMap,
   } = useModel('annotationStore');
 
@@ -151,7 +151,7 @@ const GlobalUploader: React.FC = () => {
     const yoloContents: Record<string, string> = {};
     const jsonContents: Record<string, string> = {};
     const maskAnnotations: Record<string, MaskImageAnnotationData> = {};
-    const tempCategories = new Set(Object.keys(mask_categoryColors));
+    let tempMaskClassMap: { [key: number]: ClassInfo } = { ...mask_classMap };
 
     // 3. Populate annotation data from txt and json files
     for (const file of allFiles) {
@@ -174,8 +174,8 @@ const GlobalUploader: React.FC = () => {
         try {
           const apiJson: MaskApiResponse = JSON.parse(content);
           if (apiJson.key_points || apiJson.segments || apiJson.cpnts) {
-            const viewAnnotations = maskConvertApiToView(apiJson, mask_categoryColors, 2);
-            viewAnnotations.forEach(anno => tempCategories.add(anno.category));
+            const { viewAnnotations, updatedClassMap } = maskConvertApiToView(apiJson, tempMaskClassMap, 2);
+            tempMaskClassMap = updatedClassMap; // Persist newly discovered classes
             maskAnnotations[imagePath] = { viewAnnotations, apiJson };
           }
         } catch (e) {
@@ -188,15 +188,15 @@ const GlobalUploader: React.FC = () => {
     setFile_yoloFileContents(yoloContents);
     setFile_jsonFileContents(jsonContents);
     setMask_allImageAnnotations(maskAnnotations);
-    setMask_categories(Array.from(tempCategories));
+    setMask_classMap(tempMaskClassMap);
 
     // Reset histories and modification state for ALL pages
     setFile_operationHistory({});
     setFile_redoHistory({});
-    setFile_modifiedFiles({}); // Bedrock V4.1 Change
+    setFile_modifiedFiles({});
     setMask_operationHistory({});
     setMask_redoHistory({});
-    setMask_modifiedFiles({}); // Bedrock V4.1 Change
+    setMask_modifiedFiles({});
 
     // Bedrock V4 Change: Set the initial file for both pages independently.
     if (firstImageFile) {
@@ -238,6 +238,7 @@ const GlobalExporter: React.FC = () => {
     file_yoloFileContents,
     file_jsonFileContents,
     mask_allImageAnnotations,
+    mask_classMap,
   } = useModel('annotationStore');
 
   /**
@@ -284,7 +285,7 @@ const GlobalExporter: React.FC = () => {
           const maskAnnotationData = mask_allImageAnnotations[fileNode.key];
           let maskJsonContent = "{}";
           if (maskAnnotationData) {
-            const finalApiJson = maskConvertViewToApi(maskAnnotationData.viewAnnotations);
+            const finalApiJson = convertApiToView(maskAnnotationData.apiJson, mask_classMap, 2);
             // IMPORTANT: Preserve original, non-convertible data like netlists
             const fullApiJson = { ...maskAnnotationData.apiJson, ...finalApiJson };
             maskJsonContent = JSON.stringify(fullApiJson, null, 2);
@@ -397,5 +398,3 @@ declare global {
     };
   }
 }
-
-// END OF FILE src/app.tsx

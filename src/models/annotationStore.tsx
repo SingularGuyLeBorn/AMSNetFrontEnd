@@ -30,26 +30,26 @@ const rgbaToHex = (rgba: string): string => {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
 };
 
-// Pre-process the default RGBA colors into HEX format upon module initialization.
-// This ensures that the state starts with the correct data type for UI components, preventing downstream bugs.
-const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduce(
-  (acc, [key, value]) => {
-    acc[key] = rgbaToHex(value);
+// Bedrock V4.3 Change: Unified the initial class map structure for both pages.
+const initialMaskIndexClassColorMap: { [key: number]: ClassInfo } = Object.entries(defaultCategoryColors)
+  .reduce((acc, [label, rgbaColor], index) => {
+    acc[index] = {
+      label,
+      color: rgbaToHex(rgbaColor),
+    };
     return acc;
-  },
-  {} as { [key: string]: string }
-);
+  }, {} as { [key: number]: ClassInfo });
 
 
 /**
  * @description
- * 全局数据仓库 (Global Data Store) V4.1 - 绝对隔离版
+ * 全局数据仓库 (Global Data Store) V4.3 - 模型统一版
  *
  * 该 Store 负责管理整个应用中与标注相关的共享状态。
  * 设计原则：
- * 1. 页面上下文隔离: 每个标注页面 (`FileOperate`, `MaskOperate`) 拥有自己独立的当前文件指针和所有相关状态，包括修改记录，彻底解决了页面间任何状态的交叉污染问题。
- * 2. 路径驱动 (Path-Driven): 所有与文件相关的状态，其访问键都是文件的唯一路径 (filePath)。
- * 3. 统一数据源: `fileTree` 作为单一的、权威的文件结构源。
+ * 1. 严格模型统一: `FileOperate` 和 `MaskOperate` 现已共享完全一致的、由数字索引驱动的类别管理模型 (`classMap`)。
+ * 2. 页面上下文隔离: 每个标注页面拥有自己独立的当前文件指针和所有相关状态，包括修改记录，彻底解决了页面间任何状态的交叉污染问题。
+ * 3. 路径驱动 (Path-Driven): 所有与文件相关的状态，其访问键都是文件的唯一路径 (filePath)。
  * 4. 命名空间: 所有页面专属状态均以页面标识（如 `file_`, `mask_`）为前缀，确保了代码层面的隔离性和可读性。
  */
 export default function useAnnotationStore() {
@@ -78,8 +78,7 @@ export default function useAnnotationStore() {
   const [mask_currentFilePath, setMask_currentFilePath] = useState<string | null>(null);
   const [mask_modifiedFiles, setMask_modifiedFiles] = useState<Record<string, number>>({});
   const [mask_allImageAnnotations, setMask_allImageAnnotations] = useState<Record<string, ImageAnnotationData>>({});
-  const [mask_categories, setMask_categories] = useState<string[]>(Object.keys(defaultCategoryColors));
-  const [mask_categoryColors, setMask_categoryColors] = useState<{ [key: string]: string }>(initialMaskCategoryHexColors);
+  const [mask_classMap, setMask_classMap] = useState<{ [key: number]: ClassInfo }>(initialMaskIndexClassColorMap);
   const [mask_selectedAnnotationId, setMask_selectedAnnotationId] = useState<string | null>(null);
   const [mask_operationHistory, setMask_operationHistory] = useState<Record<string, MaskUndoOperation[]>>({});
   const [mask_redoHistory, setMask_redoHistory] = useState<Record<string, MaskUndoOperation[]>>({});
@@ -102,8 +101,7 @@ export default function useAnnotationStore() {
     mask_currentFilePath, setMask_currentFilePath,
     mask_modifiedFiles, setMask_modifiedFiles,
     mask_allImageAnnotations, setMask_allImageAnnotations,
-    mask_categories, setMask_categories,
-    mask_categoryColors, setMask_categoryColors,
+    mask_classMap, setMask_classMap,
     mask_selectedAnnotationId, setMask_selectedAnnotationId,
     mask_operationHistory, setMask_operationHistory,
     mask_redoHistory, setMask_redoHistory,

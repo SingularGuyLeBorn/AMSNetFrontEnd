@@ -48,7 +48,7 @@ import {
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ApiComponent, ApiResponse, ClassInfo, Operation } from './constants';
+import type { ApiComponent, ApiResponse, ClassInfo, FileClassInfo, Operation } from './constants';
 import { jsonNameColorMap, translations } from './constants';
 import './index.css';
 
@@ -97,6 +97,7 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 5.0;
 const ZOOM_STEP = 0.1;
 
+const generateRandomHexColor = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
 /**
  * @description Recursively searches for a file node by its path (key) in the file tree.
@@ -149,9 +150,6 @@ export const convertStandardYoloToInternal = (standardYoloContent: string, class
     });
     return internalYoloLines.join('\n');
 };
-
-
-const generateRandomColor = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
 export const parseJsonContent = (jsonContent: string | null): JsonData => {
     try {
@@ -228,7 +226,8 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
         return "";
     }
     const yoloLines: string[] = [];
-    const existingNames: { [key: string]: number } = {};
+    const nameCounters: { [key: string]: number } = {};
+
     cpnts.forEach(cpnt => {
         if (typeof cpnt.t === 'undefined' || typeof cpnt.b === 'undefined' || typeof cpnt.l === 'undefined' || typeof cpnt.r === 'undefined' || typeof cpnt.type === 'undefined') {
             console.warn('Skipping invalid cpnt object:', cpnt);
@@ -256,10 +255,11 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
         const relY = absCenterY / imageHeight;
         const relW = absWidth / imageWidth;
         const relH = absHeight / imageHeight;
-        const baseName = classLabel;
-        const counter = (existingNames[baseName] || 0) + 1;
-        existingNames[baseName] = counter;
-        const uniqueName = cpnt.name || `${baseName}_${counter - 1}`;
+
+        const counter = nameCounters[classLabel] || 0;
+        nameCounters[classLabel] = counter + 1;
+        const uniqueName = cpnt.name || `${classLabel}_${counter}`;
+
         yoloLines.push(`${uniqueName} ${classIndex} ${relX.toFixed(6)} ${relY.toFixed(6)} ${relW.toFixed(6)} ${relH.toFixed(6)}`);
     });
     return yoloLines.join('\n');
@@ -435,8 +435,8 @@ const FileOperate: React.FC = () => {
             if (parts.length < 6) return null;
             const [name, classIdx, x, y, w, h] = parts;
             return { name, classIdx: parseInt(classIdx), x: parseFloat(x), y: parseFloat(y), w: parseFloat(w), h: parseFloat(h) };
-        }).filter((item): item is { name: string; classIdx: number; x: number; y: number; w: number; h: number; } => item !== null && !isNaN(item.classIdx));
-    }, [currentYoloContent]);
+        }).filter((item): item is { name: string; classIdx: number; x: number; y: number; w: number; h: number; } => item !== null && !isNaN(item.classIdx) && item.classIdx in classMap);
+    }, [currentYoloContent, classMap]);
 
     const getResizeHandles = (box: { x: number, y: number, width: number, height: number }): { [key in ResizeHandle]: { x: number, y: number, size: number } } => {
         const s = RESIZE_HANDLE_SIZE / transform.scale;
@@ -446,10 +446,10 @@ const FileOperate: React.FC = () => {
 
     const getCursorForHandle = (handle: ResizeHandle | null): string => {
         if (!handle) return 'default';
-        if (handle === 'topLeft' || handle === 'bottomRight') return 'resize-nwse';
-        if (handle === 'topRight' || handle === 'bottomLeft') return 'resize-nesw';
-        if (handle === 'top' || handle === 'bottom') return 'resize-ns';
-        if (handle === 'left' || handle === 'right') return 'resize-ew';
+        if (handle === 'topLeft' || handle === 'bottomRight') return 'nwse-resize';
+        if (handle === 'topRight' || handle === 'bottomLeft') return 'nesw-resize';
+        if (handle === 'top' || handle === 'bottom') return 'ns-resize';
+        if (handle === 'left' || handle === 'right') return 'ew-resize';
         return 'default';
     }
 
@@ -1375,7 +1375,7 @@ const FileOperate: React.FC = () => {
                 let lastIndex = Object.keys(classMap).length > 0 ? Math.max(...Object.keys(classMap).map(Number)) : -1;
                 newlyDiscovered.forEach(label => {
                     lastIndex++;
-                    newClassMap[lastIndex] = { label, color: generateRandomColor() };
+                    newClassMap[lastIndex] = { label, color: generateRandomHexColor() };
                 });
                 setClassMap(newClassMap);
                 currentClassMap = newClassMap;
@@ -1416,14 +1416,11 @@ const FileOperate: React.FC = () => {
         }
     };
 
-    const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomColor() } })); };
+    const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomHexColor() } })); };
     const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setClassMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
 
     const handleDeleteClass = (indexToDelete: number) => {
-        const className = classMap[indexToDelete]?.label;
-        if (!className) return;
-
-        const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${className}`) : `确认删除类别 [${indexToDelete}] ${className}?`;
+        const title = t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${classMap[indexToDelete]?.label}`);
         Modal.confirm({
             title: title,
             content: t.deleteClassConfirmContent,
@@ -1431,81 +1428,80 @@ const FileOperate: React.FC = () => {
             cancelText: t.cancel,
             okType: 'danger',
             onOk: () => {
-                const newYoloContents: Record<string, string> = { ...file_yoloFileContents };
-                const newJsonContents: Record<string, string> = { ...file_jsonFileContents };
-                const modifiedFilePaths = new Set<string>();
+                const updatedYoloContents: Record<string, string> = {};
+                const modifiedFileKeys: Record<string, number> = {};
                 const now = Date.now();
 
-                for (const filePath in newYoloContents) {
-                    const yoloContent = newYoloContents[filePath];
-                    if (!yoloContent) continue;
+                const allFileKeys = Object.keys(file_yoloFileContents);
 
-                    const lines = yoloContent.split('\n');
-                    const boxNamesToDeleteInFile = new Set(
-                        lines
-                            .filter(line => line.split(' ')[1] === String(indexToDelete))
-                            .map(line => line.split(' ')[0])
-                    );
+                allFileKeys.forEach(filePath => {
+                    const content = file_yoloFileContents[filePath];
+                    const lines = content.split('\n');
+                    let fileWasModified = false;
 
-                    if (boxNamesToDeleteInFile.size === 0) {
-                        continue;
+                    const newLines = lines.map(line => {
+                        if (line.trim() === '') return line;
+                        const parts = line.split(' ');
+                        const classIdx = parseInt(parts[1], 10);
+                        if (isNaN(classIdx)) return line;
+
+                        if (classIdx === indexToDelete) {
+                            fileWasModified = true;
+                            return null;
+                        }
+                        if (classIdx > indexToDelete) {
+                            fileWasModified = true;
+                            parts[1] = (classIdx - 1).toString();
+                            return parts.join(' ');
+                        }
+                        return line;
+                    }).filter((line): line is string => line !== null);
+
+                    if (fileWasModified) {
+                        updatedYoloContents[filePath] = newLines.join('\n');
+                        modifiedFileKeys[filePath] = now;
                     }
-
-                    modifiedFilePaths.add(filePath);
-                    const updatedYoloLines = lines.filter(line => line.split(' ')[1] !== String(indexToDelete));
-                    newYoloContents[filePath] = updatedYoloLines.join('\n');
-
-                    const jsonContent = newJsonContents[filePath];
-                    if (jsonContent) {
-                        const parsedJson = parseJsonContent(jsonContent);
-                        Object.keys(parsedJson.local).forEach(typeKey => {
-                            const type = typeKey as keyof typeof parsedJson.local;
-                            Object.keys(parsedJson.local[type]).forEach(nameKey => {
-                                parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
-                                    (bName: string) => !boxNamesToDeleteInFile.has(bName)
-                                );
-                            });
-                        });
-                        newJsonContents[filePath] = stringifyJsonContent(parsedJson);
-                    }
-                }
-
-                setFile_yoloFileContents(newYoloContents);
-                setFile_jsonFileContents(newJsonContents);
-
-                setFile_modifiedFiles(prev => {
-                    const updated = { ...prev };
-                    modifiedFilePaths.forEach(path => (updated[path] = now));
-                    return updated;
                 });
 
-                if (file_currentFilePath && modifiedFilePaths.has(file_currentFilePath)) {
-                    setCurrentYoloContent(newYoloContents[file_currentFilePath]);
-                    setCurrentJsonContent(newJsonContents[file_currentFilePath]);
+                setFile_yoloFileContents(prev => ({ ...prev, ...updatedYoloContents }));
+                setFile_modifiedFiles(prev => ({ ...prev, ...modifiedFileKeys }));
+
+                if (file_currentFilePath && updatedYoloContents[file_currentFilePath]) {
+                    setCurrentYoloContent(updatedYoloContents[file_currentFilePath]);
                 }
 
-                const newClassMap = { ...classMap };
-                delete newClassMap[indexToDelete];
+                const newClassMap: { [key: number]: ClassInfo } = {};
+                Object.entries(classMap).forEach(([idxStr, info]) => {
+                    const idx = parseInt(idxStr, 10);
+                    if (idx < indexToDelete) {
+                        newClassMap[idx] = info;
+                    } else if (idx > indexToDelete) {
+                        newClassMap[idx - 1] = info;
+                    }
+                });
+
                 setClassMap(newClassMap);
 
                 if (currentClassIndex === indexToDelete) {
-                    const firstKey = Object.keys(newClassMap)[0];
-                    setCurrentClassIndex(firstKey ? parseInt(firstKey, 10) : 0);
+                    setCurrentClassIndex(Object.keys(newClassMap).length > 0 ? Math.min(...Object.keys(newClassMap).map(Number)) : 0);
+                } else if (currentClassIndex > indexToDelete) {
+                    setCurrentClassIndex(currentClassIndex - 1);
                 }
 
-                message.success(t.classDeleted.replace('%s', className));
+                message.success(t.classDeleted.replace('%s', classMap[indexToDelete]?.label || ''));
             }
         });
     };
 
     const handleExportClasses = () => {
-        const exportObj: { [key: string]: string } = {};
-        for (const key in classMap) {
-            exportObj[key] = classMap[key].label;
-        }
-        const classText = `classes = ${JSON.stringify(exportObj, null, 4)}`;
-        const blob = new Blob([classText], { type: 'text/plain;charset=utf-8' });
-        saveAs(blob, 'classes.txt');
+        const exportData: FileClassInfo[] = Object.entries(classMap).map(([index, { label, color }]) => ({
+            index: parseInt(index, 10),
+            label,
+            color,
+        }));
+        const classText = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([classText], { type: 'application/json;charset=utf-8' });
+        saveAs(blob, 'file_classes.json');
     };
 
     const handleImportClasses = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1515,45 +1511,35 @@ const FileOperate: React.FC = () => {
         reader.onload = (e) => {
             const text = e.target?.result as string;
             try {
-                const jsonStringMatch = text.match(/=\s*({[\s\S]*})/);
-                if (!jsonStringMatch || !jsonStringMatch[1]) {
-                    throw new Error("Invalid format: Could not find object literal '{...}'.");
-                }
-                const jsonString = jsonStringMatch[1];
-                const parsedObject = new Function(`return ${jsonString}`)();
-
-                if (typeof parsedObject !== 'object' || parsedObject === null) {
-                    throw new Error("Parsed content is not a valid object.");
+                const importedData: FileClassInfo[] = JSON.parse(text);
+                if (!Array.isArray(importedData) || !importedData.every(item => typeof item.index === 'number' && typeof item.label === 'string' && typeof item.color === 'string')) {
+                    throw new Error("Invalid file format. Expected an array of {index, label, color}.");
                 }
 
-                const newClassMap: { [key: number]: ClassInfo } = {};
-                let hasEntries = false;
-                for (const key in parsedObject) {
-                    if (Object.prototype.hasOwnProperty.call(parsedObject, key)) {
-                        const index = parseInt(key, 10);
-                        const label = parsedObject[key];
-                        if (!isNaN(index) && typeof label === 'string') {
-                            newClassMap[index] = { label, color: generateRandomColor() };
-                            hasEntries = true;
-                        }
-                    }
-                }
-
-                if (!hasEntries) {
-                    throw new Error("No valid class entries found in the file.");
-                }
-
-                setClassMap(newClassMap);
-                setCurrentClassIndex(0);
-                message.success(`成功导入 ${Object.keys(newClassMap).length} 个类别。`);
+                Modal.confirm({
+                    title: t.importClassConfirmTitle,
+                    content: t.importClassConfirmContent,
+                    okText: t.confirmImport,
+                    cancelText: t.cancel,
+                    onOk: () => {
+                        const newClassMap: { [key: number]: ClassInfo } = {};
+                        importedData.forEach(item => {
+                            newClassMap[item.index] = { label: item.label, color: item.color };
+                        });
+                        setClassMap(newClassMap);
+                        setCurrentClassIndex(Object.keys(newClassMap).length > 0 ? Math.min(...Object.keys(newClassMap).map(Number)) : 0);
+                        message.success(`Successfully imported ${importedData.length} classes.`);
+                    },
+                });
 
             } catch (error: any) {
                 console.error("Failed to import classes:", error);
-                message.error(`导入类别失败: ${error.message}`);
+                message.error(`Failed to import classes: ${error.message}`);
+            } finally {
+                if (event.target) event.target.value = '';
             }
         };
         reader.readAsText(file);
-        if (event.target) event.target.value = '';
     };
 
     const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName;
@@ -1764,7 +1750,7 @@ const FileOperate: React.FC = () => {
                                             <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
                                         </Space.Compact>
                                     </Flex>
-                                    <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
+                                    <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".json" />
                                     <div className="class-list-container">
                                         <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
                                     </div>
@@ -1786,4 +1772,3 @@ const FileOperate: React.FC = () => {
 };
 
 export default FileOperate;
-// File: src/pages/FileOperate/index.tsx

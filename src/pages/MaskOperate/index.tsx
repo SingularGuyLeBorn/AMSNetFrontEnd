@@ -1,4 +1,3 @@
-
 import FileExplorer from "@/components/FileExplorer/index";
 import type { FileNode, FileTreeNode } from "@/models/fileTree.tsx";
 import {
@@ -27,8 +26,8 @@ import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiKeyPoint, ApiResponse, ApiSegment, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
-import { defaultCategoryColors, RESIZE_HANDLE_SIZE, translations } from './constants';
+import type { ApiComponent, ApiKeyPoint, ApiResponse, ApiSegment, ClassInfo, FileClassInfo, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
+import { RESIZE_HANDLE_SIZE, translations } from './constants';
 import './index.css';
 
 const { Title, Text } = Typography;
@@ -52,6 +51,7 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 5.0;
 const ZOOM_STEP = 0.1;
 
+const generateRandomHexColor = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
 const findFileNodeByKey = (key: string, node: FileTreeNode): FileNode | null => {
   if (node.key === key && node.isLeaf) {
@@ -69,57 +69,64 @@ const findFileNodeByKey = (key: string, node: FileTreeNode): FileNode | null => 
 };
 const generateUniqueId = (): string => `anno_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key: string]: string }, thickness: number): ViewAnnotation[] => {
+export const convertApiToView = (apiData: ApiResponse, classMap: { [key: number]: ClassInfo }, thickness: number): { viewAnnotations: ViewAnnotation[], updatedClassMap: { [key: number]: ClassInfo } } => {
   const viewAnnotations: ViewAnnotation[] = [];
-  if (!apiData) return viewAnnotations;
+  if (!apiData) return { viewAnnotations, updatedClassMap: classMap };
+
+  let tempClassMap = { ...classMap };
+  const labelToIndex = new Map(Object.entries(tempClassMap).map(([index, info]) => [info.label, parseInt(index, 10)]));
+
+  const getClassIndex = (label: string): number => {
+    if (labelToIndex.has(label)) {
+      return labelToIndex.get(label)!;
+    }
+    const newIndex = Object.keys(tempClassMap).length > 0 ? Math.max(...Object.keys(tempClassMap).map(Number)) + 1 : 0;
+    tempClassMap[newIndex] = { label: label, color: generateRandomHexColor() };
+    labelToIndex.set(label, newIndex);
+    return newIndex;
+  };
 
   const { key_points, segments, cpnts } = apiData;
 
-  // Convert segments to diagonal lines
   if (key_points && segments) {
     const keyPointMap = new Map(key_points.map(p => [p.id, p]));
     segments.forEach((segment) => {
       const srcPoint = keyPointMap.get(segment.src_key_point_id);
       const dstPoint = keyPointMap.get(segment.dst_key_point_id);
       if (srcPoint && dstPoint && srcPoint.id !== dstPoint.id) {
-        const category = srcPoint.net || 'unknown_net';
-        const color = allCategoryColors[category] || allCategoryColors['unknown_net'] || '#CCCCCC';
+        const classIndex = getClassIndex(srcPoint.net || 'unknown_net');
         viewAnnotations.push({
           id: generateUniqueId(),
           points: [{ x: srcPoint.x, y: srcPoint.y }, { x: dstPoint.x, y: dstPoint.y }],
-          category, color, thickness,
-        } as ViewDiagonalAnnotation);
+          classIndex, thickness,
+        });
       }
     });
   }
 
-  // Convert components to rectangle boxes
   if (cpnts) {
-    cpnts.forEach((component) => {
-      if (component.l === undefined || component.r === undefined || component.t === undefined || component.b === undefined) return;
-      const category = component.type || 'default';
-      const color = allCategoryColors[category] || allCategoryColors['default'] || '#CCCCCC';
+    cpnts.forEach((cpnt) => {
+      const classIndex = getClassIndex(cpnt.type || 'default');
       viewAnnotations.push({
         id: generateUniqueId(),
-        x: component.l,
-        y: component.t,
-        width: component.r - component.l,
-        height: component.b - component.t,
-        category,
-        color,
-        sourceLineWidth: 2, // A sensible default
-      } as ViewBoxAnnotation);
+        x: cpnt.l,
+        y: cpnt.t,
+        width: cpnt.r - cpnt.l,
+        height: cpnt.b - cpnt.t,
+        classIndex,
+        sourceLineWidth: 2,
+      });
     });
   }
 
-  return viewAnnotations;
+  return { viewAnnotations, updatedClassMap: tempClassMap };
 };
 
 
-export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
+export const convertViewToApi = (viewAnnotations: ViewAnnotation[], classMap: { [key: number]: ClassInfo }): ApiResponse => {
   const key_points: ApiKeyPoint[] = [];
   const segments: ApiSegment[] = [];
-  const cpnts: any[] = [];
+  const cpnts: ApiComponent[] = [];
   const pointMap = new Map<string, number>();
   let kptIdCounter = 0;
 
@@ -139,9 +146,10 @@ export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse
   }
 
   viewAnnotations.forEach(anno => {
+    const categoryLabel = classMap[anno.classIndex]?.label || `class_${anno.classIndex}`;
     if ('points' in anno) {
-      const srcId = getOrCreateKeyPoint(anno.points[0], anno.category);
-      const dstId = getOrCreateKeyPoint(anno.points[1], anno.category);
+      const srcId = getOrCreateKeyPoint(anno.points[0], categoryLabel);
+      const dstId = getOrCreateKeyPoint(anno.points[1], categoryLabel);
       segments.push({ src_key_point_id: srcId, dst_key_point_id: dstId });
     } else if ('width' in anno) {
       cpnts.push({
@@ -149,7 +157,7 @@ export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse
         t: anno.y,
         r: anno.x + anno.width,
         b: anno.y + anno.height,
-        type: anno.category,
+        type: categoryLabel,
       });
     }
   });
@@ -164,8 +172,7 @@ const MaskOperate = () => {
     fileTree,
     mask_currentFilePath, setMask_currentFilePath,
     mask_allImageAnnotations: allImageAnnotations, setMask_allImageAnnotations: setAllImageAnnotations,
-    mask_categories: categories, setMask_categories: setCategories,
-    mask_categoryColors: categoryColors, setMask_categoryColors: setCategoryColors,
+    mask_classMap: classMap, setMask_classMap: setClassMap,
     mask_selectedAnnotationId: selectedAnnotationId, setMask_selectedAnnotationId: setSelectedAnnotationId,
     mask_operationHistory, setMask_operationHistory,
     mask_redoHistory, setMask_redoHistory,
@@ -182,7 +189,7 @@ const MaskOperate = () => {
   const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
   const [activeTool, setActiveTool] = useState<ActiveTool>('select');
-  const [currentCategory, setCurrentCategory] = useState<string>(categories[0] || "");
+  const [currentClassIndex, setCurrentClassIndex] = useState<number>(0);
   const [currentLineWidth, setCurrentLineWidth] = useState<number>(2);
   const [showCategoryInBox, setShowCategoryInBox] = useState<boolean>(true);
 
@@ -216,7 +223,7 @@ const MaskOperate = () => {
 
     setAllImageAnnotations(prev => {
       const sourceApiJson = prev[mask_currentFilePath]?.apiJson || {};
-      const generatedApiJson = convertViewToApi(localAnnotations);
+      const generatedApiJson = convertViewToApi(localAnnotations, classMap);
       const updatedApiJson = { ...sourceApiJson, ...generatedApiJson };
 
       if (sourceApiJson.netlist_cdl) updatedApiJson.netlist_cdl = sourceApiJson.netlist_cdl;
@@ -230,7 +237,7 @@ const MaskOperate = () => {
 
       return { ...prev, [mask_currentFilePath]: newImageData };
     });
-  }, [mask_currentFilePath, localAnnotations, setAllImageAnnotations]);
+  }, [mask_currentFilePath, localAnnotations, classMap, setAllImageAnnotations]);
 
   const saveFuncRef = useRef(saveCurrentState);
   saveFuncRef.current = saveCurrentState;
@@ -245,9 +252,9 @@ const MaskOperate = () => {
   const currentApiJson = useMemo(() => {
     if (!mask_currentFilePath) return {};
     const sourceApi = allImageAnnotations[mask_currentFilePath]?.apiJson || {};
-    const generatedData = convertViewToApi(currentViewAnnotations);
+    const generatedData = convertViewToApi(currentViewAnnotations, classMap);
     return { ...sourceApi, ...generatedData };
-  }, [mask_currentFilePath, allImageAnnotations, currentViewAnnotations]);
+  }, [mask_currentFilePath, allImageAnnotations, currentViewAnnotations, classMap]);
 
   const displayApiJson = useMemo(() => {
     if (!mask_currentFilePath) return {};
@@ -258,8 +265,8 @@ const MaskOperate = () => {
       delete displayData.netlist_scs;
       return displayData;
     }
-    return convertViewToApi(currentViewAnnotations);
-  }, [mask_currentFilePath, allImageAnnotations, currentViewAnnotations]);
+    return convertViewToApi(currentViewAnnotations, classMap);
+  }, [mask_currentFilePath, allImageAnnotations, currentViewAnnotations, classMap]);
 
 
   const currentUndoStackSize = (mask_operationHistory[mask_currentFilePath || ''] || []).length;
@@ -295,14 +302,20 @@ const MaskOperate = () => {
 
   const renderRectangle = useCallback((box: ViewBoxAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     ctx.save();
+    const classInfo = classMap[box.classIndex];
+    if (!classInfo && !isPreview) {
+      ctx.restore();
+      return;
+    }
+
     if (isPreview) {
       ctx.setLineDash([8 / transform.scale, 4 / transform.scale]);
       ctx.strokeStyle = "#4096ff"; ctx.lineWidth = 1.5 / transform.scale;
       ctx.strokeRect(box.x, box.y, box.width, box.height);
     } else {
-      const hexColor = isSelected ? '#4096ff' : box.color;
-      const originalRgbaDef = defaultCategoryColors[box.category] || defaultCategoryColors['default'];
-      const alpha = originalRgbaDef.match(/, ([\d.]+)\)/)?.[1] || '0.75';
+      const hexColor = isSelected ? '#4096ff' : classInfo.color;
+      const alpha = 0.4; // Default alpha for boxes
+
       const r = parseInt(hexColor.slice(1, 3), 16);
       const g = parseInt(hexColor.slice(3, 5), 16);
       const b = parseInt(hexColor.slice(5, 7), 16);
@@ -320,7 +333,7 @@ const MaskOperate = () => {
         ctx.fillStyle = "#262626";
         ctx.font = `bold ${12 / transform.scale}px Arial`;
         ctx.textBaseline = "top";
-        ctx.fillText(box.category, box.x + 4 / transform.scale, box.y + 4 / transform.scale, box.width - 8 / transform.scale);
+        ctx.fillText(`[${box.classIndex}] ${classInfo.label}`, box.x + 4 / transform.scale, box.y + 4 / transform.scale, box.width - 8 / transform.scale);
       }
       if (isSelected) {
         const handles = getResizeHandles(box); ctx.fillStyle = '#0958d9';
@@ -328,17 +341,19 @@ const MaskOperate = () => {
       }
     }
     ctx.restore();
-  }, [showCategoryInBox, transform.scale]);
+  }, [showCategoryInBox, transform.scale, classMap]);
 
   const renderDiagonal = useCallback((diag: ViewDiagonalAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
+    const classInfo = classMap[diag.classIndex];
+    if (!classInfo && !isPreview) return;
+
     const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points); if (length === 0) return;
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.rotate(angleRad);
 
-    const hexColor = isSelected ? '#4096ff' : diag.color;
-    const originalRgbaDef = defaultCategoryColors[diag.category] || defaultCategoryColors['default'];
-    const alpha = originalRgbaDef.match(/, ([\d.]+)\)/)?.[1] || '0.8';
+    const hexColor = isSelected ? '#4096ff' : classInfo.color;
+    const alpha = 0.6; // Default alpha for lines
     const r = parseInt(hexColor.slice(1, 3), 16);
     const g = parseInt(hexColor.slice(3, 5), 16);
     const b = parseInt(hexColor.slice(5, 7), 16);
@@ -384,10 +399,10 @@ const MaskOperate = () => {
       ctx.font = `bold ${12 / transform.scale}px Arial`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
-      ctx.fillText(diag.category, centerX, centerY - diag.thickness / 2 - 5 / transform.scale);
+      ctx.fillText(`[${diag.classIndex}] ${classInfo.label}`, centerX, centerY - diag.thickness / 2 - 5 / transform.scale);
       ctx.restore();
     }
-  }, [showCategoryInBox, transform.scale]);
+  }, [showCategoryInBox, transform.scale, classMap]);
 
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -427,10 +442,10 @@ const MaskOperate = () => {
       if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
         const { startMousePos } = draggingState;
         if (activeTool === 'rectangle') {
-          const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, currentVirtualMousePos.x), y: Math.min(startMousePos.y, currentVirtualMousePos.y), width: Math.abs(startMousePos.x - currentVirtualMousePos.x), height: Math.abs(startMousePos.y - currentVirtualMousePos.y), category: currentCategory, color: 'preview', sourceLineWidth: currentLineWidth };
+          const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, currentVirtualMousePos.x), y: Math.min(startMousePos.y, currentVirtualMousePos.y), width: Math.abs(startMousePos.x - currentVirtualMousePos.x), height: Math.abs(startMousePos.y - currentVirtualMousePos.y), classIndex: currentClassIndex, sourceLineWidth: currentLineWidth };
           renderRectangle(previewRect, ctx, true);
         } else {
-          const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, currentVirtualMousePos], category: currentCategory, color: 'preview', thickness: currentLineWidth };
+          const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, currentVirtualMousePos], classIndex: currentClassIndex, thickness: currentLineWidth };
           renderDiagonal(previewDiag, ctx, true);
         }
       }
@@ -459,7 +474,7 @@ const MaskOperate = () => {
       ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
     ctx.restore();
-  }, [loadedImage, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox, transform]);
+  }, [loadedImage, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentClassIndex, currentLineWidth, regionSelectBox, transform]);
 
   const getVirtualCoords = useCallback((e: React.MouseEvent | { clientX: number, clientY: number }): Point => {
     const canvas = canvasRef.current;
@@ -551,9 +566,13 @@ const MaskOperate = () => {
 
 
   useEffect(() => {
-    if (categories.length > 0 && (!currentCategory || !categories.includes(currentCategory))) { setCurrentCategory(categories[0]); }
-    else if (categories.length === 0 && currentCategory !== "") { setCurrentCategory(""); }
-  }, [categories, currentCategory]);
+    const classIndexExists = currentClassIndex in classMap;
+    if (Object.keys(classMap).length > 0 && !classIndexExists) {
+      setCurrentClassIndex(Math.min(...Object.keys(classMap).map(Number)));
+    } else if (Object.keys(classMap).length === 0) {
+      setCurrentClassIndex(0);
+    }
+  }, [classMap, currentClassIndex]);
 
   useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations, transform, loadedImage]);
 
@@ -650,7 +669,7 @@ const MaskOperate = () => {
     if (!mask_currentFilePath) return;
     setAllImageAnnotations(prev => {
       const sourceApiJson = prev[mask_currentFilePath]?.apiJson || {};
-      const generatedApiJson = convertViewToApi(newViewAnnotations);
+      const generatedApiJson = convertViewToApi(newViewAnnotations, classMap);
 
       const updatedApiJson = { ...sourceApiJson, ...generatedApiJson, ...(newApiJson || {}) };
 
@@ -662,7 +681,7 @@ const MaskOperate = () => {
     if (mask_currentFilePath) {
       setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
     }
-  }, [mask_currentFilePath, setAllImageAnnotations, setMask_modifiedFiles]);
+  }, [mask_currentFilePath, classMap, setAllImageAnnotations, setMask_modifiedFiles]);
 
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
     const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? { ...a, ...updates } : a);
@@ -798,7 +817,7 @@ const MaskOperate = () => {
         setSelectedAnnotationId(null);
       }
     } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
-      if (!currentCategory) { message.warning(t.noCategoriesFound); return; }
+      if (!(currentClassIndex in classMap)) { message.warning(t.noCategoriesFound); return; }
       setDraggingState({ type: 'move', startMousePos: mousePos });
     } else if (activeTool === 'region-delete') {
       setDraggingState({ type: 'region-select', startMousePos: mousePos });
@@ -927,17 +946,16 @@ const MaskOperate = () => {
       setRegionSelectBox(null);
     } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
       const start = draggingState.startMousePos;
-      const color = categoryColors[currentCategory] || '#cccccc';
       if (activeTool === 'rectangle') {
         const width = Math.abs(start.x - end.x); const height = Math.abs(start.y - end.y);
         if (width > 2 && height > 2) {
-          const newRect: ViewBoxAnnotation = { id: generateUniqueId(), x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width, height, category: currentCategory, color, sourceLineWidth: currentLineWidth };
+          const newRect: ViewBoxAnnotation = { id: generateUniqueId(), x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width, height, classIndex: currentClassIndex, sourceLineWidth: currentLineWidth };
           addAnnotation(newRect);
         }
       } else if (activeTool === 'diagonal') {
         const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
         if (length > 2) {
-          const newDiag: ViewDiagonalAnnotation = { id: generateUniqueId(), points: [start, end], category: currentCategory, color, thickness: currentLineWidth };
+          const newDiag: ViewDiagonalAnnotation = { id: generateUniqueId(), points: [start, end], classIndex: currentClassIndex, thickness: currentLineWidth };
           addAnnotation(newDiag);
         }
       }
@@ -1076,28 +1094,10 @@ const MaskOperate = () => {
       setNetlistScsContent(apiResult.netlist_scs || null);
       setNetlistCdlContent(apiResult.netlist_cdl || null);
 
-      const allViewAnnotationsFromApi = convertApiToView(apiResult, categoryColors, currentLineWidth);
-
-      const newCatNames = [...new Set(allViewAnnotationsFromApi.map(a => a.category))];
-      const newlyDiscoveredCats = newCatNames.filter(name => !categories.includes(name));
-      let updatedCategoryColors = { ...categoryColors };
-      if (newlyDiscoveredCats.length > 0) {
-        const newCategories = [...categories, ...newlyDiscoveredCats];
-        newlyDiscoveredCats.forEach((cat) => {
-          if (!updatedCategoryColors[cat]) {
-            const colorPool = Object.values(defaultCategoryColors);
-            const tempRgba = colorPool[newCategories.indexOf(cat) % colorPool.length];
-            const r = tempRgba.match(/\d+/g);
-            if (r) updatedCategoryColors[cat] = `#${((1 << 24) + (+r[0] << 16) + (+r[1] << 8) + +r[2]).toString(16).slice(1).padStart(6, '0')}`;
-          }
-        });
-        setCategories(newCategories);
-        setCategoryColors(updatedCategoryColors);
-      }
-
-      const finalViewAnnotations = convertApiToView(apiResult, updatedCategoryColors, currentLineWidth);
+      const { viewAnnotations: finalViewAnnotations, updatedClassMap } = convertApiToView(apiResult, classMap, currentLineWidth);
 
       addUndoRecord();
+      setClassMap(updatedClassMap);
       setLocalAnnotations(finalViewAnnotations);
       updateGlobalAnnotations(finalViewAnnotations, apiResult);
       message.success({ content: `${t.operationSuccessful}: ${finalViewAnnotations.length} annotations loaded.`, key: 'ai-annotation', duration: 3 });
@@ -1110,161 +1110,116 @@ const MaskOperate = () => {
     }
   };
 
-  const handleAddClass = () => {
-    const newClassName = `new_class_${categories.filter(c => c.startsWith('new_class')).length}`; if (categories.includes(newClassName)) return;
-    const newCategories = [...categories, newClassName];
-    const newColorRgba = Object.values(defaultCategoryColors)[newCategories.length % Object.keys(defaultCategoryColors).length];
-    const r = newColorRgba.match(/\d+/g);
-    let newColorHex = '#cccccc';
-    if (r) newColorHex = `#${((1 << 24) + (+r[0] << 16) + (+r[1] << 8) + +r[2]).toString(16).slice(1).padStart(6, '0')}`;
-    const newCategoryColors = { ...categoryColors, [newClassName]: newColorHex };
-    setCategories(newCategories); setCategoryColors(newCategoryColors); setCurrentCategory(newClassName);
-  };
-  const handleUpdateClass = (oldName: string, newName: string) => {
-    if (newName === oldName || newName.trim() === '' || categories.includes(newName)) return;
-    const newNameTrimmed = newName.trim();
-    setCategories(prev => prev.map(c => c === oldName ? newNameTrimmed : c));
-    setCategoryColors(prev => { const newColors = { ...prev }; newColors[newNameTrimmed] = newColors[oldName]; delete newColors[oldName]; return newColors; });
+  const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomHexColor() } })); };
+  const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setClassMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
 
-    const newAllAnnos = { ...allImageAnnotations };
-    Object.keys(newAllAnnos).forEach(filePath => {
-      const updatedViewAnnos = newAllAnnos[filePath].viewAnnotations.map(anno => anno.category === oldName ? { ...anno, category: newNameTrimmed } : anno);
-      newAllAnnos[filePath] = { ...newAllAnnos[filePath], viewAnnotations: updatedViewAnnos };
-    });
-    setAllImageAnnotations(newAllAnnos);
-
-    if (currentCategory === oldName) setCurrentCategory(newNameTrimmed);
-    if (mask_currentFilePath) {
-      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
-    }
-  };
-  const handleUpdateColor = (catName: string, newColor: string) => {
-    setCategoryColors(prev => ({ ...prev, [catName]: newColor }));
-    const newAllAnnos = { ...allImageAnnotations };
-    Object.keys(newAllAnnos).forEach(filePath => {
-      const updatedViewAnnos = newAllAnnos[filePath].viewAnnotations.map(anno => anno.category === catName ? { ...anno, color: newColor } : anno);
-      newAllAnnos[filePath] = { ...newAllAnnos[filePath], viewAnnotations: updatedViewAnnos };
-    });
-    setAllImageAnnotations(newAllAnnos);
-    if (mask_currentFilePath) {
-      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
-    }
-  };
-  const handleDeleteClass = (className: string) => {
-    const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', className) : `确认删除类别 ${className}?`;
+  const handleDeleteClass = (indexToDelete: number) => {
+    const title = t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${classMap[indexToDelete]?.label}`);
     Modal.confirm({
       title: title,
-      content: t.deleteClassConfirmContent, okText: t.confirmDelete, okType: 'danger', cancelText: t.cancel,
+      content: t.deleteClassConfirmContent,
+      okText: t.confirmDelete,
+      cancelText: t.cancel,
+      okType: 'danger',
       onOk: () => {
-        const newCategories = categories.filter(c => c !== className);
-        const newCategoryColors = { ...categoryColors };
-        delete newCategoryColors[className];
-
-        const newAllAnnotations = { ...allImageAnnotations };
-        const updatedTimestamps: Record<string, number> = {};
+        const updatedAnnotations: Record<string, ImageAnnotationData> = {};
+        const modifiedFileKeys: Record<string, number> = {};
         const now = Date.now();
 
-        Object.keys(newAllAnnotations).forEach(filePath => {
-          const annotationsForImage = newAllAnnotations[filePath];
-          const filteredViewAnnos = annotationsForImage.viewAnnotations.filter(anno => anno.category !== className);
+        Object.entries(allImageAnnotations).forEach(([filePath, imageData]) => {
+          let fileWasModified = false;
+          const newViewAnnotations = imageData.viewAnnotations.map(anno => {
+            if (anno.classIndex === indexToDelete) {
+              fileWasModified = true;
+              return null;
+            }
+            if (anno.classIndex > indexToDelete) {
+              fileWasModified = true;
+              return { ...anno, classIndex: anno.classIndex - 1 };
+            }
+            return anno;
+          }).filter((anno): anno is ViewAnnotation => anno !== null);
 
-          if (filteredViewAnnos.length < annotationsForImage.viewAnnotations.length) {
-            updatedTimestamps[filePath] = now;
+          if (fileWasModified) {
+            const newApiJson = convertViewToApi(newViewAnnotations, classMap);
+            updatedAnnotations[filePath] = { viewAnnotations: newViewAnnotations, apiJson: { ...imageData.apiJson, ...newApiJson } };
+            modifiedFileKeys[filePath] = now;
           }
-
-          const newApiJson = convertViewToApi(filteredViewAnnos);
-
-          newApiJson.netlist_cdl = annotationsForImage.apiJson.netlist_cdl;
-          newApiJson.netlist_scs = annotationsForImage.apiJson.netlist_scs;
-
-          newAllAnnotations[filePath] = {
-            viewAnnotations: filteredViewAnnos,
-            apiJson: newApiJson
-          };
         });
 
-        setCategories(newCategories);
-        setCategoryColors(newCategoryColors);
-        setAllImageAnnotations(newAllAnnotations);
-        setMask_modifiedFiles(prev => ({ ...prev, ...updatedTimestamps }));
+        setAllImageAnnotations(prev => ({ ...prev, ...updatedAnnotations }));
+        setMask_modifiedFiles(prev => ({ ...prev, ...modifiedFileKeys }));
+        if (mask_currentFilePath && updatedAnnotations[mask_currentFilePath]) {
+          setLocalAnnotations(updatedAnnotations[mask_currentFilePath].viewAnnotations);
+        }
 
-        if (currentCategory === className) setCurrentCategory(newCategories[0] || "");
-        message.success(t.classDeleted.replace('%s', className));
+        const newClassMap: { [key: number]: ClassInfo } = {};
+        Object.entries(classMap).forEach(([idxStr, info]) => {
+          const idx = parseInt(idxStr, 10);
+          if (idx < indexToDelete) newClassMap[idx] = info;
+          else if (idx > indexToDelete) newClassMap[idx - 1] = info;
+        });
+
+        setClassMap(newClassMap);
+
+        if (currentClassIndex === indexToDelete) {
+          setCurrentClassIndex(Object.keys(newClassMap).length > 0 ? Math.min(...Object.keys(newClassMap).map(Number)) : 0);
+        } else if (currentClassIndex > indexToDelete) {
+          setCurrentClassIndex(currentClassIndex - 1);
+        }
+
+        message.success(t.classDeleted.replace('%s', classMap[indexToDelete]?.label || ''));
       }
     });
   };
 
   const handleExportClasses = () => {
-    if (categories.length === 0) {
-      message.info(t.noCategoriesToExport || 'No classes to export.');
-      return;
-    }
-    const exportClassObj: { [key: string]: string } = {};
-    categories.forEach((cat, index) => {
-      exportClassObj[index] = cat;
-    });
-    const classText = `classes = ${JSON.stringify(exportClassObj, null, 4)}`;
-    const blob = new Blob([classText], { type: 'text/plain;charset=utf-8' });
-    saveAs(blob, 'classes.txt');
-    message.success(t.exportSuccessMessage || 'Classes exported successfully.');
+    const exportData: FileClassInfo[] = Object.entries(classMap).map(([index, { label, color }]) => ({
+      index: parseInt(index, 10),
+      label,
+      color,
+    }));
+    const classText = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([classText], { type: 'application/json;charset=utf-8' });
+    saveAs(blob, 'mask_classes.json');
   };
 
-  const handleImportClasses = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleImportClasses = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const importedData: FileClassInfo[] = JSON.parse(text);
 
-    try {
-      const text = await file.text();
-      const jsonStringMatch = text.match(/=\s*({[\s\S]*})/);
-      if (!jsonStringMatch || !jsonStringMatch[1]) {
-        throw new Error("Invalid format: Could not find object literal '{...}'.");
-      }
-
-      const jsonString = jsonStringMatch[1];
-      const parsedObject = new Function(`return ${jsonString}`)();
-      if (typeof parsedObject !== 'object' || parsedObject === null) {
-        throw new Error("Parsed content is not a valid object.");
-      }
-
-      const importedCats: { index: number; label: string }[] = [];
-      for (const key in parsedObject) {
-        if (Object.prototype.hasOwnProperty.call(parsedObject, key)) {
-          const index = parseInt(key, 10);
-          const label = parsedObject[key];
-          if (!isNaN(index) && typeof label === 'string') {
-            importedCats.push({ index, label });
-          }
+        if (!Array.isArray(importedData) || !importedData.every(item => typeof item.index === 'number' && typeof item.label === 'string' && typeof item.color === 'string')) {
+          throw new Error("Invalid file format. Expected an array of {index, label, color}.");
         }
+
+        Modal.confirm({
+          title: t.importClassConfirmTitle,
+          content: t.importClassConfirmContent,
+          okText: t.confirmImport,
+          cancelText: t.cancel,
+          onOk: () => {
+            const newClassMap: { [key: number]: ClassInfo } = {};
+            importedData.forEach(item => {
+              newClassMap[item.index] = { label: item.label, color: item.color };
+            });
+            setClassMap(newClassMap);
+            setCurrentClassIndex(Object.keys(newClassMap).length > 0 ? Math.min(...Object.keys(newClassMap).map(Number)) : 0);
+            message.success(`Successfully imported ${importedData.length} classes.`);
+          },
+        });
+
+      } catch (error: any) {
+        console.error("Failed to import classes:", error);
+        message.error(`Failed to import classes: ${error.message}`);
+      } finally {
+        if (e.target) e.target.value = '';
       }
-      if (importedCats.length === 0) {
-        throw new Error("No valid class entries found in the file.");
-      }
-
-      importedCats.sort((a, b) => a.index - b.index);
-      const newCatNames = importedCats.map(c => c.label);
-      const newCatColors: { [key: string]: string } = {};
-      const defaultColorValues = Object.values(defaultCategoryColors);
-      newCatNames.forEach((cat, i) => {
-        const rgba = categoryColors[cat] || defaultColorValues[i % defaultColorValues.length];
-        const r = rgba.match(/\d+/g);
-        let hex = '#cccccc';
-        if (r) {
-          hex = `#${((1 << 24) + (parseInt(r[0], 10) << 16) + (parseInt(r[1], 10) << 8) + parseInt(r[2], 10)).toString(16).slice(1).padStart(6, '0')}`;
-        }
-        newCatColors[cat] = hex;
-      });
-
-      setCategories(newCatNames);
-      setCategoryColors(newCatColors);
-      if (newCatNames.length > 0) setCurrentCategory(newCatNames[0]);
-      message.success(`${newCatNames.length} ${t.category.toLowerCase()}(s) imported.`);
-
-    } catch (error: any) {
-      console.error("Failed to import classes:", error);
-      message.error(`导入类别失败: ${error.message}`);
-    } finally {
-      if (classesFileRef.current) classesFileRef.current.value = "";
-    }
+    };
+    reader.readAsText(file);
   };
 
   const handleClearAnnotations = () => {
@@ -1288,6 +1243,11 @@ const MaskOperate = () => {
       default: return 'grab';
     }
   }
+
+  const selectedAnnotation = useMemo(() => {
+    if (!selectedAnnotationId) return null;
+    return currentViewAnnotations.find(a => a.id === selectedAnnotationId) || null;
+  }, [selectedAnnotationId, currentViewAnnotations]);
 
   return (
     <Layout className="unified-layout">
@@ -1387,31 +1347,33 @@ const MaskOperate = () => {
                           <Panel key={item.id} className="annotation-panel-item" header={
                             <Flex justify="space-between" align="center" style={{ width: '100%' }}>
                               <Space onClick={(e) => e.stopPropagation()}>
-                                <div className="color-indicator" style={{ backgroundColor: item.color }} />
-                                <Text className="category-name-text" title={item.category} ellipsis>{item.category}</Text>
+                                <div className="color-indicator" style={{ backgroundColor: classMap[item.classIndex]?.color || '#808080' }} />
+                                <Text className="category-name-text" title={classMap[item.classIndex]?.label} ellipsis>{`[${item.classIndex}] ${classMap[item.classIndex]?.label || '未知类别'}`}</Text>
                               </Space>
                               <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
                             </Flex>}>
-                            <Descriptions bordered size="small" column={1} className="annotation-details">
-                              {'width' in item ? (
-                                <>
-                                  <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
-                                  <Descriptions.Item label="X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { x: v || 0 })} /> : item.x.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label="Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { y: v || 0 })} /> : item.y.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.width} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { width: v || 1 })} /> : item.width.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.height} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { height: v || 1 })} /> : item.height.toFixed(1)}</Descriptions.Item>
-                                </>
-                              ) : (
-                                <>
-                                  <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
-                                  <Descriptions.Item label="P1.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], x: v || 0 }, item.points[1]] })} /> : item.points[0].x.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label="P1.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], y: v || 0 }, item.points[1]] })} /> : item.points[0].y.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label="P2.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], x: v || 0 }] })} /> : item.points[1].x.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label="P2.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], y: v || 0 }] })} /> : item.points[1].y.toFixed(1)}</Descriptions.Item>
-                                  <Descriptions.Item label={t.thicknessLabel}>{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.thickness} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { thickness: v || 1 })} /> : item.thickness}</Descriptions.Item>
-                                </>
-                              )}
-                            </Descriptions>
+                            {selectedAnnotation?.id === item.id && (
+                              <Descriptions bordered size="small" column={1} className="annotation-details">
+                                {'width' in selectedAnnotation ? (
+                                  <>
+                                    <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
+                                    <Descriptions.Item label="X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={selectedAnnotation.x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { x: v || 0 })} /> : selectedAnnotation.x.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label="Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={selectedAnnotation.y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { y: v || 0 })} /> : selectedAnnotation.y.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={selectedAnnotation.width} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { width: v || 1 })} /> : selectedAnnotation.width.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={selectedAnnotation.height} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { height: v || 1 })} /> : selectedAnnotation.height.toFixed(1)}</Descriptions.Item>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
+                                    <Descriptions.Item label="P1.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={selectedAnnotation.points[0].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...selectedAnnotation.points[0], x: v || 0 }, selectedAnnotation.points[1]] })} /> : selectedAnnotation.points[0].x.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label="P1.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={selectedAnnotation.points[0].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...selectedAnnotation.points[0], y: v || 0 }, selectedAnnotation.points[1]] })} /> : selectedAnnotation.points[0].y.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label="P2.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={selectedAnnotation.points[1].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [selectedAnnotation.points[0], { ...selectedAnnotation.points[1], x: v || 0 }] })} /> : selectedAnnotation.points[1].x.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label="P2.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={selectedAnnotation.points[1].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [selectedAnnotation.points[0], { ...selectedAnnotation.points[1], y: v || 0 }] })} /> : selectedAnnotation.points[1].y.toFixed(1)}</Descriptions.Item>
+                                    <Descriptions.Item label={t.thicknessLabel}>{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={selectedAnnotation.thickness} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { thickness: v || 1 })} /> : selectedAnnotation.thickness}</Descriptions.Item>
+                                  </>
+                                )}
+                              </Descriptions>
+                            )}
                           </Panel>
                         ))}
                       </Collapse>
@@ -1468,17 +1430,9 @@ const MaskOperate = () => {
                       <Tooltip title={t.exportClasses || "Export Classes"}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
                     </Space.Compact>
                   </Flex>
-                  <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{ display: 'none' }} />
+                  <input ref={classesFileRef} type="file" accept=".json" onChange={handleImportClasses} style={{ display: 'none' }} />
                   <div className="class-list-container">
-                    <List size="small" dataSource={categories} renderItem={(cat: string) => (
-                      <List.Item>
-                        <div className="class-management-item">
-                          <input type="color" value={categoryColors[cat] || '#cccccc'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value)} className="color-picker-input" />
-                          <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} placeholder={t.className} />
-                          <Tooltip title={t.delete || "Delete"}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
-                        </div>
-                      </List.Item>
-                    )} />
+                    <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} onChange={(e) => handleUpdateClass(index, 'color', e.target.value)} className="color-picker-input" /><Input value={label} onChange={(e) => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete || "Delete"}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
                   </div>
                   <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ flexShrink: 0 }}>{t.addClass}</Button>
                 </div>
@@ -1490,16 +1444,16 @@ const MaskOperate = () => {
                   <Title level={5}>{t.viewSettings || 'View & Annotation Settings'}</Title>
                   <Form.Item label={t.category}>
                     <Select
-                      value={currentCategory}
-                      onChange={(value: string) => setCurrentCategory(value)}
-                      disabled={!hasActiveImage || categories.length === 0}
+                      value={currentClassIndex}
+                      onChange={(value: number) => setCurrentClassIndex(value)}
+                      disabled={!hasActiveImage || Object.keys(classMap).length === 0}
                       placeholder={t.noCategoriesFound}
                     >
-                      {categories.map((cat, index) =>
-                        <Option key={cat} value={cat}>
+                      {Object.entries(classMap).map(([idx, { label, color }]) =>
+                        <Option key={idx} value={parseInt(idx)}>
                           <Space>
-                            <div style={{ width: '14px', height: '14px', backgroundColor: categoryColors[cat] || '#ccc', borderRadius: '3px', border: '1px solid #ccc' }} />
-                            {`[${index}] ${cat}`}
+                            <div style={{ width: '14px', height: '14px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />
+                            {`[${idx}] ${label}`}
                           </Space>
                         </Option>
                       )}
