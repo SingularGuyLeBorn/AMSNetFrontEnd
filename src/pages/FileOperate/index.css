@@ -178,28 +178,69 @@
   /* Center the new wrapper */
 }
 
-.class-list-container {
+/* --- Sized Content Containers --- */
+.annotation-list-wrapper,
+.class-list-container,
+.data-view-container {
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   width: 100%;
-  /* Take full width inside its parent */
   flex-grow: 1;
-  /* Take available space */
+  min-height: 0;
+  /* Important for flex-grow in a flex column */
 }
 
-/* New layout rule for annotation list */
+.inspector-tab-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 95%;
+  height: 80%;
+  gap: 16px;
+}
+
+
 .annotation-list-wrapper {
-  width: 90%;
-  height: 70%;
-  overflow-y: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
   padding: 4px;
   display: flex;
-  /* Added to contain the collapse properly */
   flex-direction: column;
 }
+
+
+.data-view-container {
+  width: 95%;
+  height: 80%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0;
+  /* Remove padding if it's just a wrapper now */
+  border: none;
+  /* Remove border if it's just a wrapper */
+}
+
+.data-view-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.data-content-textarea {
+  width: 100%;
+  flex-grow: 1;
+  min-height: 100px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  color: var(--text-color-primary);
+  background-color: var(--sider-background-color);
+  resize: none;
+}
+
 
 .annotation-collapse-container {
   overflow-y: visible;
@@ -225,37 +266,6 @@
   border-radius: 4px;
   cursor: pointer;
   background-color: var(--background-color);
-}
-
-.data-view-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  height: 100%;
-  width: 90%;
-  height: 70%;
-}
-
-.data-view-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-  min-height: 0;
-}
-
-.data-content-textarea {
-  width: 100%;
-  flex-grow: 1;
-  min-height: 100px;
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-  font-size: 13px;
-  color: var(--text-color-primary);
-  background-color: var(--sider-background-color);
-  resize: none;
 }
 
 /* --- Annotation List (Shared Styles) --- */

@@ -1330,43 +1330,46 @@ const MaskOperate = () => {
           <Tabs defaultActiveKey="1" className="inspector-tabs">
             <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
               <div className="tab-pane-content">
-                {hasActiveImage && currentViewAnnotations.length > 0 ? (
-                  <div className="annotation-list-wrapper">
-                    <Collapse accordion activeKey={selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
-                      {currentViewAnnotations.map((item) => (
-                        <Panel key={item.id} className="annotation-panel-item" header={
-                          <Flex justify="space-between" align="center" style={{ width: '100%' }}>
-                            <Space onClick={(e) => e.stopPropagation()}>
-                              <div className="color-indicator" style={{ backgroundColor: item.color }} />
-                              <Text className="category-name-text" title={item.category} ellipsis>{item.category}</Text>
-                            </Space>
-                            <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
-                          </Flex>}>
-                          <Descriptions bordered size="small" column={1} className="annotation-details">
-                            {'width' in item ? (
-                              <>
-                                <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
-                                <Descriptions.Item label="X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { x: v || 0 })} /> : item.x.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { y: v || 0 })} /> : item.y.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.width} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { width: v || 1 })} /> : item.width.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.height} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { height: v || 1 })} /> : item.height.toFixed(1)}</Descriptions.Item>
-                              </>
-                            ) : (
-                              <>
-                                <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
-                                <Descriptions.Item label="P1.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], x: v || 0 }, item.points[1]] })} /> : item.points[0].x.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="P1.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], y: v || 0 }, item.points[1]] })} /> : item.points[0].y.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="P2.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], x: v || 0 }] })} /> : item.points[1].x.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="P2.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], y: v || 0 }] })} /> : item.points[1].y.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label={t.thicknessLabel}>{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.thickness} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { thickness: v || 1 })} /> : item.thickness}</Descriptions.Item>
-                              </>
-                            )}
-                          </Descriptions>
-                        </Panel>
-                      ))}
-                    </Collapse>
-                  </div>
-                ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{hasActiveImage ? t.noAnnotations : t.noImages}</Text>}
+                <div className="inspector-tab-wrapper">
+                  <Title level={5} style={{ margin: 0, flexShrink: 0 }}>{t.annotations}</Title>
+                  {hasActiveImage && currentViewAnnotations.length > 0 ? (
+                    <div className="annotation-list-wrapper">
+                      <Collapse accordion activeKey={selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
+                        {currentViewAnnotations.map((item) => (
+                          <Panel key={item.id} className="annotation-panel-item" header={
+                            <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+                              <Space onClick={(e) => e.stopPropagation()}>
+                                <div className="color-indicator" style={{ backgroundColor: item.color }} />
+                                <Text className="category-name-text" title={item.category} ellipsis>{item.category}</Text>
+                              </Space>
+                              <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
+                            </Flex>}>
+                            <Descriptions bordered size="small" column={1} className="annotation-details">
+                              {'width' in item ? (
+                                <>
+                                  <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
+                                  <Descriptions.Item label="X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { x: v || 0 })} /> : item.x.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label="Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { y: v || 0 })} /> : item.y.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.width} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { width: v || 1 })} /> : item.width.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.height} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { height: v || 1 })} /> : item.height.toFixed(1)}</Descriptions.Item>
+                                </>
+                              ) : (
+                                <>
+                                  <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
+                                  <Descriptions.Item label="P1.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], x: v || 0 }, item.points[1]] })} /> : item.points[0].x.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label="P1.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], y: v || 0 }, item.points[1]] })} /> : item.points[0].y.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label="P2.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], x: v || 0 }] })} /> : item.points[1].x.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label="P2.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], y: v || 0 }] })} /> : item.points[1].y.toFixed(1)}</Descriptions.Item>
+                                  <Descriptions.Item label={t.thicknessLabel}>{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.thickness} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { thickness: v || 1 })} /> : item.thickness}</Descriptions.Item>
+                                </>
+                              )}
+                            </Descriptions>
+                          </Panel>
+                        ))}
+                      </Collapse>
+                    </div>
+                  ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{hasActiveImage ? t.noAnnotations : t.noImages}</Text>}
+                </div>
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
@@ -1408,27 +1411,29 @@ const MaskOperate = () => {
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
-              <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
-                <Flex justify="space-between" align="center" style={{ marginBottom: 16, width: '100%' }}>
-                  <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
-                  <Space.Compact>
-                    <Tooltip title={t.importClasses || "Import Classes"}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
-                    <Tooltip title={t.exportClasses || "Export Classes"}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
-                  </Space.Compact>
-                </Flex>
-                <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{ display: 'none' }} />
-                <div className="class-list-container">
-                  <List size="small" dataSource={categories} renderItem={(cat: string) => (
-                    <List.Item>
-                      <div className="class-management-item">
-                        <input type="color" value={categoryColors[cat] || '#cccccc'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value)} className="color-picker-input" />
-                        <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} placeholder={t.className} />
-                        <Tooltip title={t.delete || "Delete"}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
-                      </div>
-                    </List.Item>
-                  )} />
+              <div className="tab-pane-content">
+                <div className="inspector-tab-wrapper">
+                  <Flex justify="space-between" align="center" style={{ width: '100%', flexShrink: 0 }}>
+                    <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
+                    <Space.Compact>
+                      <Tooltip title={t.importClasses || "Import Classes"}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
+                      <Tooltip title={t.exportClasses || "Export Classes"}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
+                    </Space.Compact>
+                  </Flex>
+                  <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{ display: 'none' }} />
+                  <div className="class-list-container">
+                    <List size="small" dataSource={categories} renderItem={(cat: string) => (
+                      <List.Item>
+                        <div className="class-management-item">
+                          <input type="color" value={categoryColors[cat] || '#cccccc'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value)} className="color-picker-input" />
+                          <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} placeholder={t.className} />
+                          <Tooltip title={t.delete || "Delete"}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
+                        </div>
+                      </List.Item>
+                    )} />
+                  </div>
+                  <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ flexShrink: 0 }}>{t.addClass}</Button>
                 </div>
-                <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ marginTop: 16, width: '100%' }}>{t.addClass}</Button>
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCog} /></Tooltip>} key="3">

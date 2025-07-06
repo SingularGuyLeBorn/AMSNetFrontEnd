@@ -1522,63 +1522,65 @@ const FileOperate: React.FC = () => {
                     <Tabs defaultActiveKey="1" className="inspector-tabs">
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1">
                             <div className="tab-pane-content">
-                                <div style={{ flexShrink: 0, width: '100%' }}>
-                                    <Form layout="vertical">
-                                        <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
-                                            <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
-                                        </Form.Item>
-                                        <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
-                                        <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
-                                        <Form.Item label={t.regionDeleteMode} style={{ marginBottom: 8, display: activeTool === 'region-delete' ? 'block' : 'none' }}>
-                                            <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode}>
-                                                <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
-                                                <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
-                                            </Radio.Group>
-                                        </Form.Item>
-                                    </Form>
-                                    <Divider />
-                                    <Title level={5} style={{ marginBottom: 8, width: '100%', textAlign: 'left' }}>{t.annotations}</Title>
-                                </div>
-                                {parsedYoloData.length > 0 ? (
-                                    <div className="annotation-list-wrapper">
-                                        <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
-                                            {parsedYoloData.map((item) => (
-                                                <Panel
-                                                    key={item.name}
-                                                    header={
-                                                        <Flex justify="space-between" align="center" style={{ width: '100%' }}>
-                                                            <Space>
-                                                                <div className="color-indicator" style={{ backgroundColor: classMap[item.classIdx]?.color || '#808080' }} />
-                                                                <Text className="category-name-text" title={item.name} ellipsis>{item.name}</Text>
-                                                            </Space>
-                                                            <Tooltip title={t.deleteAnnotationTooltip}>
-                                                                <Button
-                                                                    icon={<FontAwesomeIcon icon={faTrash} />}
-                                                                    type="text"
-                                                                    danger
-                                                                    size="small"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        handleDeleteAnnotationByName(item.name);
-                                                                    }}
-                                                                />
-                                                            </Tooltip>
-                                                        </Flex>
-                                                    }
-                                                    className="annotation-panel-item"
-                                                >
-                                                    <Descriptions bordered size="small" column={1} className="annotation-details">
-                                                        <Descriptions.Item label={t.category}>{classMap[item.classIdx]?.label || 'N/A'}</Descriptions.Item>
-                                                        <Descriptions.Item label="Center X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.x} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 2, v)} /> : item.x.toFixed(4)}</Descriptions.Item>
-                                                        <Descriptions.Item label="Center Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.y} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 3, v)} /> : item.y.toFixed(4)}</Descriptions.Item>
-                                                        <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.w} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 4, v)} /> : item.w.toFixed(4)}</Descriptions.Item>
-                                                        <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.h} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 5, v)} /> : item.h.toFixed(4)}</Descriptions.Item>
-                                                    </Descriptions>
-                                                </Panel>
-                                            ))}
-                                        </Collapse>
+                                <div className="inspector-tab-wrapper">
+                                    <div style={{ flexShrink: 0 }}>
+                                        <Form layout="vertical">
+                                            <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
+                                                <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
+                                            </Form.Item>
+                                            <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
+                                            <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
+                                            <Form.Item label={t.regionDeleteMode} style={{ marginBottom: 8, display: activeTool === 'region-delete' ? 'block' : 'none' }}>
+                                                <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode}>
+                                                    <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
+                                                    <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
+                                                </Radio.Group>
+                                            </Form.Item>
+                                        </Form>
+                                        <Divider />
+                                        <Title level={5} style={{ marginBottom: 8, width: '100%', textAlign: 'left' }}>{t.annotations}</Title>
                                     </div>
-                                ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{t.noAnnotations}</Text>}
+                                    {parsedYoloData.length > 0 ? (
+                                        <div className="annotation-list-wrapper">
+                                            <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
+                                                {parsedYoloData.map((item) => (
+                                                    <Panel
+                                                        key={item.name}
+                                                        header={
+                                                            <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+                                                                <Space>
+                                                                    <div className="color-indicator" style={{ backgroundColor: classMap[item.classIdx]?.color || '#808080' }} />
+                                                                    <Text className="category-name-text" title={item.name} ellipsis>{item.name}</Text>
+                                                                </Space>
+                                                                <Tooltip title={t.deleteAnnotationTooltip}>
+                                                                    <Button
+                                                                        icon={<FontAwesomeIcon icon={faTrash} />}
+                                                                        type="text"
+                                                                        danger
+                                                                        size="small"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleDeleteAnnotationByName(item.name);
+                                                                        }}
+                                                                    />
+                                                                </Tooltip>
+                                                            </Flex>
+                                                        }
+                                                        className="annotation-panel-item"
+                                                    >
+                                                        <Descriptions bordered size="small" column={1} className="annotation-details">
+                                                            <Descriptions.Item label={t.category}>{classMap[item.classIdx]?.label || 'N/A'}</Descriptions.Item>
+                                                            <Descriptions.Item label="Center X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.x} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 2, v)} /> : item.x.toFixed(4)}</Descriptions.Item>
+                                                            <Descriptions.Item label="Center Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.y} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 3, v)} /> : item.y.toFixed(4)}</Descriptions.Item>
+                                                            <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.w} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 4, v)} /> : item.w.toFixed(4)}</Descriptions.Item>
+                                                            <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.h} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 5, v)} /> : item.h.toFixed(4)}</Descriptions.Item>
+                                                        </Descriptions>
+                                                    </Panel>
+                                                ))}
+                                            </Collapse>
+                                        </div>
+                                    ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{t.noAnnotations}</Text>}
+                                </div>
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4">
@@ -1610,13 +1612,21 @@ const FileOperate: React.FC = () => {
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
-                            <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
-                                <Flex justify="space-between" align="center" style={{ marginBottom: 16, width: '100%' }}><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
-                                <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
-                                <div className="class-list-container">
-                                    <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
+                            <div className="tab-pane-content">
+                                <div className="inspector-tab-wrapper">
+                                    <Flex justify="space-between" align="center" style={{ width: '100%', flexShrink: 0 }}>
+                                        <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
+                                        <Space.Compact>
+                                            <Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip>
+                                            <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
+                                        </Space.Compact>
+                                    </Flex>
+                                    <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
+                                    <div className="class-list-container">
+                                        <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
+                                    </div>
+                                    <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16, width: '100%', flexShrink: 0 }}>{t.addClass}</Button>
                                 </div>
-                                <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16, width: '100%' }}>{t.addClass}</Button>
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCogs} /></Tooltip>} key="3">
