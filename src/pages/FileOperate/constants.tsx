@@ -95,6 +95,9 @@ export const translations: { [key: string]: TranslationSet } = {
     regionDeleteMode: '区域删除模式',
     fullyContained: '全包删除',
     intersecting: '接触删除',
+    toggleCategoryInBox: '框内显示类别名',
+    viewSettings: '视图与标注设置',
+    clearAnnotationsButton: '清空当前标注',
   },
   en: {
     uploadFolder: 'Upload Folder', undo: 'Undo', redo: 'Redo', save: 'Save', deleteBox: 'Delete Box', category: 'Category', previous: 'Previous', next: 'Next', currentFile: 'Current File', coloringMode: 'Coloring Mode', drawingMode: 'Drawing Mode', delete: 'Delete', saveAll: 'Export All (ZIP)', chooseJsonName: 'Choose Component (for coloring)', chooseJsonType: 'Choose Type (for coloring)', noFile: 'No files to operate on', dataExplorer: 'Data Explorer', settings: 'Settings', annotations: 'Annotations', currentImage: "Current:", noAnnotations: "No annotations for this image", noImages: "Please upload a folder first", selectTool: "Select/Move", operationSuccessful: "Operation successful", noUndoOperations: "No operations to undo", noRedoOperations: "No operations to redo", aiAnnotation: 'AI Auto-Annotation', aiAnnotating: 'AI Annotating...', aiFailed: "AI Annotation Failed", apiMode: 'API Mode', apiModeAuto: 'Auto', apiModeManual: 'Manual', manualApiEndpoint: 'Manual API Selection', apiForNew: 'API for New Image', apiForIncremental: 'API for Incremental', classManagement: 'Class Management', addClass: 'Add Class', importClasses: 'Import Classes', exportClasses: 'Export Classes', className: 'Class Name', hidePanel: 'Hide Panel', showPanel: 'Show Panel', rawData: 'Raw Data', history: 'History', revert: 'Revert', revertConfirmTitle: 'Are you sure you want to create a new branch from this version?',
@@ -112,5 +115,8 @@ export const translations: { [key: string]: TranslationSet } = {
     regionDeleteMode: 'Region Delete Mode',
     fullyContained: 'Fully Contained',
     intersecting: 'Intersecting',
+    toggleCategoryInBox: 'Show category in box',
+    viewSettings: 'View & Annotation Settings',
+    clearAnnotationsButton: 'Clear Current Annotations',
   }
 };

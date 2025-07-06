@@ -43,6 +43,7 @@ import {
     Select,
     Slider,
     Space,
+    Switch,
     Tabs,
     Tooltip,
     Typography,
@@ -326,6 +327,8 @@ const FileOperate: React.FC = () => {
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
     const [previewState, setPreviewState] = useState<PreviewState>(null);
+    const [showCategoryInBox, setShowCategoryInBox] = useState<boolean>(true);
+
 
     const [transform, setTransform] = useState<CanvasTransform>({ scale: 1, translateX: 0, translateY: 0 });
     const isSpacePressed = useRef(false);
@@ -510,6 +513,21 @@ const FileOperate: React.FC = () => {
                 ctx.lineWidth = (isSelected ? 3 : 2) / transform.scale;
                 ctx.rect(absLeft, absTop, absW, absH);
                 ctx.stroke();
+
+                if (showCategoryInBox) {
+                    ctx.fillStyle = isSelected ? '#fff' : color;
+                    ctx.font = `bold ${12 / transform.scale}px Arial`;
+                    ctx.textBaseline = "top";
+                    const text = `[${classIdx}] ${classMap[classIdx]?.label}`;
+                    const textMetrics = ctx.measureText(text);
+                    if (isSelected) {
+                        ctx.fillStyle = color;
+                        ctx.fillRect(absLeft, absTop, textMetrics.width + 8 / transform.scale, 18 / transform.scale);
+                        ctx.fillStyle = '#fff';
+                    }
+                    ctx.fillText(text, absLeft + 4 / transform.scale, absTop + 4 / transform.scale);
+                }
+
                 if (isSelected) {
                     const handles = getResizeHandles({ x: absLeft, y: absTop, width: absW, height: absH });
                     ctx.fillStyle = '#0958d9';
@@ -563,7 +581,7 @@ const FileOperate: React.FC = () => {
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
         ctx.restore();
-    }, [loadedImage, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform, previewState]);
+    }, [loadedImage, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform, previewState, showCategoryInBox]);
 
     const getVirtualCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
@@ -1216,6 +1234,15 @@ const FileOperate: React.FC = () => {
     };
     const handlePreviewEnd = () => setPreviewState(null);
 
+    const handleClearAnnotations = () => {
+        if (!hasActiveImage) return;
+        setCurrentYoloContent('');
+        setCurrentJsonContent('{}');
+        commitWithMessages("清空所有标注", { yoloContent: '', jsonContent: '{}' });
+        setSelectedBoxName(null);
+        message.success(`${t.clearAnnotationsButton} ${t.operationSuccessful}`);
+    };
+
     const handleSaveCurrent = () => {
         if (!file_currentFilePath) {
             message.warning(t.noFile);
@@ -1614,16 +1641,11 @@ const FileOperate: React.FC = () => {
                                 <div className="inspector-tab-wrapper">
                                     <div style={{ flexShrink: 0 }}>
                                         <Form layout="vertical">
-                                            <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
-                                                <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
-                                            </Form.Item>
-                                            <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
-                                            <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
-                                            <Form.Item label={t.regionDeleteMode} style={{ marginBottom: 8, display: activeTool === 'region-delete' ? 'block' : 'none' }}>
-                                                <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode}>
-                                                    <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
-                                                    <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
-                                                </Radio.Group>
+                                            <Form.Item label={t.coloringMode} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}>
+                                                <Input.Group compact>
+                                                    <Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '50%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select>
+                                                    <Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '50%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select>
+                                                </Input.Group>
                                             </Form.Item>
                                         </Form>
                                         <Divider />
@@ -1737,9 +1759,45 @@ const FileOperate: React.FC = () => {
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCogs} /></Tooltip>} key="3">
-                            <div className="tab-pane-content" style={{ justifyContent: 'flex-start' }}>
-                                <Title level={5}>{t.settings}</Title>
-                                <p>此页面暂无特定设置。</p>
+                            <div className="tab-pane-content" style={{ justifyContent: 'flex-start', alignItems: 'stretch' }}>
+                                <Form layout="vertical" style={{ width: '100%' }}>
+                                    <Title level={5}>{t.viewSettings}</Title>
+                                    <Form.Item label={t.category}>
+                                        <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }} disabled={!hasActiveImage}>
+                                            {Object.entries(classMap).map(([idx, { color, label }]) => (
+                                                <Option key={idx} value={parseInt(idx)}>
+                                                    <Space>
+                                                        <div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />
+                                                        {`[${idx}] ${label}`}
+                                                    </Space>
+                                                </Option>
+                                            ))}
+                                        </Select>
+                                    </Form.Item>
+                                    <Form.Item label={t.toggleCategoryInBox} valuePropName="checked">
+                                        <Switch checked={showCategoryInBox} onChange={setShowCategoryInBox} />
+                                    </Form.Item>
+                                    <Divider />
+                                    <Title level={5}>{t.regionDelete}</Title>
+                                    <Form.Item label={t.regionDeleteMode}>
+                                        <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode} disabled={!hasActiveImage}>
+                                            <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
+                                            <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
+                                        </Radio.Group>
+                                    </Form.Item>
+                                    <Divider />
+                                    <Form.Item>
+                                        <Button
+                                            danger
+                                            icon={<FontAwesomeIcon icon={faEraser} />}
+                                            onClick={handleClearAnnotations}
+                                            block
+                                            disabled={!hasActiveImage || (!currentYoloContent && !currentJsonContent)}
+                                        >
+                                            {t.clearAnnotationsButton}
+                                        </Button>
+                                    </Form.Item>
+                                </Form>
                             </div>
                         </TabPane>
                     </Tabs>

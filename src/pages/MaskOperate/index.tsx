@@ -90,7 +90,7 @@ export const convertApiToView = (apiData: ApiResponse, classMap: { [key: number]
     return newIndex;
   };
 
-  const { key_points, segments, cpnts } = apiData;
+  const { key_points, segments } = apiData;
 
   if (key_points && segments) {
     const keyPointMap = new Map(key_points.map(p => [p.id, p]));
@@ -108,20 +108,8 @@ export const convertApiToView = (apiData: ApiResponse, classMap: { [key: number]
     });
   }
 
-  if (cpnts) {
-    cpnts.forEach((cpnt) => {
-      const classIndex = getClassIndex(cpnt.type || 'default');
-      viewAnnotations.push({
-        id: generateUniqueId(),
-        x: cpnt.l,
-        y: cpnt.t,
-        width: cpnt.r - cpnt.l,
-        height: cpnt.b - cpnt.t,
-        classIndex,
-        sourceLineWidth: 2,
-      });
-    });
-  }
+  // Bedrock V4.2.4 Fix: Removed logic for processing `cpnts` to enforce data boundaries.
+  // This component now ONLY visualizes wire data (key_points and segments).
 
   return { viewAnnotations, updatedClassMap: tempClassMap };
 };
