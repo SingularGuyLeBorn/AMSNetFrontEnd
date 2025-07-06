@@ -14,6 +14,7 @@ export interface VersionHistory<T> {
   nodes: Record<string, HistoryNode<T>>; // Collection of all version nodes
   head: string; // Pointer to the current active version ID
   root: string; // Root node ID
+  redoStack: string[]; // Bedrock V4.2.2 Change: Stores IDs of nodes that were "undone from" for linear redo
 }
 
 // Bedrock V4.2.1 Change: Enrich DataNode with all properties from HistoryNode for type-safe rendering.
@@ -52,6 +53,7 @@ export const useVersionControl = <T>(
       nodes: { [rootId]: rootNode },
       head: rootId,
       root: rootId,
+      redoStack: [], // Bedrock V4.2.2 Change: Initialize redoStack
     };
     return newHistory;
   };
@@ -76,6 +78,7 @@ export const useVersionControl = <T>(
       ...currentHistory,
       nodes: { ...currentHistory.nodes, [newId]: newNode },
       head: newId,
+      redoStack: [], // Bedrock V4.2.2 Change: Clear redoStack on new commit (new branch started)
     });
   };
 
@@ -110,6 +113,7 @@ export const useVersionControl = <T>(
       ...currentHistory,
       nodes: { ...currentHistory.nodes, [newId]: newNode },
       head: newId,
+      redoStack: [], // Bedrock V4.2.2 Change: Clear redoStack on explicit checkout
     });
 
     return targetNode.state;
@@ -127,7 +131,11 @@ export const useVersionControl = <T>(
     }
     const parentNode = currentHistory.nodes[headNode.parentId];
     if (parentNode) {
-      setHistory({ ...currentHistory, head: parentNode.id });
+      setHistory({
+        ...currentHistory,
+        head: parentNode.id,
+        redoStack: [...currentHistory.redoStack, headNode.id], // Bedrock V4.2.2 Change: Push current head to redoStack
+      });
       return parentNode.state;
     }
     return null;
@@ -135,23 +143,27 @@ export const useVersionControl = <T>(
 
   /**
    * @description Moves the head pointer to a child of the current head, effectively performing a "redo".
-   *              It will redo to the most recent child branch.
+   *              It uses the redoStack to maintain a linear redo path.
    * @returns The state of the child node, or null if no children exist.
    */
   const redo = (): T | null => {
     const currentHistory = ensureHistory();
-    const children = Object.values(currentHistory.nodes).filter(
-      (node) => node.parentId === currentHistory.head,
-    );
-
-    if (children.length === 0) {
-      return null;
+    if (currentHistory.redoStack.length === 0) {
+      return null; // Bedrock V4.2.2 Change: No more children to redo to in linear history
     }
 
-    // Redo to the most recently created child branch.
-    const childToRedo = children.sort((a, b) => b.timestamp - a.timestamp)[0];
-    setHistory({ ...currentHistory, head: childToRedo.id });
-    return childToRedo.state;
+    const nextRedoNodeId = currentHistory.redoStack[currentHistory.redoStack.length - 1]; // Get last undone node
+    const nextRedoNode = currentHistory.nodes[nextRedoNodeId];
+
+    if (nextRedoNode) {
+      setHistory({
+        ...currentHistory,
+        head: nextRedoNode.id,
+        redoStack: currentHistory.redoStack.slice(0, -1), // Bedrock V4.2.2 Change: Pop from redoStack
+      });
+      return nextRedoNode.state;
+    }
+    return null;
   };
 
   const { treeData, activePath } = useMemo(() => {
@@ -210,7 +222,7 @@ export const useVersionControl = <T>(
     redo,
     history,
     canUndo: !!(history && history.nodes[history.head]?.parentId),
-    canRedo: !!(history && Object.values(history.nodes).some((n) => n.parentId === history.head)),
+    canRedo: !!(history && history.redoStack.length > 0), // Bedrock V4.2.2 Change: canRedo depends on redoStack
     treeData,
     activePath,
   };

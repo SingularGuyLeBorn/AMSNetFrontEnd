@@ -16,14 +16,14 @@ import { Button, message, Space, Tooltip, Upload } from 'antd';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import { nanoid } from 'nanoid';
-import React from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import defaultSettings from '../config/defaultSettings';
 import { AvatarDropdown } from './components/RightContent/AvatarDropdown';
 import { requestConfig } from './requestConfig';
 
 const loginPath = '/user/login';
 
-// Bedrock Change V4: Add a robust natural sort function for filenames.
+// Bedrock V4 Change: Add a robust natural sort function for filenames.
 /**
  * @description Performs a natural sort on two strings, correctly handling numbers within the string.
  * e.g., "item_2" comes before "item_10".
@@ -204,7 +204,8 @@ const GlobalUploader: React.FC = () => {
         head: fileRootId,
         nodes: {
           [fileRootId]: { id: fileRootId, parentId: null, timestamp: Date.now(), summary: '初始版本', state: fileInitialState }
-        }
+        },
+        redoStack: [], // Bedrock V4.2.2 Change: Initialize redoStack
       };
 
       // MaskOperate History
@@ -215,7 +216,8 @@ const GlobalUploader: React.FC = () => {
         head: maskRootId,
         nodes: {
           [maskRootId]: { id: maskRootId, parentId: null, timestamp: Date.now(), summary: '初始版本', state: maskInitialState }
-        }
+        },
+        redoStack: [], // Bedrock V4.2.2 Change: Initialize redoStack
       };
     }
 
@@ -260,13 +262,19 @@ const GlobalUploader: React.FC = () => {
 };
 
 
+// Interface for the ref exposed by GlobalExporter
+interface GlobalExporterRef {
+  exportAll: () => Promise<void>;
+}
+
 /**
  * @description Global exporter component. It intelligently handles data from the current page's real-time state.
  *              This is key to solving a core problem: it reads the active file path and corresponding in-memory
  *              content directly from the `annotationStore`. This ensures that even if the user hasn't triggered a save
  *              by switching images, the "Global Export" captures the latest work.
+ *              Bedrock V4.2.3 Change: Wrapped with forwardRef to expose `exportAll` method for AutoSaveManager.
  */
-const GlobalExporter: React.FC = () => {
+const GlobalExporter = forwardRef<GlobalExporterRef, {}>(({ }, ref) => {
   const {
     fileTree,
     file_yoloFileContents,
@@ -278,7 +286,7 @@ const GlobalExporter: React.FC = () => {
   /**
    * @description Exports all annotation data from both FileOperate and MaskOperate pages into a structured ZIP file.
    */
-  const handleGlobalExport = async () => {
+  const exportAll = async () => {
     if (!fileTree) {
       message.warning("没有可导出的文件。");
       return;
@@ -343,15 +351,63 @@ const GlobalExporter: React.FC = () => {
     } catch (error: any) {
       console.error("全局导出失败:", error);
       message.error({ content: `导出失败: ${error.message}`, key: 'global-export', duration: 3 });
+      throw error; // Re-throw to allow AutoSaveManager to catch
     }
   };
 
+  // Expose the exportAll function via ref
+  useImperativeHandle(ref, () => ({
+    exportAll,
+  }));
+
   return (
     <Tooltip title="导出所有页面的标注数据">
-      <Button type="primary" icon={<FileZipOutlined />} onClick={handleGlobalExport} ghost>
+      <Button type="primary" icon={<FileZipOutlined />} onClick={exportAll} ghost>
         全局导出
       </Button>
     </Tooltip>
+  );
+});
+
+/**
+ * @description Manages automatic global exports at a defined interval.
+ * Bedrock V4.2.3 Change: New component for periodic auto-save.
+ */
+const AutoSaveManager: React.FC = () => {
+  const globalExporterRef = useRef<GlobalExporterRef>(null);
+  const isAutoExportingRef = useRef(false); // To prevent concurrent auto-exports
+
+  // Configurable interval: 10 minutes
+  const AUTO_SAVE_INTERVAL_MS = 10 * 60 * 1000;
+
+  useEffect(() => {
+    const intervalId = setInterval(async () => {
+      if (globalExporterRef.current && !isAutoExportingRef.current) {
+        isAutoExportingRef.current = true;
+
+        // Show silent loading message
+        const hideLoading = message.loading({ content: '正在自动导出数据...', key: 'auto-export', duration: 0 });
+
+        try {
+          await globalExporterRef.current.exportAll(); // Call the exposed export method
+          message.success({ content: '自动导出成功！', key: 'auto-export', duration: 2 });
+        } catch (error) {
+          // Error already logged by GlobalExporter, just show a message
+          message.error({ content: `自动导出失败！`, key: 'auto-export', duration: 3 });
+        } finally {
+          hideLoading(); // Dismiss loading message
+          isAutoExportingRef.current = false;
+        }
+      }
+    }, AUTO_SAVE_INTERVAL_MS);
+
+    // Cleanup interval on component unmount
+    return () => clearInterval(intervalId);
+  }, []); // Empty dependency array means this effect runs once on mount
+
+  return (
+    // Render the actual GlobalExporter component, passing the ref
+    <GlobalExporter ref={globalExporterRef} />
   );
 };
 
@@ -399,7 +455,7 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     rightContentRender: () => (
       <Space size="middle">
         <GlobalUploader />
-        <GlobalExporter />
+        <AutoSaveManager /> {/* Use the new AutoSaveManager component */}
         <LanguageSwitcher />
         <AvatarDropdown />
       </Space>
