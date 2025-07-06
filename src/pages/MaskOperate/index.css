@@ -1,4 +1,3 @@
-/* START OF FILE src/pages/MaskOperate/index.css */
 /* --- Unified Color Palette --- */
 :root {
   --primary-color: #4096ff;
@@ -267,5 +266,3 @@
 .ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
 }
-
-/* END OF FILE src/pages/MaskOperate/index.css */

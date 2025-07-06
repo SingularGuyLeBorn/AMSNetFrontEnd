@@ -1,12 +1,14 @@
-// START OF FILE src/pages/FileOperate/index.tsx
 import FileExplorer from "@/components/FileExplorer";
-import type { FileNode } from "@/models/fileTree";
+import type { FileNode, FileTreeNode } from "@/models/fileTree";
 import {
     faCogs,
-    faDatabase, faEraser,
+    faDatabase,
+    faEraser,
     faFileExport,
     faFileImport,
-    faList, faMinusCircle, faMousePointer,
+    faList,
+    faMinusCircle,
+    faMousePointer,
     faPaintBrush,
     faPen,
     faPlus,
@@ -91,12 +93,12 @@ const MAGNIFIER_ZOOM = 3; // The zoom level
 /**
  * @description Recursively searches for a file node by its path (key) in the file tree.
  * @param {string} key The path of the file to find.
- * @param {any} node The current node to search within.
+ * @param {FileTreeNode} node The current node to search within.
  * @returns {FileNode | null} The found file node or null.
  */
-const findFileNodeByKey = (key: string, node: any): FileNode | null => {
+const findFileNodeByKey = (key: string, node: FileTreeNode): FileNode | null => {
     if (node.key === key && node.isLeaf) {
-        return node;
+        return node as FileNode;
     }
     if (!node.isLeaf) {
         for (const child of node.children) {
@@ -1099,7 +1101,7 @@ const FileOperate: React.FC = () => {
             }
 
 
-            const addFolderToZip = (node: any, currentZipFolder: JSZip) => {
+            const addFolderToZip = (node: FileTreeNode, currentZipFolder: JSZip) => {
                 if (!node.isLeaf) { // It's a directory
                     const folder = currentZipFolder.folder(node.title);
                     if (folder) {
@@ -1482,5 +1484,3 @@ const FileOperate: React.FC = () => {
 };
 
 export default FileOperate;
-
-// File: src/pages/FileOperate/index.tsx

@@ -1,6 +1,5 @@
-// START OF FILE src/pages/MaskOperate/index.tsx
 import FileExplorer from "@/components/FileExplorer/index";
-import type { FileNode } from "@/models/fileTree.tsx";
+import type { FileNode, FileTreeNode } from "@/models/fileTree.tsx";
 import {
   faCog,
   faDatabase,
@@ -47,9 +46,9 @@ const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
 const DIAGONAL_HANDLE_SIZE = 10;
 
-const findFileNodeByKey = (key: string, node: any): FileNode | null => {
+const findFileNodeByKey = (key: string, node: FileTreeNode): FileNode | null => {
   if (node.key === key && node.isLeaf) {
-    return node;
+    return node as FileNode;
   }
   if (!node.isLeaf) {
     for (const child of node.children) {
@@ -871,7 +870,7 @@ const MaskOperate = () => {
 
       const finalAllAnnotations = allImageAnnotations;
 
-      const addFolderToZip = (node: any, currentZipFolder: JSZip) => {
+      const addFolderToZip = (node: FileTreeNode, currentZipFolder: JSZip) => {
         if (!node.isLeaf) { // Directory
           const folder = currentZipFolder.folder(node.title);
           if (folder) node.children.forEach((child: any) => addFolderToZip(child, folder));
@@ -1336,5 +1335,3 @@ const MaskOperate = () => {
 };
 
 export default MaskOperate;
-
-// File: src/pages/MaskOperate/index.tsx

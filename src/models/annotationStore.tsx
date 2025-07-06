@@ -105,4 +105,3 @@ export default function useAnnotationStore() {
     mask_redoHistory, setMask_redoHistory,
   };
 }
-// END OF FILE src/models/annotationStore.tsx
