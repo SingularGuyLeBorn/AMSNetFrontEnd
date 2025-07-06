@@ -1,5 +1,6 @@
 // START OF FILE src/app.tsx
 import Footer from '@/components/Footer';
+import type { VersionHistory } from '@/hooks/useVersionControl';
 import type { DirectoryNode, FileNode, FileTreeNode } from '@/models/fileTree';
 import type { ClassInfo } from '@/pages/FileOperate/constants';
 // Bedrock Change: Import helpers with specific aliases to avoid name collisions between pages.
@@ -14,6 +15,7 @@ import { history, useModel } from '@umijs/max';
 import { Button, message, Space, Tooltip, Upload } from 'antd';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
+import { nanoid } from 'nanoid';
 import React from 'react';
 import defaultSettings from '../config/defaultSettings';
 import { AvatarDropdown } from './components/RightContent/AvatarDropdown';
@@ -66,12 +68,10 @@ const GlobalUploader: React.FC = () => {
     setMask_currentFilePath,
     setFile_yoloFileContents,
     setFile_jsonFileContents,
-    setFile_operationHistory,
-    setFile_redoHistory,
+    setFile_versionHistory,
     setFile_modifiedFiles,
     setMask_allImageAnnotations,
-    setMask_operationHistory,
-    setMask_redoHistory,
+    setMask_versionHistory,
     setMask_classMap,
     setMask_modifiedFiles,
     mask_classMap,
@@ -93,6 +93,7 @@ const GlobalUploader: React.FC = () => {
     const root: DirectoryNode = { key: 'root', title: 'Project', isLeaf: false, children: [] };
     const nodeMap = new Map<string, DirectoryNode>([['root', root]]);
     let firstImageFile: FileNode | null = null;
+    const imagePaths: string[] = [];
 
     const allFiles = files.filter(f => f.size > 0).sort((a, b) => naturalSort(a.webkitRelativePath, b.webkitRelativePath));
 
@@ -140,8 +141,11 @@ const GlobalUploader: React.FC = () => {
       };
       currentNode.children.push(fileNode);
 
-      if (file.type.startsWith('image/') && !firstImageFile) {
-        firstImageFile = fileNode;
+      if (file.type.startsWith('image/')) {
+        if (!firstImageFile) {
+          firstImageFile = fileNode;
+        }
+        imagePaths.push(fileNode.key);
       }
     }
 
@@ -184,19 +188,49 @@ const GlobalUploader: React.FC = () => {
       }
     }
 
-    // 4. Update global state for ALL pages
+    // 4. Initialize Version Histories for all image files
+    const fileVersionHistories: Record<string, VersionHistory<{ yoloContent: string | null; jsonContent: string | null; }>> = {};
+    const maskVersionHistories: Record<string, VersionHistory<MaskImageAnnotationData>> = {};
+
+    for (const imagePath of imagePaths) {
+      // FileOperate History
+      const fileRootId = nanoid();
+      const fileInitialState = {
+        yoloContent: yoloContents[imagePath] || null,
+        jsonContent: jsonContents[imagePath] || null,
+      };
+      fileVersionHistories[imagePath] = {
+        root: fileRootId,
+        head: fileRootId,
+        nodes: {
+          [fileRootId]: { id: fileRootId, parentId: null, timestamp: Date.now(), summary: '初始版本', state: fileInitialState }
+        }
+      };
+
+      // MaskOperate History
+      const maskRootId = nanoid();
+      const maskInitialState = maskAnnotations[imagePath] || { viewAnnotations: [], apiJson: {} };
+      maskVersionHistories[imagePath] = {
+        root: maskRootId,
+        head: maskRootId,
+        nodes: {
+          [maskRootId]: { id: maskRootId, parentId: null, timestamp: Date.now(), summary: '初始版本', state: maskInitialState }
+        }
+      };
+    }
+
+    // 5. Update global state for ALL pages
     setFile_yoloFileContents(yoloContents);
     setFile_jsonFileContents(jsonContents);
     setMask_allImageAnnotations(maskAnnotations);
     setMask_classMap(tempMaskClassMap);
 
     // Reset histories and modification state for ALL pages
-    setFile_operationHistory({});
-    setFile_redoHistory({});
+    setFile_versionHistory(fileVersionHistories);
+    setMask_versionHistory(maskVersionHistories);
     setFile_modifiedFiles({});
-    setMask_operationHistory({});
-    setMask_redoHistory({});
     setMask_modifiedFiles({});
+
 
     // Bedrock V4 Change: Set the initial file for both pages independently.
     if (firstImageFile) {

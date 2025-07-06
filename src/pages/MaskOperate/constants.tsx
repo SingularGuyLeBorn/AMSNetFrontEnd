@@ -1,4 +1,3 @@
-// START OF FILE src/pages/MaskOperate/constants.tsx
 // MaskOperate/constants.tsx
 
 // Bedrock V4.3 Change: Import and reuse the unified ClassInfo types
@@ -82,15 +81,7 @@ export type ImageAnnotationData = {
   apiJson: ApiResponse;
 };
 
-// --- 撤销/重做操作定义 ---
-// Note: Class map changes are considered significant, destructive operations
-// and are not included in the standard annotation undo/redo stack.
-// They are guarded by modals instead.
-export type UndoOperation = {
-  filePath: string;
-  previousViewAnnotations: ViewAnnotation[];
-  previousApiJson: ApiResponse;
-};
+// Bedrock V4.2 Change: Operation type is deprecated and replaced by the VersionHistory model in annotationStore.
 
 
 // 定义默认的类别颜色映射
@@ -155,6 +146,9 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     hidePanel: '隐藏面板',
     showPanel: '显示面板',
     viewSettings: '视图设置',
+    history: '历史记录',
+    revert: '恢复',
+    revertConfirmTitle: '确定要从此版本创建分支吗?',
     deleteClassConfirmTitle: '确认删除类别 “%s” ?',
     deleteClassConfirmContent: '此操作不可恢复，将删除所有图片中属于该类别的标注，并重新排列后续类别的索引。',
     importClassConfirmTitle: '确认导入类别?',
@@ -208,6 +202,9 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     hidePanel: 'Hide Panel',
     showPanel: 'Show Panel',
     viewSettings: 'View Settings',
+    history: 'History',
+    revert: 'Revert',
+    revertConfirmTitle: 'Are you sure you want to create a new branch from this version?',
     deleteClassConfirmTitle: 'Confirm deletion of class "%s"?',
     deleteClassConfirmContent: 'This action cannot be undone. It will remove all annotations of this class from all images and re-index subsequent classes.',
     importClassConfirmTitle: 'Confirm Class Import?',

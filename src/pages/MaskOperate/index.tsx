@@ -1,4 +1,6 @@
 import FileExplorer from "@/components/FileExplorer/index";
+import VersionHistoryViewer from "@/components/VersionHistoryViewer";
+import { useVersionControl } from "@/hooks/useVersionControl";
 import type { FileNode, FileTreeNode } from "@/models/fileTree.tsx";
 import {
   faCog,
@@ -7,6 +9,7 @@ import {
   faEraser,
   faFileExport,
   faFileImport,
+  faHistory,
   faList,
   faMinusCircle,
   faMousePointer,
@@ -26,7 +29,7 @@ import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiComponent, ApiKeyPoint, ApiResponse, ApiSegment, ClassInfo, FileClassInfo, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
+import type { ApiComponent, ApiKeyPoint, ApiResponse, ApiSegment, ClassInfo, FileClassInfo, ImageAnnotationData, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
 import { RESIZE_HANDLE_SIZE, translations } from './constants';
 import './index.css';
 
@@ -43,6 +46,7 @@ type RegionSelectBox = { start: Point; end: Point; } | null;
 type RegionDeleteMode = 'contain' | 'intersect';
 type ImageDetails = { name: string; url: string; width: number; height: number; originalFile: File; };
 interface CanvasTransform { scale: number; translateX: number; translateY: number; };
+type PreviewState = { viewAnnotations: ViewAnnotation[], apiJson: ApiResponse } | null;
 
 const MAGNIFIER_SIZE = 150; // The size of the magnifier view
 const MAGNIFIER_ZOOM = 3; // The zoom level
@@ -172,10 +176,9 @@ const MaskOperate = () => {
     fileTree,
     mask_currentFilePath, setMask_currentFilePath,
     mask_allImageAnnotations: allImageAnnotations, setMask_allImageAnnotations: setAllImageAnnotations,
+    mask_versionHistory: versionHistory, setMask_versionHistory: setVersionHistory,
     mask_classMap: classMap, setMask_classMap: setClassMap,
     mask_selectedAnnotationId: selectedAnnotationId, setMask_selectedAnnotationId: setSelectedAnnotationId,
-    mask_operationHistory, setMask_operationHistory,
-    mask_redoHistory, setMask_redoHistory,
     mask_modifiedFiles, setMask_modifiedFiles,
   } = useModel('annotationStore');
 
@@ -215,20 +218,34 @@ const MaskOperate = () => {
   const [isMagnifierVisible, setIsMagnifierVisible] = useState(false);
   const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
   const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
+  const [previewState, setPreviewState] = useState<PreviewState>(null);
 
   const hasActiveImage = !!currentImageDetails;
 
+  const { commit, checkout, undo, redo, canUndo, canRedo, treeData, activePath } = useVersionControl<ImageAnnotationData>(
+    mask_currentFilePath ? versionHistory[mask_currentFilePath] : undefined,
+    (newHistory) => {
+      if (mask_currentFilePath) {
+        setVersionHistory(prev => ({ ...prev, [mask_currentFilePath]: newHistory }));
+      }
+    },
+    { viewAnnotations: [], apiJson: {} }
+  );
+
+  const commitWithMessages = (summary: string, newState: ImageAnnotationData) => {
+    commit(summary, newState);
+    if (mask_currentFilePath) {
+      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+    }
+  };
+
   const saveCurrentState = useCallback(() => {
     if (!mask_currentFilePath) return;
+    const apiJson = convertViewToApi(localAnnotations, classMap);
 
     setAllImageAnnotations(prev => {
-      const sourceApiJson = prev[mask_currentFilePath]?.apiJson || {};
-      const generatedApiJson = convertViewToApi(localAnnotations, classMap);
-      const updatedApiJson = { ...sourceApiJson, ...generatedApiJson };
-
-      if (sourceApiJson.netlist_cdl) updatedApiJson.netlist_cdl = sourceApiJson.netlist_cdl;
-      if (sourceApiJson.netlist_scs) updatedApiJson.netlist_scs = sourceApiJson.netlist_scs;
-      if (sourceApiJson.cpnts) updatedApiJson.cpnts = sourceApiJson.cpnts;
+      const existingData = prev[mask_currentFilePath] || { viewAnnotations: [], apiJson: {} };
+      const updatedApiJson = { ...existingData.apiJson, ...apiJson };
 
       const newImageData: ImageAnnotationData = {
         viewAnnotations: localAnnotations,
@@ -248,29 +265,23 @@ const MaskOperate = () => {
     };
   }, []);
 
-  const currentViewAnnotations: ViewAnnotation[] = localAnnotations;
+  const currentViewAnnotations = useMemo(() => previewState ? previewState.viewAnnotations : localAnnotations, [previewState, localAnnotations]);
   const currentApiJson = useMemo(() => {
-    if (!mask_currentFilePath) return {};
-    const sourceApi = allImageAnnotations[mask_currentFilePath]?.apiJson || {};
-    const generatedData = convertViewToApi(currentViewAnnotations, classMap);
-    return { ...sourceApi, ...generatedData };
-  }, [mask_currentFilePath, allImageAnnotations, currentViewAnnotations, classMap]);
+    if (previewState) return previewState.apiJson;
+    return convertViewToApi(localAnnotations, classMap);
+  }, [previewState, localAnnotations, classMap]);
+
 
   const displayApiJson = useMemo(() => {
-    if (!mask_currentFilePath) return {};
-    const apiJsonForImage = allImageAnnotations[mask_currentFilePath]?.apiJson;
+    const apiJsonForImage = currentApiJson;
     if (apiJsonForImage) {
       const displayData = { ...apiJsonForImage };
       delete displayData.netlist_cdl;
       delete displayData.netlist_scs;
       return displayData;
     }
-    return convertViewToApi(currentViewAnnotations, classMap);
-  }, [mask_currentFilePath, allImageAnnotations, currentViewAnnotations, classMap]);
-
-
-  const currentUndoStackSize = (mask_operationHistory[mask_currentFilePath || ''] || []).length;
-  const currentRedoStackSize = (mask_redoHistory[mask_currentFilePath || ''] || []).length;
+    return {};
+  }, [currentApiJson]);
 
   useEffect(() => {
     if (mask_currentFilePath) {
@@ -285,6 +296,7 @@ const MaskOperate = () => {
         setNetlistCdlContent(null);
       }
       setTransform({ scale: 1, translateX: 0, translateY: 0 }); // Reset view on file change
+      setPreviewState(null);
     } else {
       setLocalAnnotations([]);
       setNetlistScsContent(null);
@@ -335,13 +347,13 @@ const MaskOperate = () => {
         ctx.textBaseline = "top";
         ctx.fillText(`[${box.classIndex}] ${classInfo.label}`, box.x + 4 / transform.scale, box.y + 4 / transform.scale, box.width - 8 / transform.scale);
       }
-      if (isSelected) {
+      if (isSelected && !previewState) {
         const handles = getResizeHandles(box); ctx.fillStyle = '#0958d9';
         Object.values(handles).forEach(handle => { if (handle) ctx.fillRect(handle.x, handle.y, handle.size, handle.size) });
       }
     }
     ctx.restore();
-  }, [showCategoryInBox, transform.scale, classMap]);
+  }, [showCategoryInBox, transform.scale, classMap, previewState]);
 
   const renderDiagonal = useCallback((diag: ViewDiagonalAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     const classInfo = classMap[diag.classIndex];
@@ -378,7 +390,7 @@ const MaskOperate = () => {
     ctx.stroke();
     ctx.restore();
 
-    if (isSelected) {
+    if (isSelected && !previewState) {
       ctx.save();
       ctx.fillStyle = '#0958d9';
       ctx.strokeStyle = 'white';
@@ -402,7 +414,7 @@ const MaskOperate = () => {
       ctx.fillText(`[${diag.classIndex}] ${classInfo.label}`, centerX, centerY - diag.thickness / 2 - 5 / transform.scale);
       ctx.restore();
     }
-  }, [showCategoryInBox, transform.scale, classMap]);
+  }, [showCategoryInBox, transform.scale, classMap, previewState]);
 
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -421,6 +433,7 @@ const MaskOperate = () => {
       ctx.save();
       ctx.translate(transform.translateX, transform.translateY);
       ctx.scale(transform.scale, transform.scale);
+      if (previewState) { ctx.globalAlpha = 0.65; }
 
       ctx.drawImage(loadedImage, 0, 0, canvas.width, canvas.height);
 
@@ -438,6 +451,7 @@ const MaskOperate = () => {
         if ('points' in selectedAnno) renderDiagonal(selectedAnno, ctx, false, true);
         else renderRectangle(selectedAnno, ctx, false, true);
       }
+      if (previewState) { ctx.globalAlpha = 1.0; }
 
       if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
         const { startMousePos } = draggingState;
@@ -474,7 +488,7 @@ const MaskOperate = () => {
       ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
     ctx.restore();
-  }, [loadedImage, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentClassIndex, currentLineWidth, regionSelectBox, transform]);
+  }, [loadedImage, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentClassIndex, currentLineWidth, regionSelectBox, transform, previewState]);
 
   const getVirtualCoords = useCallback((e: React.MouseEvent | { clientX: number, clientY: number }): Point => {
     const canvas = canvasRef.current;
@@ -574,7 +588,7 @@ const MaskOperate = () => {
     }
   }, [classMap, currentClassIndex]);
 
-  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations, transform, loadedImage]);
+  useEffect(() => { redrawCanvas(); }, [redrawCanvas, localAnnotations, transform, loadedImage, previewState]);
 
   useEffect(() => {
     const handleResize = () => redrawCanvas();
@@ -655,101 +669,75 @@ const MaskOperate = () => {
 
   const isPointInRect = (point: Point, rect: { x: number; y: number; width: number; height: number }): boolean => (point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
 
-  const addUndoRecord = useCallback(() => {
-    if (!mask_currentFilePath) return;
-    const operation: MaskUndoOperation = { filePath: mask_currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
-    setMask_operationHistory(prev => ({ ...prev, [mask_currentFilePath]: [...(prev[mask_currentFilePath] || []), operation] }));
-    setMask_redoHistory(prev => ({ ...prev, [mask_currentFilePath]: [] }));
-    if (mask_currentFilePath) {
-      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
-    }
-  }, [mask_currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory, setMask_modifiedFiles]);
-
-  const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[], newApiJson?: ApiResponse) => {
-    if (!mask_currentFilePath) return;
-    setAllImageAnnotations(prev => {
-      const sourceApiJson = prev[mask_currentFilePath]?.apiJson || {};
-      const generatedApiJson = convertViewToApi(newViewAnnotations, classMap);
-
-      const updatedApiJson = { ...sourceApiJson, ...generatedApiJson, ...(newApiJson || {}) };
-
-      if (sourceApiJson.netlist_cdl) updatedApiJson.netlist_cdl = sourceApiJson.netlist_cdl;
-      if (sourceApiJson.netlist_scs) updatedApiJson.netlist_scs = sourceApiJson.netlist_scs;
-
-      return { ...prev, [mask_currentFilePath]: { viewAnnotations: newViewAnnotations, apiJson: updatedApiJson } };
-    });
-    if (mask_currentFilePath) {
-      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
-    }
-  }, [mask_currentFilePath, classMap, setAllImageAnnotations, setMask_modifiedFiles]);
-
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
-    const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? { ...a, ...updates } : a);
+    const newViewAnnotations = localAnnotations.map(a => a.id === annoId ? { ...a, ...updates } : a);
     setLocalAnnotations(newViewAnnotations);
-    updateGlobalAnnotations(newViewAnnotations);
-  }, [currentViewAnnotations, updateGlobalAnnotations]);
+    commitWithMessages("更新标注属性", { viewAnnotations: newViewAnnotations, apiJson: currentApiJson });
+  }, [localAnnotations, currentApiJson, commitWithMessages]);
 
   const handleEditFocus = useCallback((annotationId: string) => {
     if (isCurrentlyEditingId !== annotationId) {
-      addUndoRecord();
+      commitWithMessages(`编辑标注 ${annotationId}`, { viewAnnotations: localAnnotations, apiJson: currentApiJson });
       setIsCurrentlyEditingId(annotationId);
     }
-  }, [isCurrentlyEditingId, addUndoRecord]);
+  }, [isCurrentlyEditingId, localAnnotations, currentApiJson, commitWithMessages]);
 
-  const addAnnotation = useCallback((newAnnotation: ViewAnnotation) => {
-    addUndoRecord();
-    const newAnnos = [...currentViewAnnotations, newAnnotation];
+  const addAnnotation = useCallback((newAnnotation: ViewAnnotation, summary: string) => {
+    const newAnnos = [...localAnnotations, newAnnotation];
     setLocalAnnotations(newAnnos);
-    updateGlobalAnnotations(newAnnos);
-  }, [addUndoRecord, updateGlobalAnnotations, currentViewAnnotations]);
+    commitWithMessages(summary, { viewAnnotations: newAnnos, apiJson: convertViewToApi(newAnnos, classMap) });
+  }, [localAnnotations, classMap, commitWithMessages]);
 
   const removeAnnotationById = useCallback((idToRemove: string) => {
-    addUndoRecord();
-    const updatedAnnotations = currentViewAnnotations.filter(a => a.id !== idToRemove);
+    const updatedAnnotations = localAnnotations.filter(a => a.id !== idToRemove);
     setLocalAnnotations(updatedAnnotations);
-    updateGlobalAnnotations(updatedAnnotations);
+    commitWithMessages(`删除标注`, { viewAnnotations: updatedAnnotations, apiJson: convertViewToApi(updatedAnnotations, classMap) });
+
     if (selectedAnnotationId === idToRemove) setSelectedAnnotationId(null);
     message.success(`${t.deleteAnnotationTooltip} ${t.operationSuccessful}`);
-  }, [currentViewAnnotations, addUndoRecord, updateGlobalAnnotations, t, selectedAnnotationId, setSelectedAnnotationId]);
+  }, [localAnnotations, classMap, selectedAnnotationId, commitWithMessages, t]);
 
-  const performUndo = useCallback(() => {
-    if (!mask_currentFilePath) return;
-    const history = mask_operationHistory[mask_currentFilePath] || []; if (history.length === 0) return;
-    const lastOp = history[history.length - 1];
-    const redoOp: MaskUndoOperation = { filePath: mask_currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
-    setMask_redoHistory(prev => ({ ...prev, [mask_currentFilePath]: [redoOp, ...(prev[mask_currentFilePath] || [])] }));
-
-    setAllImageAnnotations(prev => {
-      if (!lastOp.filePath) return prev;
-      return { ...prev, [lastOp.filePath]: { viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson } };
-    });
-
-    setMask_operationHistory(prev => ({ ...prev, [mask_currentFilePath]: history.slice(0, -1) }));
-    if (mask_currentFilePath) {
-      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+  const handleUndo = () => {
+    if (!canUndo) { message.info("没有可撤销的操作"); return; }
+    const prevState = undo();
+    if (prevState) {
+      setLocalAnnotations(prevState.viewAnnotations);
+      setNetlistScsContent(prevState.apiJson?.netlist_scs || null);
+      setNetlistCdlContent(prevState.apiJson?.netlist_cdl || null);
+      message.success(t.operationSuccessful);
     }
-    message.success(t.operationSuccessful);
-  }, [mask_operationHistory, mask_currentFilePath, localAnnotations, currentApiJson, setMask_redoHistory, setAllImageAnnotations, setMask_operationHistory, t.operationSuccessful, setMask_modifiedFiles]);
+  };
 
-  const performRedo = useCallback(() => {
-    if (!mask_currentFilePath) return;
-    const history = mask_redoHistory[mask_currentFilePath] || []; if (history.length === 0) return;
-    const redoOp = history[0];
-    const undoOp: MaskUndoOperation = { filePath: mask_currentFilePath, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
-    setMask_operationHistory(prev => ({ ...prev, [mask_currentFilePath]: [...(prev[mask_currentFilePath] || []), undoOp] }));
-
-    setAllImageAnnotations(prev => {
-      if (!redoOp.filePath) return prev;
-      return { ...prev, [redoOp.filePath]: { viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson } };
-    });
-
-    setMask_redoHistory(prev => ({ ...prev, [mask_currentFilePath]: history.slice(1) }));
-    if (mask_currentFilePath) {
-      setMask_modifiedFiles(prev => ({ ...prev, [mask_currentFilePath]: Date.now() }));
+  const handleRedo = () => {
+    if (!canRedo) { message.info("没有可重做的操作"); return; }
+    const nextState = redo();
+    if (nextState) {
+      setLocalAnnotations(nextState.viewAnnotations);
+      setNetlistScsContent(nextState.apiJson?.netlist_scs || null);
+      setNetlistCdlContent(nextState.apiJson?.netlist_cdl || null);
+      message.success(t.operationSuccessful);
     }
-    message.success(t.operationSuccessful);
-  }, [mask_redoHistory, mask_currentFilePath, localAnnotations, currentApiJson, setMask_operationHistory, setAllImageAnnotations, setMask_redoHistory, t.operationSuccessful, setMask_modifiedFiles]);
+  };
 
+  const handleCheckout = (nodeId: string) => {
+    const newState = checkout(nodeId);
+    if (newState) {
+      setLocalAnnotations(newState.viewAnnotations);
+      setNetlistScsContent(newState.apiJson?.netlist_scs || null);
+      setNetlistCdlContent(newState.apiJson?.netlist_cdl || null);
+      message.success(`${t.revert} ${t.operationSuccessful}`);
+    }
+  };
+
+  const handlePreview = (nodeId: string) => {
+    const history = versionHistory[mask_currentFilePath!];
+    const node = history?.nodes[nodeId];
+    if (node) {
+      setPreviewState(node.state);
+    }
+  };
+
+  const handlePreviewEnd = () => setPreviewState(null);
 
   const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -763,7 +751,7 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!currentImageDetails || !canvasRef.current || e.button !== 0 && e.button !== 1) return;
+    if (!currentImageDetails || !canvasRef.current || previewState || (e.button !== 0 && e.button !== 1)) return;
 
     if (e.button === 1 || isSpacePressed.current) {
       setDraggingState({
@@ -777,14 +765,14 @@ const MaskOperate = () => {
 
     const mousePos = getVirtualCoords(e);
     if (activeTool === 'select') {
-      const selectedAnno = currentViewAnnotations.find(a => a.id === selectedAnnotationId);
+      const selectedAnno = localAnnotations.find(a => a.id === selectedAnnotationId);
       if (selectedAnno) {
         if ('width' in selectedAnno) {
           const handles = getResizeHandles(selectedAnno);
           const handleSize = RESIZE_HANDLE_SIZE / transform.scale;
           for (const handleKey of Object.keys(handles) as (keyof typeof handles)[]) {
             const handle = handles[handleKey]; if (handle && isPointInRect(mousePos, { x: handle.x, y: handle.y, width: handleSize, height: handleSize })) {
-              addUndoRecord(); setDraggingState({ type: 'resize', handle: handleKey, startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
+              setDraggingState({ type: 'resize', handle: handleKey, startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
             }
           }
         } else if ('points' in selectedAnno) {
@@ -792,15 +780,15 @@ const MaskOperate = () => {
           const distToStart = Math.hypot(mousePos.x - selectedAnno.points[0].x, mousePos.y - selectedAnno.points[0].y);
           const distToEnd = Math.hypot(mousePos.x - selectedAnno.points[1].x, mousePos.y - selectedAnno.points[1].y);
           if (distToStart < handleRadius) {
-            addUndoRecord(); setDraggingState({ type: 'resize', handle: 'start', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
+            setDraggingState({ type: 'resize', handle: 'start', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
           }
           if (distToEnd < handleRadius) {
-            addUndoRecord(); setDraggingState({ type: 'resize', handle: 'end', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
+            setDraggingState({ type: 'resize', handle: 'end', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(selectedAnno)) }); return;
           }
         }
       }
 
-      const clickedAnnotation = [...currentViewAnnotations].reverse().find((anno: ViewAnnotation) => {
+      const clickedAnnotation = [...localAnnotations].reverse().find((anno: ViewAnnotation) => {
         if ('points' in anno) {
           const { angleRad, length, centerX, centerY } = getDiagonalParameters(anno.points); const translatedX = mousePos.x - centerX; const translatedY = mousePos.y - centerY; const rotatedX = translatedX * Math.cos(-angleRad) - translatedY * Math.sin(-angleRad); const rotatedY = translatedX * Math.sin(-angleRad) + translatedY * Math.cos(-angleRad);
           return Math.abs(rotatedX) <= length / 2 && Math.abs(rotatedY) <= anno.thickness / 2;
@@ -810,7 +798,6 @@ const MaskOperate = () => {
         if (selectedAnnotationId !== clickedAnnotation.id) {
           setSelectedAnnotationId(clickedAnnotation.id);
         } else {
-          addUndoRecord();
           setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(clickedAnnotation)) });
         }
       } else {
@@ -849,7 +836,7 @@ const MaskOperate = () => {
       if (draggingState.startAnnotationState?.id) {
         const dx = currentVirtualMousePos.x - draggingState.startMousePos.x; const dy = currentVirtualMousePos.y - draggingState.startMousePos.y;
         const startState = draggingState.startAnnotationState;
-        const updatedAnnos = currentViewAnnotations.map(anno => {
+        const updatedAnnos = localAnnotations.map(anno => {
           if (anno.id === startState.id) {
             let newAnno: ViewAnnotation = JSON.parse(JSON.stringify(anno));
             if (draggingState.type === 'move') {
@@ -891,7 +878,7 @@ const MaskOperate = () => {
     const end = getVirtualCoords(e);
 
     if (activeTool === 'select') {
-      updateGlobalAnnotations(localAnnotations);
+      commitWithMessages('移动/缩放标注', { viewAnnotations: localAnnotations, apiJson: currentApiJson });
     } else if (draggingState.type === 'region-select') {
       const start = draggingState.startMousePos;
       const selRect = {
@@ -900,7 +887,7 @@ const MaskOperate = () => {
       };
 
       const idsToDelete = new Set<string>();
-      currentViewAnnotations.forEach(anno => {
+      localAnnotations.forEach(anno => {
         let annoRect: { x: number, y: number, width: number, height: number };
         if ('width' in anno) {
           annoRect = { x: anno.x, y: anno.y, width: anno.width, height: anno.height };
@@ -934,10 +921,10 @@ const MaskOperate = () => {
       });
 
       if (idsToDelete.size > 0) {
-        addUndoRecord();
-        const updatedAnnotations = currentViewAnnotations.filter(a => !idsToDelete.has(a.id));
+        const updatedAnnotations = localAnnotations.filter(a => !idsToDelete.has(a.id));
         setLocalAnnotations(updatedAnnotations);
-        updateGlobalAnnotations(updatedAnnotations);
+        commitWithMessages(`区域删除 ${idsToDelete.size} 个标注`, { viewAnnotations: updatedAnnotations, apiJson: convertViewToApi(updatedAnnotations, classMap) });
+
         if (selectedAnnotationId && idsToDelete.has(selectedAnnotationId)) {
           setSelectedAnnotationId(null);
         }
@@ -950,13 +937,13 @@ const MaskOperate = () => {
         const width = Math.abs(start.x - end.x); const height = Math.abs(start.y - end.y);
         if (width > 2 && height > 2) {
           const newRect: ViewBoxAnnotation = { id: generateUniqueId(), x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width, height, classIndex: currentClassIndex, sourceLineWidth: currentLineWidth };
-          addAnnotation(newRect);
+          addAnnotation(newRect, "绘制矩形");
         }
       } else if (activeTool === 'diagonal') {
         const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
         if (length > 2) {
           const newDiag: ViewDiagonalAnnotation = { id: generateUniqueId(), points: [start, end], classIndex: currentClassIndex, thickness: currentLineWidth };
-          addAnnotation(newDiag);
+          addAnnotation(newDiag, "绘制对角线");
         }
       }
     }
@@ -965,11 +952,11 @@ const MaskOperate = () => {
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!currentImageDetails || draggingState || e.button !== 0) return;
+    if (!currentImageDetails || draggingState || previewState || e.button !== 0) return;
     const clickPos = getVirtualCoords(e);
 
     if (activeTool === 'delete') {
-      const annoToDelete = [...currentViewAnnotations].reverse().find((anno: ViewAnnotation) => {
+      const annoToDelete = [...localAnnotations].reverse().find((anno: ViewAnnotation) => {
         if ('points' in anno) {
           const { angleRad, length, centerX, centerY } = getDiagonalParameters(anno.points);
           const t_mousePos = { x: clickPos.x - centerX, y: clickPos.y - centerY };
@@ -1096,10 +1083,10 @@ const MaskOperate = () => {
 
       const { viewAnnotations: finalViewAnnotations, updatedClassMap } = convertApiToView(apiResult, classMap, currentLineWidth);
 
-      addUndoRecord();
       setClassMap(updatedClassMap);
       setLocalAnnotations(finalViewAnnotations);
-      updateGlobalAnnotations(finalViewAnnotations, apiResult);
+      commitWithMessages('AI 自动标注', { viewAnnotations: finalViewAnnotations, apiJson: apiResult });
+
       message.success({ content: `${t.operationSuccessful}: ${finalViewAnnotations.length} annotations loaded.`, key: 'ai-annotation', duration: 3 });
 
     } catch (error: any) {
@@ -1223,16 +1210,16 @@ const MaskOperate = () => {
   };
 
   const handleClearAnnotations = () => {
-    if (!currentImageDetails || currentViewAnnotations.length === 0) return;
-    addUndoRecord();
+    if (!currentImageDetails || localAnnotations.length === 0) return;
     setLocalAnnotations([]);
-    updateGlobalAnnotations([]);
+    commitWithMessages('清空所有标注', { viewAnnotations: [], apiJson: currentApiJson });
     setSelectedAnnotationId(null); message.success(t.clearAnnotationsButton + ' ' + t.operationSuccessful);
   };
 
-  const isSelectedForEdit = (item: ViewAnnotation) => activeTool === 'select' && item.id === selectedAnnotationId;
+  const isSelectedForEdit = (item: ViewAnnotation) => activeTool === 'select' && item.id === selectedAnnotationId && !previewState;
 
   const getCanvasCursor = () => {
+    if (previewState) return 'default';
     if (draggingState?.type === 'pan' || isSpacePressed.current) return 'panning';
     if (isMagnifierVisible) return 'none';
     switch (activeTool) {
@@ -1246,8 +1233,8 @@ const MaskOperate = () => {
 
   const selectedAnnotation = useMemo(() => {
     if (!selectedAnnotationId) return null;
-    return currentViewAnnotations.find(a => a.id === selectedAnnotationId) || null;
-  }, [selectedAnnotationId, currentViewAnnotations]);
+    return localAnnotations.find(a => a.id === selectedAnnotationId) || null;
+  }, [selectedAnnotationId, localAnnotations]);
 
   return (
     <Layout className="unified-layout">
@@ -1286,8 +1273,8 @@ const MaskOperate = () => {
           <Tooltip title={t.aiAnnotate} placement="bottom"><Button onClick={handleAiAnnotation} type="text" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!hasActiveImage || isAiAnnotating} /></Tooltip>
         </Space>
         <div className="header-right-controls">
-          <Tooltip title={t.undo}><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={currentUndoStackSize === 0} /></Tooltip>
-          <Tooltip title={t.redo}><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={currentRedoStackSize === 0} /></Tooltip>
+          <Tooltip title={t.undo}><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={handleUndo} disabled={!canUndo} /></Tooltip>
+          <Tooltip title={t.redo}><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={handleRedo} disabled={!canRedo} /></Tooltip>
           <Button type="primary" icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportAll} ghost disabled={!fileTree}>{t.exportAll}</Button>
         </div>
       </Header>
@@ -1301,7 +1288,7 @@ const MaskOperate = () => {
           <Content
             className={`canvas-content ${draggingState?.type === 'pan' || isSpacePressed.current ? 'panning' : ''}`}
             onMouseEnter={() => setIsMouseOnCanvas(true)}
-            onMouseLeave={() => setIsMouseOnCanvas(false)}
+            onMouseLeave={() => { setIsMouseOnCanvas(false); handlePreviewEnd(); }}
           >
             <div className={`canvas-wrapper`}>
               <canvas ref={canvasRef} onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} onClick={handleCanvasClick} className={getCanvasCursor()} />
@@ -1342,7 +1329,7 @@ const MaskOperate = () => {
                   <Title level={5} style={{ margin: 0, flexShrink: 0 }}>{t.annotations}</Title>
                   {hasActiveImage && currentViewAnnotations.length > 0 ? (
                     <div className="annotation-list-wrapper">
-                      <Collapse accordion activeKey={selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
+                      <Collapse accordion activeKey={previewState ? undefined : selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
                         {currentViewAnnotations.map((item) => (
                           <Panel key={item.id} className="annotation-panel-item" header={
                             <Flex justify="space-between" align="center" style={{ width: '100%' }}>
@@ -1350,9 +1337,9 @@ const MaskOperate = () => {
                                 <div className="color-indicator" style={{ backgroundColor: classMap[item.classIndex]?.color || '#808080' }} />
                                 <Text className="category-name-text" title={classMap[item.classIndex]?.label} ellipsis>{`[${item.classIndex}] ${classMap[item.classIndex]?.label || '未知类别'}`}</Text>
                               </Space>
-                              <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
+                              <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} disabled={!!previewState} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
                             </Flex>}>
-                            {selectedAnnotation?.id === item.id && (
+                            {selectedAnnotation?.id === item.id && !previewState && (
                               <Descriptions bordered size="small" column={1} className="annotation-details">
                                 {'width' in selectedAnnotation ? (
                                   <>
@@ -1420,6 +1407,23 @@ const MaskOperate = () => {
                 </div>
               </div>
             </TabPane>
+            <TabPane tab={<Tooltip title={t.history} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="5">
+              <div className="tab-pane-content">
+                <div className="inspector-tab-wrapper">
+                  <Title level={5} style={{ margin: 0, flexShrink: 0 }}>{t.history}</Title>
+                  <VersionHistoryViewer
+                    treeData={treeData}
+                    activePath={activePath}
+                    onCheckout={handleCheckout}
+                    onPreview={handlePreview}
+                    onPreviewEnd={handlePreviewEnd}
+                    revertText={t.revert}
+                    cancelText={t.cancel}
+                    revertConfirmTitle={t.revertConfirmTitle}
+                  />
+                </div>
+              </div>
+            </TabPane>
             <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2">
               <div className="tab-pane-content">
                 <div className="inspector-tab-wrapper">
@@ -1470,7 +1474,7 @@ const MaskOperate = () => {
                     </Radio.Group>
                   </Form.Item>
                   <Divider />
-                  <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearAnnotations} block disabled={!hasActiveImage || currentViewAnnotations.length === 0}>{t.clearAnnotationsButton}</Button></Form.Item>
+                  <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearAnnotations} block disabled={!hasActiveImage || localAnnotations.length === 0}>{t.clearAnnotationsButton}</Button></Form.Item>
                 </Form>
               </div>
             </TabPane>

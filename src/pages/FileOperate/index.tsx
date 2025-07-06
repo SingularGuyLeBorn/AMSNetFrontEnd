@@ -1,4 +1,6 @@
 import FileExplorer from "@/components/FileExplorer";
+import VersionHistoryViewer from "@/components/VersionHistoryViewer";
+import { useVersionControl } from "@/hooks/useVersionControl";
 import type { FileNode, FileTreeNode } from "@/models/fileTree";
 import {
     faCogs,
@@ -6,6 +8,7 @@ import {
     faEraser,
     faFileExport,
     faFileImport,
+    faHistory,
     faList,
     faMinusCircle,
     faMousePointer,
@@ -48,7 +51,7 @@ import {
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ApiComponent, ApiResponse, ClassInfo, FileClassInfo, Operation } from './constants';
+import type { ApiComponent, ApiResponse, ClassInfo, FileClassInfo } from './constants';
 import { jsonNameColorMap, translations } from './constants';
 import './index.css';
 
@@ -88,6 +91,8 @@ interface JsonData {
 }
 
 type FullApiResponse = ApiResponse;
+type AnnotationState = { yoloContent: string | null; jsonContent: string | null; };
+type PreviewState = { yolo: string, json: string } | null;
 
 
 const RESIZE_HANDLE_SIZE = 8;
@@ -274,8 +279,7 @@ const FileOperate: React.FC = () => {
         file_classMap: classMap, setFile_classMap: setClassMap,
         file_yoloFileContents, setFile_yoloFileContents,
         file_jsonFileContents, setFile_jsonFileContents,
-        file_operationHistory: operationHistory, setFile_operationHistory: setOperationHistory,
-        file_redoHistory: redoHistory, setFile_redoHistory: setRedoHistory,
+        file_versionHistory: versionHistory, setFile_versionHistory: setVersionHistory,
         file_modifiedFiles, setFile_modifiedFiles,
     } = useModel('annotationStore');
 
@@ -321,10 +325,26 @@ const FileOperate: React.FC = () => {
 
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
+    const [previewState, setPreviewState] = useState<PreviewState>(null);
 
     const [transform, setTransform] = useState<CanvasTransform>({ scale: 1, translateX: 0, translateY: 0 });
     const isSpacePressed = useRef(false);
     const hasActiveImage = !!currentPng;
+
+    const { commit, checkout, undo, redo, canUndo, canRedo, treeData, activePath } = useVersionControl<AnnotationState>(
+        file_currentFilePath ? versionHistory[file_currentFilePath] : undefined,
+        (newHistory) => {
+            if (file_currentFilePath) {
+                setVersionHistory(prev => ({ ...prev, [file_currentFilePath]: newHistory }));
+            }
+        },
+        { yoloContent: file_yoloFileContents[file_currentFilePath || ''] || null, jsonContent: file_jsonFileContents[file_currentFilePath || ''] || null }
+    );
+
+    const commitWithMessages = (summary: string, newState: AnnotationState) => {
+        commit(summary, newState);
+        setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath!]: Date.now() }));
+    }
 
     const saveCurrentState = useCallback(() => {
         if (!file_currentFilePath) return;
@@ -350,16 +370,19 @@ const FileOperate: React.FC = () => {
         };
     }, []);
 
+    const yoloForDisplay = previewState ? previewState.yolo : currentYoloContent;
+    const jsonForDisplay = previewState ? previewState.json : currentJsonContent;
+
     const displayApiJson = useMemo(() => {
         if (!loadedImage) {
             return {};
         }
         const { width, height } = loadedImage;
-        const generatedData = convertYoloToApi(currentYoloContent, classMap, width, height);
+        const generatedData = convertYoloToApi(yoloForDisplay, classMap, width, height);
 
         let sourceApiData: Partial<ApiResponse> = {};
         try {
-            sourceApiData = JSON.parse(currentJsonContent || '{}');
+            sourceApiData = JSON.parse(jsonForDisplay || '{}');
         } catch (e) {
             // Silently ignore parsing errors for the display object,
             // as the source data might be temporarily invalid during user edits.
@@ -374,7 +397,7 @@ const FileOperate: React.FC = () => {
         delete finalDisplayData.netlist_cdl;
 
         return finalDisplayData;
-    }, [currentYoloContent, currentJsonContent, classMap, loadedImage]);
+    }, [yoloForDisplay, jsonForDisplay, classMap, loadedImage]);
 
 
     useEffect(() => {
@@ -390,6 +413,7 @@ const FileOperate: React.FC = () => {
         setNetlistScsContent(null);
         setNetlistCdlContent(null);
         setSelectedBoxName(null);
+        setPreviewState(null);
 
         if (file_currentFilePath && fileTree) {
             const node = findFileNodeByKey(file_currentFilePath, fileTree);
@@ -430,13 +454,14 @@ const FileOperate: React.FC = () => {
 
 
     const parsedYoloData = useMemo(() => {
-        return (currentYoloContent || '').split('\n').filter(Boolean).map(line => {
+        const contentToParse = previewState ? previewState.yolo : currentYoloContent;
+        return (contentToParse || '').split('\n').filter(Boolean).map(line => {
             const parts = line.split(' ');
             if (parts.length < 6) return null;
             const [name, classIdx, x, y, w, h] = parts;
             return { name, classIdx: parseInt(classIdx), x: parseFloat(x), y: parseFloat(y), w: parseFloat(w), h: parseFloat(h) };
         }).filter((item): item is { name: string; classIdx: number; x: number; y: number; w: number; h: number; } => item !== null && !isNaN(item.classIdx) && item.classIdx in classMap);
-    }, [currentYoloContent, classMap]);
+    }, [currentYoloContent, previewState, classMap]);
 
     const getResizeHandles = (box: { x: number, y: number, width: number, height: number }): { [key in ResizeHandle]: { x: number, y: number, size: number } } => {
         const s = RESIZE_HANDLE_SIZE / transform.scale;
@@ -467,6 +492,7 @@ const FileOperate: React.FC = () => {
             ctx.save();
             ctx.translate(transform.translateX, transform.translateY);
             ctx.scale(transform.scale, transform.scale);
+            if (previewState) { ctx.globalAlpha = 0.65; }
 
             ctx.drawImage(loadedImage, 0, 0);
             const yoloDataForStain: { name: string, data: number[] }[] = [];
@@ -477,7 +503,7 @@ const FileOperate: React.FC = () => {
                 const absH = relH * canvas.height;
                 const absLeft = (relX * canvas.width) - absW / 2;
                 const absTop = (relY * canvas.height) - absH / 2;
-                const isSelected = selectedBoxName === name;
+                const isSelected = selectedBoxName === name && !previewState;
                 const color = classMap[classIdx]?.color || '#808080';
                 ctx.beginPath();
                 ctx.strokeStyle = isSelected ? '#0958d9' : color;
@@ -491,7 +517,8 @@ const FileOperate: React.FC = () => {
                 }
             });
 
-            const parsedStainJson = parseJsonContent(currentJsonContent);
+            const jsonToParse = previewState ? previewState.json : currentJsonContent;
+            const parsedStainJson = parseJsonContent(jsonToParse);
             if (parsedStainJson.local) {
                 Object.values(parsedStainJson.local).forEach(nameMap => {
                     if (nameMap && typeof nameMap === 'object') {
@@ -503,13 +530,14 @@ const FileOperate: React.FC = () => {
                                 const [, relX, relY, relW, relH] = yoloEntry.data;
                                 const absW = relW * canvas.width; const absH = relH * canvas.height;
                                 const absX = (relX * canvas.width) - absW / 2; const absY = (relY * canvas.height) - absH / 2;
-                                ctx.fillStyle = color; ctx.globalAlpha = 0.35;
-                                ctx.fillRect(absX, absY, absW, absH); ctx.globalAlpha = 1.0;
+                                ctx.fillStyle = color; ctx.globalAlpha = previewState ? 0.2 : 0.35;
+                                ctx.fillRect(absX, absY, absW, absH); ctx.globalAlpha = previewState ? 0.65 : 1.0;
                             });
                         });
                     }
                 });
             }
+            if (previewState) { ctx.globalAlpha = 1.0; }
 
             if (regionSelectBox) {
                 ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
@@ -535,7 +563,7 @@ const FileOperate: React.FC = () => {
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
         ctx.restore();
-    }, [loadedImage, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform]);
+    }, [loadedImage, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, transform, previewState]);
 
     const getVirtualCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
@@ -599,7 +627,7 @@ const FileOperate: React.FC = () => {
         drawMagnifier();
     }, [canvasMousePos, redrawCanvas, loadedImage]);
 
-    useEffect(() => { redrawCanvas(); }, [redrawCanvas, currentYoloContent, transform, loadedImage]);
+    useEffect(() => { redrawCanvas(); }, [redrawCanvas, currentYoloContent, transform, loadedImage, previewState]);
 
     useEffect(() => {
         const handleResize = () => redrawCanvas();
@@ -696,17 +724,8 @@ const FileOperate: React.FC = () => {
     const handleDeleteAnnotationByName = useCallback((boxNameToDelete: string) => {
         if (!boxNameToDelete || !file_currentFilePath) return;
 
-        const previousYoloContentForUndo = currentYoloContent;
-        const previousJsonContentForUndo = currentJsonContent;
-
-        const allLines = (currentYoloContent || '').split('\n');
-        const deletedLineContent = allLines.find(line => line.startsWith(boxNameToDelete + ' '));
-        const deletedLineIndex = allLines.findIndex(line => line.startsWith(boxNameToDelete + ' '));
-
-        const newYoloLines = allLines.filter(line => !line.startsWith(boxNameToDelete + ' '));
+        const newYoloLines = (currentYoloContent || '').split('\n').filter(line => !line.startsWith(boxNameToDelete + ' '));
         const newYoloContent = newYoloLines.join('\n');
-
-        setCurrentYoloContent(newYoloContent);
 
         let newJsonContent = currentJsonContent;
         if (currentJsonContent) {
@@ -720,29 +739,17 @@ const FileOperate: React.FC = () => {
                 });
             });
             newJsonContent = stringifyJsonContent(parsedJson);
-            setCurrentJsonContent(newJsonContent);
         }
 
-        if (deletedLineContent) {
-            const newOp: Operation = {
-                type: 'delete',
-                deletedLines: [{ index: deletedLineIndex, content: deletedLineContent }],
-                previousYoloContent: previousYoloContentForUndo,
-                previousJsonContent: previousJsonContentForUndo,
-            };
-            setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-            setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-        }
+        setCurrentYoloContent(newYoloContent);
+        setCurrentJsonContent(newJsonContent);
+        commitWithMessages(`删除标注: ${boxNameToDelete}`, { yoloContent: newYoloContent, jsonContent: newJsonContent });
 
         if (selectedBoxName === boxNameToDelete) {
             setSelectedBoxName(null);
         }
-
-        if (file_currentFilePath) {
-            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-        }
         message.success(`标注 '${boxNameToDelete}' 已删除`);
-    }, [currentYoloContent, currentJsonContent, file_currentFilePath, selectedBoxName, setOperationHistory, setRedoHistory, setCurrentYoloContent, setCurrentJsonContent, setSelectedBoxName, setFile_modifiedFiles]);
+    }, [currentYoloContent, currentJsonContent, file_currentFilePath, selectedBoxName, commitWithMessages]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
@@ -763,7 +770,6 @@ const FileOperate: React.FC = () => {
                 const boxY = (relY * canvas.height) - (relH * canvas.height) / 2;
                 const boxW = relW * canvas.width; const boxH = relH * canvas.height;
                 if (mouseX >= boxX && mouseX <= boxX + boxW && mouseY >= boxY && mouseY <= boxY + boxH) {
-                    const previousJson = currentJsonContent;
                     const newJson = stringifyJsonContent((() => {
                         const jsonObj = parseJsonContent(currentJsonContent);
                         const targetDict = jsonObj.local[selectedJsonType!];
@@ -776,12 +782,7 @@ const FileOperate: React.FC = () => {
                         return jsonObj;
                     })());
                     setCurrentJsonContent(newJson);
-                    const newOp: Operation = { type: 'stain', boxName, jsonType: selectedJsonType, jsonName: selectedJsonName, previousJsonContent: previousJson };
-                    setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-                    setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-                    if (file_currentFilePath) {
-                        setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-                    }
+                    commitWithMessages(`染色: ${boxName}`, { yoloContent: currentYoloContent, jsonContent: newJson });
                     break;
                 }
             }
@@ -818,7 +819,7 @@ const FileOperate: React.FC = () => {
     };
 
     const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
-        if (e.button !== 0 && e.button !== 1 || !file_currentFilePath) return;
+        if (previewState || (e.button !== 0 && e.button !== 1) || !file_currentFilePath) return;
 
         if (e.button === 1 || isSpacePressed.current) {
             setDraggingState({
@@ -867,9 +868,6 @@ const FileOperate: React.FC = () => {
                             startAbsBox: { x: absLeft, y: absTop, w: absW, h: absH },
                             startFullYoloLine: selectedBoxLine
                         });
-                        const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-                        setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-                        setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
                         return;
                     }
                 }
@@ -904,9 +902,6 @@ const FileOperate: React.FC = () => {
                     startMousePos: startPos,
                     startYoloData: clickedYoloData,
                 });
-                const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-                setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
             } else {
                 setDraggingState(null);
             }
@@ -1049,15 +1044,9 @@ const FileOperate: React.FC = () => {
                 const yoloWidth = width / canvas.width; const yoloHeight = height / canvas.height;
                 const yoloFormatData = `${uniqueName} ${currentClassIndex} ${x_center.toFixed(6)} ${y_center.toFixed(6)} ${yoloWidth.toFixed(6)} ${yoloHeight.toFixed(6)}`;
 
-                const previousYolo = currentYoloContent;
-                setCurrentYoloContent(prev => (prev ? `${prev}\n${yoloFormatData}` : yoloFormatData));
-
-                const newOp: Operation = { type: 'draw', yoloData: [yoloFormatData], previousYoloContent: previousYolo };
-                setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-                if (file_currentFilePath) {
-                    setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-                }
+                const newYoloContent = currentYoloContent ? `${currentYoloContent}\n${yoloFormatData}` : yoloFormatData;
+                setCurrentYoloContent(newYoloContent);
+                commitWithMessages(`绘制标注: ${uniqueName}`, { yoloContent: newYoloContent, jsonContent: currentJsonContent });
             }
             setCanvasImageData(null);
         } else if (draggingState && draggingState.type === 'region-select') {
@@ -1102,22 +1091,11 @@ const FileOperate: React.FC = () => {
             });
 
             if (boxNamesToDelete.length > 0) {
-                const previousYoloContentForUndo = currentYoloContent;
-                const previousJsonContentForUndo = currentJsonContent;
-
-                const allLines = (currentYoloContent || '').split('\n');
-                const deletedLines: { index: number, content: string }[] = [];
-
-                const newYoloLines = allLines.filter((line, index) => {
+                const newYoloLines = (currentYoloContent || '').split('\n').filter(line => {
                     const name = line.split(' ')[0];
-                    if (boxNamesToDelete.includes(name)) {
-                        deletedLines.push({ index, content: line });
-                        return false;
-                    }
-                    return true;
+                    return !boxNamesToDelete.includes(name);
                 });
                 const newYoloContent = newYoloLines.join('\n');
-                setCurrentYoloContent(newYoloContent);
 
                 let newJsonContent = currentJsonContent;
                 if (currentJsonContent) {
@@ -1131,27 +1109,15 @@ const FileOperate: React.FC = () => {
                         });
                     });
                     newJsonContent = stringifyJsonContent(parsedJson);
-                    setCurrentJsonContent(newJsonContent);
                 }
-
-                const newOp: Operation = {
-                    type: 'delete',
-                    deletedLines: deletedLines,
-                    previousYoloContent: previousYoloContentForUndo,
-                    previousJsonContent: previousJsonContentForUndo,
-                };
-                setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-                if (file_currentFilePath) {
-                    setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-                }
+                setCurrentYoloContent(newYoloContent);
+                setCurrentJsonContent(newJsonContent);
+                commitWithMessages(`区域删除 ${boxNamesToDelete.length} 个标注`, { yoloContent: newYoloContent, jsonContent: newJsonContent });
                 message.success(`删除了 ${boxNamesToDelete.length} 个标注。`);
             }
         }
-        if (draggingState) { // Any drag operation should mark file as modified
-            if (file_currentFilePath) {
-                setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-            }
+        if (draggingState) { // Any drag operation should mark file as modified and commit
+            commitWithMessages(`移动或缩放标注`, { yoloContent: currentYoloContent, jsonContent: currentJsonContent });
         }
         setDraggingState(null);
         setRegionSelectBox(null);
@@ -1185,13 +1151,8 @@ const FileOperate: React.FC = () => {
 
     const addUndoRecord = useCallback(() => {
         if (!file_currentFilePath) return;
-        const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-        setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-        setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-        if (file_currentFilePath) {
-            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-        }
-    }, [currentYoloContent, file_currentFilePath, setOperationHistory, setRedoHistory, setFile_modifiedFiles]);
+        commitWithMessages("更新标注属性", { yoloContent: currentYoloContent, jsonContent: currentJsonContent });
+    }, [currentYoloContent, currentJsonContent, file_currentFilePath, commitWithMessages]);
 
     const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
@@ -1217,38 +1178,43 @@ const FileOperate: React.FC = () => {
     }, [currentYoloContent, setCurrentYoloContent, file_currentFilePath, setFile_modifiedFiles]);
 
     const handleUndo = () => {
-        if (!file_currentFilePath) return;
-        const currentImageHistory = operationHistory[file_currentFilePath] || [];
-        if (currentImageHistory.length === 0) { message.info(t.noUndoOperations); return; }
-        const lastOperation = currentImageHistory[currentImageHistory.length - 1];
-        let redoOp: Operation;
-        switch (lastOperation.type) { case 'draw': case 'ai_annotate': case 'move': redoOp = { ...lastOperation, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': redoOp = { ...lastOperation, previousJsonContent: currentJsonContent }; break; case 'delete': redoOp = { ...lastOperation, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
-        setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [redoOp, ...(prev[file_currentFilePath] || [])] }));
-        setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: currentImageHistory.slice(0, -1) }));
-        if ('previousYoloContent' in lastOperation) { setCurrentYoloContent(lastOperation.previousYoloContent); }
-        if ('previousJsonContent' in lastOperation) { setCurrentJsonContent(lastOperation.previousJsonContent); }
-        if (file_currentFilePath) {
-            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        if (!canUndo) { message.info(t.noUndoOperations); return; }
+        const prevState = undo();
+        if (prevState) {
+            setCurrentYoloContent(prevState.yoloContent);
+            setCurrentJsonContent(prevState.jsonContent);
+            message.success(t.operationSuccessful);
         }
-        message.success(t.operationSuccessful);
     };
     const handleRedo = () => {
-        if (!file_currentFilePath) return;
-        const currentImageRedoHistory = redoHistory[file_currentFilePath] || [];
-        if (currentImageRedoHistory.length === 0) { message.info(t.noRedoOperations); return; }
-        const operationToRedo = currentImageRedoHistory[0];
-        let undoOp: Operation;
-        let redoOp: Operation;
-        switch (operationToRedo.type) { case 'draw': case 'ai_annotate': case 'move': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': undoOp = { ...operationToRedo, previousJsonContent: currentJsonContent }; break; case 'delete': redoOp = { ...operationToRedo, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
-        setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), undoOp] }));
-        setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: currentImageRedoHistory.slice(1) }));
-        if ('previousYoloContent' in operationToRedo) { setCurrentYoloContent(operationToRedo.previousYoloContent); }
-        if ('previousJsonContent' in operationToRedo) { setCurrentJsonContent(operationToRedo.previousJsonContent); }
-        if (file_currentFilePath) {
-            setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
+        if (!canRedo) { message.info(t.noRedoOperations); return; }
+        const nextState = redo();
+        if (nextState) {
+            setCurrentYoloContent(nextState.yoloContent);
+            setCurrentJsonContent(nextState.jsonContent);
+            message.success(t.operationSuccessful);
         }
-        message.success(t.operationSuccessful);
     };
+
+    const handleCheckout = (nodeId: string) => {
+        const newState = checkout(nodeId);
+        if (newState) {
+            setCurrentYoloContent(newState.yoloContent);
+            setCurrentJsonContent(newState.jsonContent);
+            message.success(`${t.revert} ${t.operationSuccessful}`);
+        }
+    };
+
+    const handlePreview = (nodeId: string) => {
+        const node = versionHistory[file_currentFilePath!]?.nodes[nodeId];
+        if (node) {
+            setPreviewState({
+                yolo: node.state.yoloContent || '',
+                json: node.state.jsonContent || '{}',
+            });
+        }
+    };
+    const handlePreviewEnd = () => setPreviewState(null);
 
     const handleSaveCurrent = () => {
         if (!file_currentFilePath) {
@@ -1361,7 +1327,6 @@ const FileOperate: React.FC = () => {
                 return;
             }
 
-            const previousYolo = currentYoloContent;
 
             const { width, height } = canvasRef.current;
 
@@ -1399,13 +1364,7 @@ const FileOperate: React.FC = () => {
             setNetlistScsContent(resultData.netlist_scs || null);
             setNetlistCdlContent(resultData.netlist_cdl || null);
 
-            const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
-            setOperationHistory(prev => ({ ...prev, [file_currentFilePath]: [...(prev[file_currentFilePath] || []), newOp] }));
-            setRedoHistory(prev => ({ ...prev, [file_currentFilePath]: [] }));
-
-            if (file_currentFilePath) {
-                setFile_modifiedFiles(prev => ({ ...prev, [file_currentFilePath]: Date.now() }));
-            }
+            commitWithMessages("AI 自动标注", { yoloContent: newYoloContent, jsonContent: displayJsonContent });
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
 
         } catch (error: any) {
@@ -1542,9 +1501,10 @@ const FileOperate: React.FC = () => {
         reader.readAsText(file);
     };
 
-    const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName;
+    const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName && !previewState;
 
     const getCanvasCursor = () => {
+        if (previewState) return 'default';
         if (draggingState?.type === 'pan' || isSpacePressed.current) return 'panning';
         if (isMagnifierVisible) return 'none';
         switch (activeTool) {
@@ -1593,8 +1553,8 @@ const FileOperate: React.FC = () => {
                     <Tooltip title={t.aiAnnotation} placement="bottom"><Button onClick={handleAiAnnotation} type="text" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentPng || isAiAnnotating} /></Tooltip>
                 </Space>
                 <div className="header-right-controls">
-                    <Tooltip title={t.undo}><Button onClick={handleUndo} icon={<FontAwesomeIcon icon={faUndo} />} disabled={(operationHistory[file_currentFilePath || ''] || []).length === 0} /></Tooltip>
-                    <Tooltip title={t.redo}><Button onClick={handleRedo} icon={<FontAwesomeIcon icon={faRedo} />} disabled={(redoHistory[file_currentFilePath || ''] || []).length === 0} /></Tooltip>
+                    <Tooltip title={t.undo}><Button onClick={handleUndo} icon={<FontAwesomeIcon icon={faUndo} />} disabled={!canUndo} /></Tooltip>
+                    <Tooltip title={t.redo}><Button onClick={handleRedo} icon={<FontAwesomeIcon icon={faRedo} />} disabled={!canRedo} /></Tooltip>
                     <Button onClick={handleSaveCurrent} icon={<FontAwesomeIcon icon={faSave} />} disabled={!currentPng}>{t.save}</Button>
                     <Button onClick={handleSaveAllToZip} icon={<FontAwesomeIcon icon={faFileExport} />} type="primary" ghost disabled={!fileTree}>{t.saveAll}</Button>
                 </div>
@@ -1609,7 +1569,7 @@ const FileOperate: React.FC = () => {
                     <Content
                         className={`canvas-content ${draggingState?.type === 'pan' || isSpacePressed.current ? 'panning' : ''}`}
                         onMouseEnter={() => setIsMouseOnCanvas(true)}
-                        onMouseLeave={() => setIsMouseOnCanvas(false)}
+                        onMouseLeave={() => { setIsMouseOnCanvas(false); handlePreviewEnd(); }}
                     >
                         <div className={`canvas-wrapper`}>
                             <canvas
@@ -1671,7 +1631,7 @@ const FileOperate: React.FC = () => {
                                     </div>
                                     {parsedYoloData.length > 0 ? (
                                         <div className="annotation-list-wrapper">
-                                            <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
+                                            <Collapse accordion activeKey={previewState ? undefined : selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost className="annotation-collapse-container">
                                                 {parsedYoloData.map((item) => (
                                                     <Panel
                                                         key={item.name}
@@ -1687,6 +1647,7 @@ const FileOperate: React.FC = () => {
                                                                         type="text"
                                                                         danger
                                                                         size="small"
+                                                                        disabled={!!previewState}
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
                                                                             handleDeleteAnnotationByName(item.name);
@@ -1718,7 +1679,7 @@ const FileOperate: React.FC = () => {
                                     <Tabs type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', width: '100%' }}>
                                         <TabPane tab="YOLO (.txt)" key="yolo-data">
                                             <div className="data-view-item" style={{ height: '100%' }}>
-                                                <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
+                                                <textarea value={yoloForDisplay || ""} className="data-content-textarea" readOnly />
                                             </div>
                                         </TabPane>
                                         <TabPane tab="Annotation Data (.json)" key="json-data">
@@ -1737,6 +1698,23 @@ const FileOperate: React.FC = () => {
                                             </div>
                                         </TabPane>
                                     </Tabs>
+                                </div>
+                            </div>
+                        </TabPane>
+                        <TabPane tab={<Tooltip title={t.history} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="5">
+                            <div className="tab-pane-content">
+                                <div className="inspector-tab-wrapper">
+                                    <Title level={5} style={{ margin: 0, flexShrink: 0 }}>{t.history}</Title>
+                                    <VersionHistoryViewer
+                                        treeData={treeData}
+                                        activePath={activePath}
+                                        onCheckout={handleCheckout}
+                                        onPreview={handlePreview}
+                                        onPreviewEnd={handlePreviewEnd}
+                                        revertText={t.revert}
+                                        cancelText={t.cancel}
+                                        revertConfirmTitle={t.revertConfirmTitle}
+                                    />
                                 </div>
                             </div>
                         </TabPane>

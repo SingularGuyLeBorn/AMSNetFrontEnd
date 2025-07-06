@@ -1,8 +1,9 @@
 // START OF FILE src/models/annotationStore.tsx
+import type { VersionHistory } from '@/hooks/useVersionControl';
 import type { DirectoryNode } from '@/models/fileTree.tsx';
-import type { ClassInfo, Operation } from '@/pages/FileOperate/constants';
+import type { ClassInfo } from '@/pages/FileOperate/constants';
 import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
-import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/pages/MaskOperate/constants';
+import type { ImageAnnotationData } from '@/pages/MaskOperate/constants';
 import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
 import { useState } from 'react';
 
@@ -40,15 +41,16 @@ const initialMaskIndexClassColorMap: { [key: number]: ClassInfo } = Object.entri
     return acc;
   }, {} as { [key: number]: ClassInfo });
 
+type FileOperateState = { yoloContent: string | null; jsonContent: string | null; };
 
 /**
  * @description
- * 全局数据仓库 (Global Data Store) V4.3 - 模型统一版
+ * 全局数据仓库 (Global Data Store) V4.2 - 版本树模型
  *
  * 该 Store 负责管理整个应用中与标注相关的共享状态。
  * 设计原则：
- * 1. 严格模型统一: `FileOperate` 和 `MaskOperate` 现已共享完全一致的、由数字索引驱动的类别管理模型 (`classMap`)。
- * 2. 页面上下文隔离: 每个标注页面拥有自己独立的当前文件指针和所有相关状态，包括修改记录，彻底解决了页面间任何状态的交叉污染问题。
+ * 1. 统一版本模型: `FileOperate` 和 `MaskOperate` 现已共享完全一致的、基于图（树）的版本控制数据模型。
+ * 2. 状态原子化: 所有与标注内容相关的状态都以完整的快照形式存储在版本节点中。
  * 3. 路径驱动 (Path-Driven): 所有与文件相关的状态，其访问键都是文件的唯一路径 (filePath)。
  * 4. 命名空间: 所有页面专属状态均以页面标识（如 `file_`, `mask_`）为前缀，确保了代码层面的隔离性和可读性。
  */
@@ -68,8 +70,8 @@ export default function useAnnotationStore() {
   const [file_yoloFileContents, setFile_yoloFileContents] = useState<Record<string, string>>({});
   const [file_jsonFileContents, setFile_jsonFileContents] = useState<Record<string, string>>({});
   const [file_classMap, setFile_classMap] = useState<{ [key: number]: ClassInfo }>(initialIndexClassColorMap);
-  const [file_operationHistory, setFile_operationHistory] = useState<Record<string, Operation[]>>({});
-  const [file_redoHistory, setFile_redoHistory] = useState<Record<string, Operation[]>>({});
+  const [file_versionHistory, setFile_versionHistory] = useState<Record<string, VersionHistory<FileOperateState>>>({});
+
 
   // ===================================================================
   // MaskOperate 页面状态 (MaskOperate Page State)
@@ -80,8 +82,7 @@ export default function useAnnotationStore() {
   const [mask_allImageAnnotations, setMask_allImageAnnotations] = useState<Record<string, ImageAnnotationData>>({});
   const [mask_classMap, setMask_classMap] = useState<{ [key: number]: ClassInfo }>(initialMaskIndexClassColorMap);
   const [mask_selectedAnnotationId, setMask_selectedAnnotationId] = useState<string | null>(null);
-  const [mask_operationHistory, setMask_operationHistory] = useState<Record<string, MaskUndoOperation[]>>({});
-  const [mask_redoHistory, setMask_redoHistory] = useState<Record<string, MaskUndoOperation[]>>({});
+  const [mask_versionHistory, setMask_versionHistory] = useState<Record<string, VersionHistory<ImageAnnotationData>>>({});
 
 
   return {
@@ -94,8 +95,8 @@ export default function useAnnotationStore() {
     file_yoloFileContents, setFile_yoloFileContents,
     file_jsonFileContents, setFile_jsonFileContents,
     file_classMap, setFile_classMap,
-    file_operationHistory, setFile_operationHistory,
-    file_redoHistory, setFile_redoHistory,
+    file_versionHistory, setFile_versionHistory,
+
 
     // MaskOperate Exports
     mask_currentFilePath, setMask_currentFilePath,
@@ -103,7 +104,6 @@ export default function useAnnotationStore() {
     mask_allImageAnnotations, setMask_allImageAnnotations,
     mask_classMap, setMask_classMap,
     mask_selectedAnnotationId, setMask_selectedAnnotationId,
-    mask_operationHistory, setMask_operationHistory,
-    mask_redoHistory, setMask_redoHistory,
+    mask_versionHistory, setMask_versionHistory,
   };
 }

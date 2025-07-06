@@ -181,7 +181,8 @@
 /* --- Sized Content Containers --- */
 .annotation-list-wrapper,
 .class-list-container,
-.data-view-container {
+.data-view-container,
+.history-list-container {
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;

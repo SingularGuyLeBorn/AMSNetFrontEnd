@@ -1,0 +1,54 @@
+/* START OF FILE src/components/VersionHistoryViewer/index.css */
+.history-tree-container {
+    height: 100%;
+    width: 100%;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.history-tree-container .ant-tree {
+    background: transparent;
+}
+
+.history-tree-node {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-right: 4px;
+}
+
+.history-node-title-wrapper {
+    flex-grow: 1;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.history-node-title {
+    vertical-align: middle;
+}
+
+.history-node-action {
+    flex-shrink: 0;
+    visibility: hidden;
+    opacity: 0;
+    transition: visibility 0s 0.2s, opacity 0.2s linear;
+}
+
+.history-tree-node:hover .history-node-action {
+    visibility: visible;
+    opacity: 1;
+    transition-delay: 0s;
+}
+
+.history-tree-container .ant-tree-treenode {
+    padding: 4px 0;
+}
+
+.history-tree-container .ant-tree-node-content-wrapper {
+    padding: 2px 4px !important;
+}
+
+/* END OF FILE src/components/VersionHistoryViewer/index.css */
