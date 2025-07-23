@@ -15,6 +15,7 @@ import { RESIZE_HANDLE_SIZE, translations, defaultCategoryColors } from './const
 import type { ImageAnnotationData, ViewAnnotation, UndoOperation as MaskUndoOperation, ViewBoxAnnotation, ViewDiagonalAnnotation, Point, ApiResponse, ApiKeyPoint, ApiSegment } from './constants';
 import './index.css';
 
+// 用注释测试是否签出成功
 const { Title, Text } = Typography;
 const { Panel } = Collapse;
 const { Option } = Select;
@@ -90,7 +91,7 @@ const convertViewToApi = (viewAnnotations: ViewAnnotation[]): ApiResponse => {
         pointMap.set(key, newId);
         return newId;
     };
-    
+
     if (!Array.isArray(viewAnnotations)) {
         return { key_points: [], segments: [] };
     }
@@ -134,7 +135,7 @@ const MaskOperate = () => {
     mask_redoHistory, setMask_redoHistory,
     file_pngList: images, setFile_pngList: setImages,
   } = useModel('annotationStore');
-  
+
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang];
   const [currentImageDetails, setCurrentImageDetails] = useState<ImageDetails | null>(null);
@@ -155,11 +156,11 @@ const MaskOperate = () => {
   const classesFileRef = useRef<HTMLInputElement>(null);
 
   const hasActiveImage = images.length > 0 && currentImageIndex >= 0 && currentImageIndex < images.length;
-  
+
   const currentAnnotations = useMemo(() => {
     return currentImageDetails ? allImageAnnotations[currentImageDetails.name] : null;
   }, [currentImageDetails, allImageAnnotations]);
-  
+
   const currentViewAnnotations: ViewAnnotation[] = currentAnnotations?.viewAnnotations || [];
   const currentApiJson: ApiResponse = currentAnnotations?.apiJson || { key_points: [], segments: [] };
 
@@ -185,7 +186,7 @@ const MaskOperate = () => {
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.fillRect(box.x, box.y, box.width, box.height);
       ctx.strokeRect(box.x, box.y, box.width, box.height);
-      
+
       ctx.globalAlpha = 1.0;
       if (showCategoryInBox) {
         ctx.fillStyle = "#262626"; ctx.font = "bold 12px Arial"; ctx.textBaseline = "top";
@@ -198,39 +199,39 @@ const MaskOperate = () => {
     }
     ctx.restore();
   }, [showCategoryInBox]);
-  
+
   const renderDiagonal = useCallback((diag: ViewDiagonalAnnotation, ctx: CanvasRenderingContext2D, isPreview = false, isSelected = false) => {
     const { angleRad, length, centerX, centerY } = getDiagonalParameters(diag.points); if (length === 0) return;
-    ctx.save(); 
-    ctx.translate(centerX, centerY); 
+    ctx.save();
+    ctx.translate(centerX, centerY);
     ctx.rotate(angleRad);
-    
+
     const color = isSelected ? '#4096ff' : diag.color;
     const lineWidth = isSelected ? 3 : 1;
-    
+
     ctx.globalAlpha = isSelected ? 1.0 : 0.8;
     ctx.fillStyle = color;
     ctx.strokeStyle = isSelected ? "#0958d9" : "rgba(0,0,0,0.6)";
-    
+
     if (isPreview) {
         ctx.setLineDash([8, 4]);
         ctx.lineWidth = 2;
     } else {
         ctx.lineWidth = lineWidth;
     }
-    
+
     ctx.beginPath();
     ctx.rect(-length / 2, -diag.thickness / 2, length, diag.thickness);
     ctx.fill();
     ctx.stroke();
-    
+
     ctx.restore();
-    
+
     if (!isPreview && showCategoryInBox) {
         ctx.save();
-        ctx.fillStyle = "#262626"; 
-        ctx.font = "bold 12px Arial"; 
-        ctx.textAlign = "center"; 
+        ctx.fillStyle = "#262626";
+        ctx.font = "bold 12px Arial";
+        ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
         ctx.fillText(diag.category, centerX, centerY - diag.thickness / 2 - 5);
         ctx.restore();
@@ -240,17 +241,17 @@ const MaskOperate = () => {
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
-    
+
     if (currentImageDetails) {
-        const img = new Image(); 
+        const img = new Image();
         img.crossOrigin = "Anonymous";
         img.src = currentImageDetails.url;
         img.onload = () => {
-            canvas.width = currentImageDetails.width; 
+            canvas.width = currentImageDetails.width;
             canvas.height = currentImageDetails.height;
-            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            
+
             currentViewAnnotations.forEach((anno: ViewAnnotation) => {
                 if (anno.id !== selectedAnnotationId) {
                     if ('points' in anno) renderDiagonal(anno, ctx, false, false);
@@ -263,7 +264,7 @@ const MaskOperate = () => {
                 if ('points' in selectedAnno) renderDiagonal(selectedAnno, ctx, false, true);
                 else renderRectangle(selectedAnno, ctx, false, true);
             }
-            
+
             if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
                 const { startMousePos } = draggingState;
                 if (activeTool === 'rectangle') {
@@ -288,7 +289,7 @@ const MaskOperate = () => {
         ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
   }, [currentImageDetails, currentViewAnnotations, selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth]);
-  
+
   const getScaledCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -313,16 +314,16 @@ const MaskOperate = () => {
   }, [currentImageIndex, hasActiveImage, images]);
 
   useEffect(() => {
-    if (categories.length > 0 && (!currentCategory || !categories.includes(currentCategory))) { setCurrentCategory(categories[0]); } 
+    if (categories.length > 0 && (!currentCategory || !categories.includes(currentCategory))) { setCurrentCategory(categories[0]); }
     else if (categories.length === 0 && currentCategory !== "") { setCurrentCategory(""); }
   }, [categories, currentCategory]);
-  
+
   useEffect(() => { redrawCanvas(); }, [redrawCanvas]);
-  
-  useEffect(() => { 
-    const handleResize = () => redrawCanvas(); 
-    window.addEventListener('resize', handleResize); 
-    return () => window.removeEventListener('resize', handleResize); 
+
+  useEffect(() => {
+    const handleResize = () => redrawCanvas();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, [redrawCanvas]);
 
   useEffect(() => {
@@ -342,9 +343,9 @@ const MaskOperate = () => {
     if (isResizingInspector) { document.body.style.userSelect = 'none'; window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); }
     return () => { document.body.style.userSelect = ''; window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
   }, [isResizingInspector]);
-  
+
   const isPointInRect = (point: Point, rect: { x: number; y: number; width: number; height: number }): boolean => ( point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height );
-  
+
   const addUndoRecord = useCallback(() => {
     if (!currentImageDetails) return;
     const operation: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
@@ -359,7 +360,7 @@ const MaskOperate = () => {
       return { ...prev, [currentImageDetails.name]: { ...prev[currentImageDetails.name], viewAnnotations: newViewAnnotations, apiJson: updatedApiJson }};
     });
   }, [currentImageDetails, setAllImageAnnotations]);
-  
+
   const handleAnnotationPropertyUpdate = useCallback((annoId: string, updates: Partial<ViewAnnotation>) => {
     const newViewAnnotations = currentViewAnnotations.map(a => a.id === annoId ? {...a, ...updates} : a);
     updateAnnotations(newViewAnnotations);
@@ -389,7 +390,7 @@ const MaskOperate = () => {
 
   const performUndo = useCallback(() => {
     const history = mask_operationHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
-    const lastOp = history[history.length - 1]; 
+    const lastOp = history[history.length - 1];
     const redoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
     setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: [redoOp, ...(prev[currentImageIndex] || [])] }));
     setAllImageAnnotations(prev => ({...prev, [lastOp.imageId]: {...prev[lastOp.imageId], viewAnnotations: lastOp.previousViewAnnotations, apiJson: lastOp.previousApiJson }}));
@@ -399,7 +400,7 @@ const MaskOperate = () => {
 
   const performRedo = useCallback(() => {
     const history = mask_redoHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
-    const redoOp = history[0]; 
+    const redoOp = history[0];
     const undoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: currentViewAnnotations, previousApiJson: currentApiJson };
     setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: [...(prev[currentImageIndex] || []), undoOp] }));
     setAllImageAnnotations(prev => ({...prev, [redoOp.imageId]: {...prev[redoOp.imageId], viewAnnotations: redoOp.previousViewAnnotations, apiJson: redoOp.previousApiJson }}));
@@ -427,11 +428,11 @@ const MaskOperate = () => {
         } else return isPointInRect(mousePos, anno);
       });
       if (clickedAnnotation) {
-        if (selectedAnnotationId !== clickedAnnotation.id) { 
-          setSelectedAnnotationId(clickedAnnotation.id); 
-        } else { 
-          addUndoRecord(); 
-          setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(clickedAnnotation)) }); 
+        if (selectedAnnotationId !== clickedAnnotation.id) {
+          setSelectedAnnotationId(clickedAnnotation.id);
+        } else {
+          addUndoRecord();
+          setDraggingState({ type: 'move', startMousePos: mousePos, startAnnotationState: JSON.parse(JSON.stringify(clickedAnnotation)) });
         }
       } else {
         setSelectedAnnotationId(null);
@@ -443,7 +444,7 @@ const MaskOperate = () => {
   };
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!draggingState || !currentImageDetails) return;
-    const mousePos = getScaledCoords(e); 
+    const mousePos = getScaledCoords(e);
     if (activeTool === 'select' && draggingState.startAnnotationState.id) {
       const dx = mousePos.x - draggingState.startMousePos.x; const dy = mousePos.y - draggingState.startMousePos.y;
       const startState = draggingState.startAnnotationState;
@@ -473,7 +474,7 @@ const MaskOperate = () => {
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!draggingState) return;
     if (activeTool === 'rectangle' || activeTool === 'diagonal') {
-        const start = draggingState.startMousePos; 
+        const start = draggingState.startMousePos;
         const end = getScaledCoords(e);
         const color = categoryColors[currentCategory] || '#cccccc';
         if (activeTool === 'rectangle') {
@@ -513,7 +514,7 @@ const MaskOperate = () => {
     if (!uploadedFiles) return;
     message.loading({ content: t.uploadFolder, key: 'fileProcessing', duration: 0 });
     const filesArray = Array.from(uploadedFiles);
-    
+
     let tempCats = [...categories];
     let tempColors = { ...categoryColors };
 
@@ -531,7 +532,7 @@ const MaskOperate = () => {
             try {
                 apiJson = JSON.parse(await jsonFile.text());
                 const viewAnnotations = convertApiToView(apiJson, tempColors, currentLineWidth);
-                
+
                 const newCats = [...new Set(viewAnnotations.map(va => va.category))];
                 newCats.forEach(cat => {
                     if (cat && !tempCats.includes(cat)) {
@@ -540,39 +541,39 @@ const MaskOperate = () => {
                     }
                 });
 
-            } catch(e) { 
+            } catch(e) {
                 message.error(`${t.errorParseJsonFile} ${jsonFile.name}: ${e instanceof Error ? e.message : String(e)}`);
                 apiJson = {};
             }
         }
-        
+
         const viewAnnotations = convertApiToView(apiJson, tempColors, currentLineWidth);
         newAnnotations[imgFile.name] = { viewAnnotations, apiJson };
     }
-    setCategories(tempCats); 
+    setCategories(tempCats);
     setCategoryColors(tempColors);
     setImages(sortedImageFiles);
-    setAllImageAnnotations(newAnnotations); 
+    setAllImageAnnotations(newAnnotations);
     setCurrentImageIndex(sortedImageFiles.length > 0 ? 0 : -1);
     setMask_operationHistory({}); setMask_redoHistory({});
     message.success({content: `${sortedImageFiles.length} ${t.filesProcessed} ${t.fileProcessingComplete}`, key: 'fileProcessing', duration: 3});
     if(folderUploadRef.current) folderUploadRef.current.value = "";
   };
-  
+
   const navigateImage = (offset: number) => { const newIndex = currentImageIndex + offset; if (newIndex >= 0 && newIndex < images.length) { setCurrentImageIndex(newIndex); setSelectedAnnotationId(null); setDraggingState(null); } };
-  
+
   const handleExportAll = async () => {
     if(images.length === 0) return;
     message.loading({ content: t.exportingMessage, key: 'exporting', duration: 0 });
     try {
         const zip = new JSZip();
         zip.file("classes.txt", categories.join('\n'));
-        
+
         for (const imageFile of images) {
             zip.file(`images/${imageFile.name}`, imageFile);
             const imageName = imageFile.name;
             const annotationsForImage = allImageAnnotations[imageName] || { viewAnnotations: [], apiJson: {} };
-            
+
             const jsonContent = JSON.stringify(annotationsForImage.apiJson, null, 2);
 
             const baseName = getFileNameWithoutExtension(imageName);
@@ -581,15 +582,15 @@ const MaskOperate = () => {
         const content = await zip.generateAsync({ type: "blob" });
         saveAs(content, "maskoperate_annotations.zip");
         message.success({ content: t.exportSuccessMessage, key: 'exporting', duration: 3 });
-    } catch (error: any) { 
-        console.error("Export failed:", error); 
-        message.error({ content: `${t.exportFailureMessage} ${error.message}`, key: 'exporting', duration: 3 }); 
+    } catch (error: any) {
+        console.error("Export failed:", error);
+        message.error({ content: `${t.exportFailureMessage} ${error.message}`, key: 'exporting', duration: 3 });
     }
   };
-  
+
   const handleAiAnnotation = async () => {
     if (!currentImageDetails) { message.warning(t.noImages); return; }
-    
+
     setIsAiAnnotating(true);
     message.loading({ content: t.aiAnnotating, key: 'ai-annotation', duration: 0 });
 
@@ -637,7 +638,7 @@ const MaskOperate = () => {
             setCategories(newCategories);
             setCategoryColors(updatedCategoryColors);
         }
-        
+
         const finalViewAnnotations = convertApiToView(apiResult, updatedCategoryColors, currentLineWidth);
 
         addUndoRecord();
@@ -664,7 +665,7 @@ const MaskOperate = () => {
     const newNameTrimmed = newName.trim();
     setCategories(prev => prev.map(c => c === oldName ? newNameTrimmed : c));
     setCategoryColors(prev => { const newColors = {...prev}; newColors[newNameTrimmed] = newColors[oldName]; delete newColors[oldName]; return newColors; });
-    
+
     const newAllAnnos = {...allImageAnnotations};
     Object.keys(newAllAnnos).forEach(imgName => {
         const updatedViewAnnos = newAllAnnos[imgName].viewAnnotations.map(anno => anno.category === oldName ? {...anno, category: newNameTrimmed} : anno);
@@ -677,7 +678,7 @@ const MaskOperate = () => {
   const handleUpdateColor = (catName: string, newColor: string) => {
     setCategoryColors(prev => ({...prev, [catName]: newColor}));
     const newAllAnnos = {...allImageAnnotations};
-    Object.keys(newAllAnnos).forEach(imgName => { 
+    Object.keys(newAllAnnos).forEach(imgName => {
         const updatedViewAnnos = newAllAnnos[imgName].viewAnnotations.map(anno => anno.category === catName ? {...anno, color: newColor} : anno);
         newAllAnnos[imgName] = { ...newAllAnnos[imgName], viewAnnotations: updatedViewAnnos };
     });
@@ -685,8 +686,8 @@ const MaskOperate = () => {
   };
   const handleDeleteClass = (className: string) => {
     const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', className) : `确认删除类别 ${className}?`;
-    Modal.confirm({ 
-        title: title, 
+    Modal.confirm({
+        title: title,
         content: t.deleteClassConfirmContent, okText: t.confirmDelete, okType: 'danger', cancelText: t.cancel,
         onOk: () => {
             const newCategories = categories.filter(c => c !== className);
@@ -844,13 +845,13 @@ const MaskOperate = () => {
                             <Form layout="vertical">
                                 <Title level={5}>{t.viewSettings || 'View & Annotation Settings'}</Title>
                                 <Form.Item label={t.category}>
-                                  <Select 
-                                      value={currentCategory} 
-                                      onChange={(value: string) => setCurrentCategory(value)} 
-                                      disabled={!hasActiveImage || categories.length === 0} 
+                                  <Select
+                                      value={currentCategory}
+                                      onChange={(value: string) => setCurrentCategory(value)}
+                                      disabled={!hasActiveImage || categories.length === 0}
                                       placeholder={t.noCategoriesFound}
                                   >
-                                      {categories.map(cat => 
+                                      {categories.map(cat =>
                                           <Option key={cat} value={cat}>
                                               <Space>
                                                   <div style={{ width: '14px', height: '14px', backgroundColor: categoryColors[cat] || '#ccc', borderRadius: '3px', border: '1px solid #ccc' }} />
