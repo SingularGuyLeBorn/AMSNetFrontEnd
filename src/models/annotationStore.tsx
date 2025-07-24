@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
-import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
+// FILE: src/models/annotationStore.tsx
 import type { ClassInfo, Operation } from '@/pages/FileOperate/constants';
+import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
 import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/pages/MaskOperate/constants';
+import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
+import { useState } from 'react';
 
-// 新增：RGBA转HEX的辅助函数，确保颜色选择器能正确显示
 const rgbaToHex = (rgba: string): string => {
   if (!rgba) return '#000000';
   if (rgba.startsWith('#')) return rgba;
@@ -16,7 +16,6 @@ const rgbaToHex = (rgba: string): string => {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0')}`;
 };
 
-// 修改：在这里将初始的RGBA颜色对象转换为HEX格式的对象
 const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduce(
   (acc, [key, value]) => {
     acc[key] = rgbaToHex(value);
@@ -25,75 +24,72 @@ const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduc
   {} as { [key: string]: string }
 );
 
-
 /**
  * @description
  * 全局数据仓库 (Global Data Store)
  *
  * 该 Store 负责管理整个应用中与标注相关的共享状态。
- * 设计原则：
- * 1. 状态隔离：通过明确的前缀（`file_` 和 `mask_`）区分不同页面的专属状态，避免交叉污染。
- * 2. 数据共享：`file_pngList` 作为共享的图片源，由全局上传组件填充，供两个标注页面消费。
- * 3. 索引独立：`file_currentIndex` 和 `mask_currentIndex` 是各自页面的独立指针，实现操作解耦。
+ * 设计原则 (重构后):
+ * 1. 源数据分离: 所有源数据通过 `workspaceService` 访问，Store 不持有源数据。
+ * 2. 脏数据缓存: Store 作为整个会话的 "脏数据缓存"。任何未保存的修改都存在这里。
+ * 3. 索引独立：`file_currentIndex` 和 `mask_currentIndex` 是各自页面的独立指针。
+ * 4. Bedrock Change: 增加全局锁 `isAppBusy`，用于防止异步操作的竞态条件。
  */
 export default function useAnnotationStore() {
   // ===================================================================
-  // FileOperate & 共享状态
+  // Workspace & 共享状态
   // ===================================================================
+  const [imageKeys, setImageKeys] = useState<string[]>([]);
+  /**
+   * @description Bedrock Change: 全局应用繁忙状态锁。
+   * 在任何关键的、耗时的异步操作（如加载、保存、AI处理）期间，此状态应为 true。
+   * 它用于禁用全局范围内的冲突交互，防止竞态条件。
+   */
+  const [isAppBusy, setAppBusy] = useState<boolean>(false);
 
-  // 共享的图片文件列表，是所有标注操作的数据基础
-  const [file_pngList, setFile_pngList] = useState<File[]>([]);
-  // FileOperate 页面的 YOLO 标注文件列表
-  const [file_yoloList, setFile_yoloList] = useState<File[]>([]);
-  // FileOperate 页面的 JSON 染色文件列表
-  const [file_jsonList, setFile_jsonList] = useState<File[]>([]);
-
-  // 【核心解耦】FileOperate 页面的当前图片索引
+  // ===================================================================
+  // FileOperate 页面状态
+  // ===================================================================
   const [file_currentIndex, setFile_currentIndex] = useState<number>(0);
-
-  // FileOperate 页面的类别定义
   const [file_classMap, setFile_classMap] = useState<{ [key: number]: ClassInfo }>(initialIndexClassColorMap);
-  // FileOperate 页面当前正在编辑的 YOLO 内容
-  const [file_currentYoloContent, setFile_currentYoloContent] = useState<string | null>(null);
-  // FileOperate 页面当前正在编辑的 JSON 内容
-  const [file_currentJsonContent, setFile_currentJsonContent] = useState<string | null>(null);
-  // FileOperate 页面的操作历史，用于撤销
+  const [file_dirtyYolo, setFile_dirtyYolo] = useState<{ [imageKey: string]: string }>({});
+  const [file_dirtyJson, setFile_dirtyJson] = useState<{ [imageKey: string]: string }>({});
   const [file_operationHistory, setFile_operationHistory] = useState<Record<number, Operation[]>>({});
-  // FileOperate 页面的重做历史，用于恢复
   const [file_redoHistory, setFile_redoHistory] = useState<Record<number, Operation[]>>({});
 
   // ===================================================================
   // MaskOperate 页面状态
   // ===================================================================
-
-  // 【核心解耦】MaskOperate 页面的当前图片索引
   const [mask_currentIndex, setMask_currentIndex] = useState<number>(0);
-
-  // MaskOperate 页面的所有图片标注数据集合，以图片名为 key
   const [mask_allImageAnnotations, setMask_allImageAnnotations] = useState<{ [imageName: string]: ImageAnnotationData }>({});
-  
-  // MaskOperate 页面的类别列表 (保持不变)
   const [mask_categories, setMask_categories] = useState<string[]>(Object.keys(defaultCategoryColors));
-  
-  // 修改：使用预处理过的HEX颜色对象进行初始化
   const [mask_categoryColors, setMask_categoryColors] = useState<{ [key: string]: string }>(initialMaskCategoryHexColors);
-  
-  // MaskOperate 页面当前选中的标注ID
   const [mask_selectedAnnotationId, setMask_selectedAnnotationId] = useState<string | null>(null);
-  // MaskOperate 页面的操作历史，用于撤销
   const [mask_operationHistory, setMask_operationHistory] = useState<Record<number, MaskUndoOperation[]>>({});
-  // MaskOperate 页面的重做历史，用于恢复
   const [mask_redoHistory, setMask_redoHistory] = useState<Record<number, MaskUndoOperation[]>>({});
 
+  const clearAllDirtyData = () => {
+    setFile_dirtyYolo({});
+    setFile_dirtyJson({});
+    setMask_allImageAnnotations({});
+    setFile_operationHistory({});
+    setFile_redoHistory({});
+    setMask_operationHistory({});
+    setMask_redoHistory({});
+  };
+
+
   return {
-    // FileOperate Exports (及共享状态)
-    file_pngList, setFile_pngList,
-    file_yoloList, setFile_yoloList,
-    file_jsonList, setFile_jsonList,
+    // Workspace & Shared Exports
+    imageKeys, setImageKeys,
+    isAppBusy, setAppBusy,
+    clearAllDirtyData,
+
+    // FileOperate Exports
     file_currentIndex, setFile_currentIndex,
     file_classMap, setFile_classMap,
-    file_currentYoloContent, setFile_currentYoloContent,
-    file_currentJsonContent, setFile_currentJsonContent,
+    file_dirtyYolo, setFile_dirtyYolo,
+    file_dirtyJson, setFile_dirtyJson,
     file_operationHistory, setFile_operationHistory,
     file_redoHistory, setFile_redoHistory,
 

@@ -1,173 +1,157 @@
-// src/app.tsx
+// FILE: src / app.tsx
 import Footer from '@/components/Footer';
+import { workspaceService } from "@/models/workspaceService";
 import { getLoginUserUsingGet } from '@/services/backend/userController';
+import { FolderOpenOutlined, GlobalOutlined, SaveOutlined } from '@ant-design/icons';
 import type { RunTimeLayoutConfig } from '@umijs/max';
 import { history, useModel } from '@umijs/max';
+import { Button, Modal, Progress, Space, Tooltip, message } from 'antd';
+import React, { useEffect, useRef, useState } from 'react';
 import defaultSettings from '../config/defaultSettings';
 import { AvatarDropdown } from './components/RightContent/AvatarDropdown';
 import { requestConfig } from './requestConfig';
-import { Button, Upload, message, Space, Tooltip } from 'antd';
-import { GlobalOutlined, UploadOutlined, FileZipOutlined } from '@ant-design/icons';
-import React from 'react';
-import type { ImageAnnotationData } from '@/pages/MaskOperate/constants';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+
 
 const loginPath = '/user/login';
 
-// 辅助函数：获取不带扩展名的文件名
-const getFileNameWithoutExtension = (fileName: string): string => {
-    const lastDotIndex = fileName.lastIndexOf('.');
-    if (lastDotIndex === -1) return fileName;
-    return fileName.substring(0, lastDotIndex);
-};
-
-// 全局文件上传组件
+/**
+ * @description Bedrock Change: 全局工作区加载器，集成全局状态锁
+ */
 const GlobalUploader: React.FC = () => {
-    const {
-      setFile_pngList,
-      setFile_yoloList,
-      setFile_jsonList,
-      setFile_currentIndex,
-      setMask_allImageAnnotations,
-      setMask_operationHistory,
-      setMask_redoHistory,
-      setMask_currentIndex,
-    } = useModel('annotationStore');
+  const { setImageKeys, setFile_currentIndex, setMask_currentIndex, clearAllDirtyData, isAppBusy, setAppBusy } = useModel('annotationStore');
+  const [isIndexing, setIsIndexing] = useState(false);
+  const [progress, setProgress] = useState({ loaded: 0, total: 1 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleGlobalUpload = async (files: File[]) => {
-        if (!files || files.length === 0) {
-            message.warning("文件夹中未选择任何文件。");
-            return;
-        }
-        message.loading({ content: "正在处理文件夹...", key: 'global-upload', duration: 0 });
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
 
-        const compareFn = (a: File, b: File) => a.name.localeCompare(b.name, undefined, { numeric: true });
+    if (isAppBusy) {
+      message.warning("应用正忙，请稍后再试。");
+      return;
+    }
 
-        const pngList: File[] = files.filter(f => f.type.startsWith('image/')).sort(compareFn);
-        const yoloList: File[] = files.filter(f => f.name.endsWith('.txt')).sort(compareFn);
-        const jsonList: File[] = files.filter(f => f.name.endsWith('.json')).sort(compareFn);
+    setAppBusy(true); // 加锁
+    setIsIndexing(true);
+    setProgress({ loaded: 0, total: files.length });
+    message.loading({ content: "正在索引文件夹...", key: 'global-upload', duration: 0 });
 
-        setFile_pngList(pngList);
-        setFile_yoloList(yoloList);
-        setFile_jsonList(jsonList);
-        setFile_currentIndex(0);
+    try {
+      const workspaceInfo = await workspaceService.initializeSourceWorkspace(Array.from(files), (p) => {
+        setProgress(p);
+      });
 
-        const newAnnotationsData: { [imageName: string]: ImageAnnotationData } = {};
-        await Promise.all(
-          pngList.map(async (imgFile) => {
-              const baseName = getFileNameWithoutExtension(imgFile.name);
-              const annotationJsonFile = jsonList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-              const annotations: ImageAnnotationData = { jsonAnnotations: [], txtAnnotations: [] };
-              if (annotationJsonFile) {
-                  try {
-                      JSON.parse(await annotationJsonFile.text());
-                  } catch (e) {
-                      console.error(`解析JSON文件失败 ${imgFile.name}:`, e);
-                  }
-              }
-              newAnnotationsData[imgFile.name] = annotations;
-          })
-        );
-        setMask_allImageAnnotations(newAnnotationsData);
-        setMask_operationHistory({});
-        setMask_redoHistory({});
-        setMask_currentIndex(0);
+      setImageKeys(workspaceInfo.imageKeys);
+      setFile_currentIndex(0);
+      setMask_currentIndex(0);
+      clearAllDirtyData();
+      await workspaceService.saveLastIndices({ fileOperateIndex: 0, maskOperateIndex: 0 });
 
-        message.success({ content: '文件夹上传并处理成功！', key: 'global-upload', duration: 3 });
-    };
+      message.success({ content: `工作区加载成功，共发现 ${workspaceInfo.imageKeys.length} 张图片！`, key: 'global-upload', duration: 3 });
 
-    return (
-        <Upload
-            directory
-            multiple
-            showUploadList={false}
-            beforeUpload={(_, fileList) => {
-                handleGlobalUpload(fileList);
-                return false;
-            }}
-        >
-            <Button icon={<UploadOutlined />}>上传文件夹</Button>
-        </Upload>
-    );
+    } catch (error: any) {
+      console.error("初始化工作区失败:", error);
+      message.error({ content: `初始化工作区失败: ${error.message}`, key: 'global-upload', duration: 5 });
+    } finally {
+      setIsIndexing(false);
+      setAppBusy(false); // 解锁
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  return (
+    <>
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+        // @ts-ignore
+        webkitdirectory="true"
+        directory="true"
+      />
+      <Tooltip title="打开一个新的源文件夹">
+        <Button icon={<FolderOpenOutlined />} onClick={triggerFileUpload} loading={isIndexing} disabled={isAppBusy}>
+          打开文件夹
+        </Button>
+      </Tooltip>
+      <Modal
+        title="正在处理文件..."
+        open={isIndexing}
+        closable={false}
+        footer={null}
+        centered
+      >
+        <Progress percent={Math.round((progress.loaded / progress.total) * 100)} />
+        <p style={{ textAlign: 'center', marginTop: '1rem' }}>{`正在索引文件: ${progress.loaded} / ${progress.total}`}</p>
+      </Modal>
+    </>
+  );
 };
+
 
 /**
- * 全局导出组件
- * @description 负责将两个标注页面的数据从 annotationStore 中聚合，并打包成一个 zip 文件导出。
- * 【核心逻辑】始终以图片列表为准，确保为每张图片都生成对应的标注文件，如果不存在则生成空文件。
+ * @description Bedrock Change: 全局工作区保存器，集成全局状态锁
  */
-const GlobalExporter: React.FC = () => {
-    const { file_pngList, file_yoloList, mask_allImageAnnotations } = useModel('annotationStore');
+const WorkspaceSaver: React.FC = () => {
+  const { imageKeys, file_dirtyYolo, file_dirtyJson, mask_allImageAnnotations, isAppBusy, setAppBusy } = useModel('annotationStore');
+  const [isSaving, setIsSaving] = useState(false);
 
-    const handleGlobalExport = async () => {
-        if (file_pngList.length === 0) {
-            message.warning("没有可导出的文件。");
-            return;
-        }
-        message.loading({ content: "正在打包所有标注数据...", key: 'global-export', duration: 0 });
+  const handleSave = async () => {
+    if (imageKeys.length === 0) {
+      message.warning("没有可保存的工作区。");
+      return;
+    }
+    if (isAppBusy) {
+      message.warning("应用正忙，请稍后再试。");
+      return;
+    }
 
-        try {
-            const zip = new JSZip();
-            const imagesFolder = zip.folder('images');
-            const cpntFolder = zip.folder('cpnt'); // For FileOperate's YOLO .txt
-            const wireFolder = zip.folder('wire'); // For MaskOperate's .json
+    setAppBusy(true); // 加锁
+    setIsSaving(true);
+    message.loading({ content: "正在打包工作区...", key: 'workspace-save', duration: 0 });
+    try {
+      const success = await workspaceService.saveWorkspace({
+        yolo: file_dirtyYolo,
+        json: file_dirtyJson,
+        mask: mask_allImageAnnotations
+      });
+      if (success) {
+        message.success({ content: '工作区已成功打包为ZIP文件！', key: 'workspace-save', duration: 3 });
+      } else {
+        message.info({ content: '保存操作已取消。', key: 'workspace-save', duration: 3 });
+      }
+    } catch (error: any) {
+      console.error("保存工作区失败:", error);
+      message.error({ content: `保存失败: ${error.message}`, key: 'workspace-save', duration: 5 });
+    } finally {
+      setIsSaving(false);
+      setAppBusy(false); // 解锁
+    }
+  };
 
-            if (!imagesFolder || !cpntFolder || !wireFolder) {
-                 throw new Error("创建ZIP文件夹失败。");
-            }
-
-            // 为什么？以图片列表为权威数据源进行遍历，这是确保文件完整性的基石。
-            for (const imageFile of file_pngList) {
-                const baseName = getFileNameWithoutExtension(imageFile.name);
-
-                // 1. 添加图片文件
-                imagesFolder.file(imageFile.name, imageFile);
-
-                // 2. 添加或补全 FileOperate (cpnt) 的 YOLO 文件
-                const yoloFile = file_yoloList.find(f => getFileNameWithoutExtension(f.name) === baseName);
-                const yoloContent = yoloFile ? await yoloFile.text() : ""; // 如果找不到，则内容为空字符串
-                cpntFolder.file(`${baseName}.txt`, yoloContent);
-
-                // 3. 添加或补全 MaskOperate (wire) 的 JSON 文件
-                const annotationData = mask_allImageAnnotations[imageFile.name];
-                const annotations = annotationData?.jsonAnnotations || [];
-                
-                const annotationsByCategory: { [key: string]: any[] } = {};
-                annotations.forEach(anno => {
-                    if (!annotationsByCategory[anno.category]) {
-                        annotationsByCategory[anno.category] = [];
-                    }
-                    const { id, color, category, ...rest } = anno as any; // 去除内部状态
-                    annotationsByCategory[category].push(rest);
-                });
-                
-                // 为什么？即使 annotationsByCategory 为空对象，JSON.stringify 也会生成 "{}"，确保了空文件的正确性。
-                const jsonContent = JSON.stringify(annotationsByCategory, null, 2);
-                wireFolder.file(`${baseName}.json`, jsonContent);
-            }
-
-            const zipContent = await zip.generateAsync({ type: 'blob' });
-            saveAs(zipContent, 'global_annotations_export.zip');
-            message.success({ content: '所有数据已成功导出！', key: 'global-export', duration: 3 });
-
-        } catch (error: any) {
-            console.error("全局导出失败:", error);
-            message.error({ content: `导出失败: ${error.message}`, key: 'global-export', duration: 3 });
-        }
-    };
-
-    return (
-        <Tooltip title="导出所有页面的标注数据">
-            <Button type="primary" icon={<FileZipOutlined />} onClick={handleGlobalExport} ghost>
-                全局导出
-            </Button>
-        </Tooltip>
-    );
+  return (
+    <Tooltip title="将所有修改打包成ZIP文件下载">
+      <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={isSaving} disabled={isAppBusy}>
+        保存工作区
+      </Button>
+    </Tooltip>
+  );
 };
 
 
-// 语言切换器组件
+/**
+ * @description 语言切换器组件
+ */
 const LanguageSwitcher: React.FC = () => {
   const { initialState, setInitialState } = useModel('@@initialState');
   const currentLanguage = initialState?.language || 'en';
@@ -178,9 +162,9 @@ const LanguageSwitcher: React.FC = () => {
     window.dispatchEvent(new CustomEvent('languageChange', { detail: { language: newLanguage } }));
   };
   return (
-      <Button type="primary" icon={<GlobalOutlined />} onClick={toggleLanguage}>
-          {currentLanguage === 'zh' ? '中文' : 'EN'}
-      </Button>
+    <Button type="primary" icon={<GlobalOutlined />} onClick={toggleLanguage} ghost>
+      {currentLanguage === 'zh' ? '中文' : 'EN'}
+    </Button>
   );
 };
 
@@ -204,20 +188,58 @@ export async function getInitialState(): Promise<{
   return initialState;
 }
 
-// UmiJS 运行时布局配置
+const AppStartupLogic: React.FC = () => {
+  const { setImageKeys, setFile_currentIndex, setMask_currentIndex, setAppBusy } = useModel('annotationStore');
+
+  useEffect(() => {
+    const tryRestore = async () => {
+      setAppBusy(true); // 加锁
+      try {
+        const restored = await workspaceService.restoreWorkspace();
+        if (restored) {
+          setImageKeys(restored.imageKeys);
+          setFile_currentIndex(restored.lastFileOperateIndex);
+          setMask_currentIndex(restored.lastMaskOperateIndex);
+          message.success(`已恢复上次的工作区，共 ${restored.imageKeys.length} 张图片。`);
+        }
+      } catch (e) {
+        console.error("恢复工作区失败", e);
+        message.error("恢复上次工作区失败。");
+      } finally {
+        setAppBusy(false); // 解锁
+      }
+    };
+    tryRestore();
+  }, [setImageKeys, setFile_currentIndex, setMask_currentIndex, setAppBusy]);
+
+  return null;
+}
+
+/**
+ * @description UmiJS 运行时布局配置
+ */
 export const layout: RunTimeLayoutConfig = ({ initialState }) => {
   return {
     rightContentRender: () => (
-        <Space size="middle">
-            <GlobalUploader />
-            <GlobalExporter />
-            <LanguageSwitcher />
-            <AvatarDropdown />
-        </Space>
+      <Space size="middle">
+        <GlobalUploader />
+        <WorkspaceSaver />
+        <LanguageSwitcher />
+        <AvatarDropdown />
+      </Space>
     ),
     footerRender: () => <Footer />,
     waterMarkProps: {
       content: initialState?.currentUser?.userName,
+    },
+    // 在布局中插入一个无UI的组件来执行启动逻辑
+    childrenRender: (children) => {
+      return (
+        <>
+          <AppStartupLogic />
+          {children}
+        </>
+      )
     },
     menuHeaderRender: undefined,
     ...defaultSettings,
@@ -226,6 +248,9 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
 
 export const request = requestConfig;
 
+/**
+ * @description 全局语言切换事件系统
+ */
 window.appLanguage = {
   getCurrentLanguage: () => localStorage.getItem('language') || 'en',
   subscribeToLanguageChange: (callback) => {
@@ -235,11 +260,72 @@ window.appLanguage = {
   }
 };
 
+// Bedrock Change: Type Definitions for File System Access API are kept for potential future use (e.g., in HTTPS environments)
+// But the core logic no longer relies on them.
 declare global {
+  interface FileSystemHandle {
+    readonly kind: 'file' | 'directory';
+    readonly name: string;
+    isSameEntry(other: FileSystemHandle): Promise<boolean>;
+    queryPermission(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
+    requestPermission(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
+  }
+
+  interface FileSystemFileHandle extends FileSystemHandle {
+    readonly kind: 'file';
+    getFile(): Promise<File>;
+    createWritable(options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream>;
+  }
+
+  interface FileSystemDirectoryHandle extends FileSystemHandle {
+    readonly kind: 'directory';
+    getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<FileSystemDirectoryHandle>;
+    getFileHandle(name: string, options?: FileSystemGetFileOptions): Promise<FileSystemFileHandle>;
+    removeEntry(name: string, options?: FileSystemRemoveOptions): Promise<void>;
+    resolve(possibleDescendant: FileSystemHandle): Promise<string[] | null>;
+    keys(): AsyncIterableIterator<string>;
+    values(): AsyncIterableIterator<FileSystemHandle>;
+    entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+    [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
+  }
+
   interface Window {
     appLanguage: {
       getCurrentLanguage: () => string;
       subscribeToLanguageChange: (cb: (lang: string) => void) => () => void;
     };
+    showDirectoryPicker(options?: DirectoryPickerOptions): Promise<FileSystemDirectoryHandle>;
+  }
+
+  // Define related types that might be missing
+  interface FileSystemHandlePermissionDescriptor {
+    mode?: 'read' | 'readwrite';
+  }
+
+  interface FileSystemCreateWritableOptions {
+    keepExistingData?: boolean;
+  }
+
+  interface FileSystemGetDirectoryOptions {
+    create?: boolean;
+  }
+
+  interface FileSystemGetFileOptions {
+    create?: boolean;
+  }
+
+  interface FileSystemRemoveOptions {
+    recursive?: boolean;
+  }
+
+  interface DirectoryPickerOptions {
+    id?: string;
+    mode?: 'read' | 'readwrite';
+    startIn?: 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos' | FileSystemHandle;
+  }
+
+  interface FileSystemWritableFileStream extends WritableStream {
+    seek(position: number): Promise<void>;
+    truncate(size: number): Promise<void>;
   }
 }

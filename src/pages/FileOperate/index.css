@@ -1,3 +1,4 @@
+/* FILE: src/pages/FileOperate/index.css */
 /* START OF FILE src/pages/FileOperate/index.css */
 /* --- Unified Color Palette --- */
 :root {
@@ -90,6 +91,23 @@
   overflow: auto;
   height: calc(100vh - 60px);
   padding: 16px;
+  position: relative;
+  /* Bedrock Change: for transition overlay */
+}
+
+/* Bedrock Change: Transition overlay */
+.transition-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 20;
+  backdrop-filter: blur(2px);
 }
 
 .canvas-wrapper {
@@ -112,13 +130,33 @@
 }
 
 /* --- Cursors --- */
-.draw-cursor { cursor: crosshair; }
-.delete-cursor { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ff4d4f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'), auto; }
-.canvas-wrapper canvas.resize-nwse { cursor: nwse-resize; }
-.canvas-wrapper canvas.resize-nesw { cursor: nesw-resize; }
-.canvas-wrapper canvas.resize-ns { cursor: ns-resize; }
-.canvas-wrapper canvas.resize-ew { cursor: ew-resize; }
-.canvas-wrapper canvas.move { cursor: move; }
+.draw-cursor {
+  cursor: crosshair;
+}
+
+.delete-cursor {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ff4d4f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'), auto;
+}
+
+.canvas-wrapper canvas.resize-nwse {
+  cursor: nwse-resize;
+}
+
+.canvas-wrapper canvas.resize-nesw {
+  cursor: nesw-resize;
+}
+
+.canvas-wrapper canvas.resize-ns {
+  cursor: ns-resize;
+}
+
+.canvas-wrapper canvas.resize-ew {
+  cursor: ew-resize;
+}
+
+.canvas-wrapper canvas.move {
+  cursor: move;
+}
 
 
 /* --- Inspector Sider (Right) --- */
@@ -163,15 +201,31 @@
   margin-bottom: 0 !important;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+/* Bedrock Fix: Cascade height: 100% through AntD's internal Tab structure */
+.inspector-tabs .ant-tabs-content-holder,
+.inspector-tabs .ant-tabs-content,
+.inspector-tabs .ant-tabs-tabpane {
+  height: 100%;
 }
 
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  /* IMPORTANT: This prevents the holder from scrolling */
 }
 
 .tab-pane-content {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 16px;
+  /* Bedrock Change: Ensure consistent gap */
+  overflow-y: auto;
+  /* Bedrock Change: Allow the whole pane to scroll if needed */
 }
 
 .class-list-container {
@@ -181,12 +235,15 @@
   border-radius: 6px;
 }
 
-/* --- 新增: 为标注列表提供滚动容器 --- */
 .annotation-collapse-container {
-  max-height: calc(100vh - 340px);
+  flex-grow: 1;
+  /* Grow to fill available space */
   overflow-y: auto;
+  /* Enable scrolling ONLY on this container */
   border-radius: 6px;
   border: 1px solid var(--border-color);
+  min-height: 50px;
+  /* Prevent collapsing to zero height */
 }
 
 
@@ -207,11 +264,30 @@
   background-color: var(--background-color);
 }
 
+/* Bedrock Change: New styles for data view container */
+.data-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.data-view-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  /* Each item takes equal space */
+  min-height: 0;
+  /* Crucial for flexbox resizing in a scrolling container */
+}
+
+
 /* --- Data Textareas (FileOperate) --- */
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
-  min-height: 150px;
+  min-height: 100px;
   padding: 8px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -219,7 +295,8 @@
   font-size: 13px;
   color: var(--text-color-primary);
   background-color: var(--sider-background-color);
-  resize: vertical;
+  resize: none;
+  /* Disable manual resizing */
 }
 
 /* --- Annotation List (MaskOperate & FileOperate) --- */
@@ -244,7 +321,7 @@
 }
 
 .annotation-details-input {
-    width: 100%;
+  width: 100%;
 }
 
 /* --- Ant Design Overrides & Helpers --- */
@@ -265,4 +342,5 @@
 .ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
 }
-/* END OF FILE src/pages/FileOperate/index.css */
+
+/* END OF FILE: src/pages/FileOperate/index.css */

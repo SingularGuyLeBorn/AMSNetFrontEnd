@@ -1,3 +1,4 @@
+/* FILE: src/pages/MaskOperate/index.css */
 /* START OF FILE src/pages/MaskOperate/index.css */
 /* --- Unified Color Palette --- */
 :root {
@@ -90,6 +91,23 @@
   overflow: auto;
   height: calc(100vh - 60px);
   padding: 16px;
+  position: relative;
+  /* Bedrock Change: for transition overlay */
+}
+
+/* Bedrock Change: Transition overlay */
+.transition-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 20;
+  backdrop-filter: blur(2px);
 }
 
 .canvas-wrapper {
@@ -161,15 +179,29 @@
   margin-bottom: 0 !important;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+/* Bedrock Fix: Cascade height: 100% through AntD's internal Tab structure */
+.inspector-tabs .ant-tabs-content-holder,
+.inspector-tabs .ant-tabs-content,
+.inspector-tabs .ant-tabs-tabpane {
+  height: 100%;
 }
 
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  /* IMPORTANT: This prevents the holder from scrolling */
 }
 
 .tab-pane-content {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 16px;
+  overflow-y: auto;
 }
 
 .class-list-container {
@@ -177,6 +209,14 @@
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 6px;
+}
+
+.annotation-collapse-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  min-height: 50px;
 }
 
 .class-management-item {
@@ -196,11 +236,30 @@
   background-color: var(--background-color);
 }
 
-/* --- Data Textareas (FileOperate) --- */
+/* Bedrock Change: New styles for data view container (shared) */
+.data-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.data-view-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  /* Each item takes equal space */
+  min-height: 0;
+  /* Crucial for flexbox resizing in a scrolling container */
+}
+
+/* --- Data Textareas (Shared) --- */
 .data-content-textarea {
   width: 100%;
   flex-grow: 1;
-  min-height: 150px;
+  min-height: 100px;
+  /* Reduced min-height to fit multiple textareas */
   padding: 8px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -208,10 +267,10 @@
   font-size: 13px;
   color: var(--text-color-primary);
   background-color: var(--sider-background-color);
-  resize: vertical;
+  resize: none;
 }
 
-/* --- Annotation List (MaskOperate) --- */
+/* --- Annotation List (Shared) --- */
 .annotation-panel-item .ant-collapse-header {
   padding: 8px 12px !important;
 }
@@ -233,7 +292,7 @@
 }
 
 .annotation-details-input {
-    width: 100%;
+  width: 100%;
 }
 
 /* --- Ant Design Overrides & Helpers --- */
@@ -254,4 +313,5 @@
 .ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
 }
-/* END OF FILE src/pages/MaskOperate/index.css */
+
+/* END OF FILE: src/pages/MaskOperate/index.css */

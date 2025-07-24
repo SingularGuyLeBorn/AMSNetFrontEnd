@@ -1,5 +1,5 @@
-
-// START OF FILE src/pages/FileOperate/constants.ts
+// FILE: src/pages/FileOperate/constants.tsx
+// START OF FILE src/pages/FileOperate/constants.tsx
 /**
  * @description 标注类别信息的接口定义
  */
@@ -8,22 +8,28 @@ export interface ClassInfo {
   color: string;
 }
 
-// Bedrock Note: 新增API响应类型定义，与MaskOperate保持同步，以便调用同一个后端
+/**
+ * @description Bedrock Change: 与MaskOperate对齐的统一API组件类型定义，确保数据处理一致性
+ */
 export interface ApiComponent {
-    b: number; // bottom
-    l: number; // left
-    r: number; // right
-    t: number; // top
-    type: string;
-    // 允许其他可能的字段
-    [key: string]: any;
+  b: number; // bottom
+  l: number; // left
+  r: number; // right
+  t: number; // top
+  type: string;
+  // 允许API返回其他潜在字段
+  [key: string]: any;
 }
 
+/**
+ * @description Bedrock Change: 统一的API响应类型，增强类型安全
+ */
 export interface ApiResponse {
   cpnts?: ApiComponent[];
-  // 保留 key_points 和 segments 的可选定义，以增强类型安全性
+  // 保留 key_points 和 segments 的可选定义以增强类型安全
   key_points?: any[];
   segments?: any[];
+  // 允许响应中存在其他顶层键
   [key: string]: any;
 }
 
@@ -84,7 +90,12 @@ export const translations: { [key: string]: TranslationSet } = {
     confirmDelete: '确认删除',
     cancel: '取消',
     classDeleted: '类别 %s 已删除',
-    deleteAnnotationTooltip: '删除此标注'
+    deleteAnnotationTooltip: '删除此标注',
+    magnifier: '放大镜',
+    regionDelete: '区域删除',
+    regionDeleteMode: '区域删除模式',
+    fullyContained: '全包删除',
+    intersecting: '接触删除',
   },
   en: {
     uploadFolder: 'Upload Folder', undo: 'Undo', redo: 'Redo', save: 'Save', deleteBox: 'Delete Box', category: 'Category', previous: 'Previous', next: 'Next', currentFile: 'Current File', coloringMode: 'Coloring Mode', drawingMode: 'Drawing Mode', delete: 'Delete', saveAll: 'Export All (ZIP)', chooseJsonName: 'Choose Component (for coloring)', chooseJsonType: 'Choose Type (for coloring)', noFile: 'No files to operate on', dataExplorer: 'Data Explorer', settings: 'Settings', annotations: 'Annotations', currentImage: "Current:", noAnnotations: "No annotations for this image", noImages: "Please upload a folder first", selectTool: "Select/Move", operationSuccessful: "Operation successful", noUndoOperations: "No operations to undo", noRedoOperations: "No operations to redo", aiAnnotation: 'AI Auto-Annotation', aiAnnotating: 'AI Annotating...', aiFailed: "AI Annotation Failed", apiMode: 'API Mode', apiModeAuto: 'Auto', apiModeManual: 'Manual', manualApiEndpoint: 'Manual API Selection', apiForNew: 'API for New Image', apiForIncremental: 'API for Incremental', classManagement: 'Class Management', addClass: 'Add Class', importClasses: 'Import Classes', exportClasses: 'Export Classes', className: 'Class Name', hidePanel: 'Hide Panel', showPanel: 'Show Panel', rawData: 'Raw Data',
@@ -93,7 +104,12 @@ export const translations: { [key: string]: TranslationSet } = {
     confirmDelete: 'Confirm Delete',
     cancel: 'Cancel',
     classDeleted: 'Class %s has been deleted',
-    deleteAnnotationTooltip: 'Delete this annotation'
+    deleteAnnotationTooltip: 'Delete this annotation',
+    magnifier: 'Magnifier',
+    regionDelete: 'Region Delete',
+    regionDeleteMode: 'Region Delete Mode',
+    fullyContained: 'Fully Contained',
+    intersecting: 'Intersecting',
   }
 };
-// END OF FILE src/pages/FileOperate/constants.ts
+// END OF FILE: src/pages/FileOperate/constants.tsx
