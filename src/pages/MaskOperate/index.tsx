@@ -25,7 +25,7 @@ import { useModel } from '@umijs/max';
 import { Button, Collapse, Descriptions, Divider, Flex, Form, Input, InputNumber, Layout, List, Modal, Radio, RadioChangeEvent, Select, Space, Spin, Switch, Tabs, Tooltip, Typography, message } from 'antd';
 import { saveAs } from 'file-saver';
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiKeyPoint, ApiResponse, ApiSegment, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
+import type { ApiKeyPoint, ApiResponse, ApiComponent, ApiSegment, ImageAnnotationData, UndoOperation as MaskUndoOperation, Point, ViewAnnotation, ViewBoxAnnotation, ViewDiagonalAnnotation } from './constants';
 import { RESIZE_HANDLE_SIZE, defaultCategoryColors, translations } from './constants';
 import './index.css';
 
@@ -121,12 +121,33 @@ export const convertApiToView = (apiData: ApiResponse, allCategoryColors: { [key
     });
   }
 
+  // Bedrock Change: Also convert cpnts to ViewBoxAnnotation if available
+  if (apiData.cpnts) {
+    apiData.cpnts.forEach(cpnt => {
+      if (typeof cpnt.t === 'number' && typeof cpnt.b === 'number' && typeof cpnt.l === 'number' && typeof cpnt.r === 'number' && typeof cpnt.type === 'string') {
+        const category = cpnt.type;
+        const color = allCategoryColors[category] || allCategoryColors['default'] || '#CCCCCC';
+        viewAnnotations.push({
+          id: generateUniqueId(),
+          x: cpnt.l,
+          y: cpnt.t,
+          width: cpnt.r - cpnt.l,
+          height: cpnt.b - cpnt.t,
+          category,
+          color,
+          sourceLineWidth: thickness, // Reusing thickness for box annotations line width
+        } as ViewBoxAnnotation);
+      }
+    });
+  }
+
   return viewAnnotations;
 };
 
 export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiResponse, 'key_points' | 'segments' | 'cpnts'> => {
   const key_points: ApiKeyPoint[] = [];
   const segments: ApiSegment[] = [];
+  const cpnts: ApiComponent[] = []; // Bedrock Change: Collect cpnts
   const pointMap = new Map<string, number>();
   let kptIdCounter = 0;
 
@@ -150,10 +171,21 @@ export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiRes
       const srcId = getOrCreateKeyPoint(anno.points[0], anno.category);
       const dstId = getOrCreateKeyPoint(anno.points[1], anno.category);
       segments.push({ src_key_point_id: srcId, dst_key_point_id: dstId });
+    } else if ('width' in anno) { // Bedrock Change: Convert ViewBoxAnnotation to ApiComponent
+      cpnts.push({
+        t: anno.y,
+        b: anno.y + anno.height,
+        l: anno.x,
+        r: anno.x + anno.width,
+        type: anno.category,
+        // Add a name property if it exists in ViewBoxAnnotation (e.g., for consistency)
+        // If not, it can be generated or omitted as per API spec.
+        // For simplicity, we assume no 'name' property needed for cpnts on creation here.
+      });
     }
   });
 
-  return { key_points, segments, cpnts: [] };
+  return { key_points, segments, cpnts };
 };
 
 
@@ -860,8 +892,8 @@ const MaskOperate = () => {
       }
       const apiResult: ApiResponse = await response.json();
 
-      if (!apiResult || !apiResult.key_points || !apiResult.segments) {
-        message.info({ content: "AI 未返回任何有效的连线标注。", key: 'ai-annotation', duration: 3 });
+      if (!apiResult || (!apiResult.key_points && !apiResult.cpnts) || ((apiResult.key_points?.length === 0 || !apiResult.key_points) && (apiResult.cpnts?.length === 0 || !apiResult.cpnts))) {
+        message.info({ content: "AI 未返回任何有效的连线或框标注。", key: 'ai-annotation', duration: 3 });
         return;
       }
 
@@ -945,14 +977,25 @@ const MaskOperate = () => {
         const newAllAnnotations = { ...mask_allImageAnnotations };
         Object.keys(newAllAnnotations).forEach(imgName => {
           const currentAnnos = newAllAnnotations[imgName];
-          if (currentAnnos && currentAnnos.apiJson) {
-            const filteredKeyPoints = (currentAnnos.apiJson.key_points || []).filter(kp => kp.net !== className);
-            const filteredKeyPointIds = new Set(filteredKeyPoints.map(kp => kp.id));
-            const filteredSegments = (currentAnnos.apiJson.segments || []).filter(
-              seg => filteredKeyPointIds.has(seg.src_key_point_id) && filteredKeyPointIds.has(seg.dst_key_point_id)
-            );
-            currentAnnos.apiJson.key_points = filteredKeyPoints;
-            currentAnnos.apiJson.segments = filteredSegments;
+          if (currentAnnos) { // Check if currentAnnos exists
+            // Filter view annotations directly based on category
+            currentAnnos.viewAnnotations = currentAnnos.viewAnnotations.filter(anno => anno.category !== className);
+
+            // Also clean up apiJson if needed (less critical as it's generated from viewAnnotations on save)
+            if (currentAnnos.apiJson) {
+              const filteredKeyPoints = (currentAnnos.apiJson.key_points || []).filter(kp => kp.net !== className);
+              const filteredKeyPointIds = new Set(filteredKeyPoints.map(kp => kp.id));
+              const filteredSegments = (currentAnnos.apiJson.segments || []).filter(
+                seg => filteredKeyPointIds.has(seg.src_key_point_id) && filteredKeyPointIds.has(seg.dst_key_point_id)
+              );
+              const filteredCpnts = (currentAnnos.apiJson.cpnts || []).filter(
+                cpnt => cpnt.type !== className
+              );
+
+              currentAnnos.apiJson.key_points = filteredKeyPoints;
+              currentAnnos.apiJson.segments = filteredSegments;
+              currentAnnos.apiJson.cpnts = filteredCpnts; // Bedrock Change: Filter cpnts as well
+            }
           }
         });
 
@@ -1003,6 +1046,7 @@ const MaskOperate = () => {
       const newCatColors: { [key: string]: string } = {};
       const defaultColorValues = Object.values(defaultCategoryColors).map(rgbaToHex);
       newCatNames.forEach((cat, i) => {
+        // Preserve existing color if category already exists, otherwise assign from default pool
         newCatColors[cat] = mask_categoryColors[cat] || defaultColorValues[i % defaultColorValues.length];
       });
 
@@ -1015,7 +1059,7 @@ const MaskOperate = () => {
       console.error("导入类别失败:", error);
       message.error(`导入类别失败: ${error.message}`);
     } finally {
-      if (classesFileRef.current) classesFileRef.current.value = "";
+      if (classesFileRef.current) classesFileRef.current.value = ""; // Clear file input
     }
   };
 
@@ -1125,19 +1169,22 @@ const MaskOperate = () => {
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4" disabled={disabledUI}>
-              <div className="tab-pane-content data-view-container">
-                <div className="data-view-item">
-                  <Title level={5}>Core Annotation Data (In Memory)</Title>
-                  <textarea className="data-content-textarea" readOnly value={JSON.stringify(convertViewToApi(localAnnotations), null, 2)} placeholder="Key points and segments data will be shown here." />
-                </div>
-                <div className="data-view-item">
-                  <Title level={5}>Netlist (.scs)</Title>
-                  <textarea className="data-content-textarea" readOnly value={netlistScsContent || ""} placeholder="Netlist (SCS format) will be shown here after processing." />
-                </div>
-                <div className="data-view-item">
-                  <Title level={5}>Netlist (.cdl)</Title>
-                  <textarea className="data-content-textarea" readOnly value={netlistCdlContent || ""} placeholder="Netlist (CDL format) will be shown here after processing." />
-                </div>
+              <div className="tab-pane-content">
+                {/* Bedrock Change: Replaced vertical stack with nested tabs */}
+                <Tabs defaultActiveKey="core" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <TabPane tab="Core Annotation Data" key="core" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                    {/* Bedrock Change: Added specific placeholder */}
+                    <textarea className="data-content-textarea" readOnly value={JSON.stringify(convertViewToApi(localAnnotations), null, 2)} placeholder="Core annotation data (key points, segments, components) will appear here." />
+                  </TabPane>
+                  <TabPane tab="Netlist (.scs)" key="scs" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                    {/* Bedrock Change: Added specific placeholder */}
+                    <textarea className="data-content-textarea" readOnly value={netlistScsContent || ""} placeholder="Netlist (SCS format) will be shown here after processing." />
+                  </TabPane>
+                  <TabPane tab="Netlist (.cdl)" key="cdl" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                    {/* Bedrock Change: Added specific placeholder */}
+                    <textarea className="data-content-textarea" readOnly value={netlistCdlContent || ""} placeholder="Netlist (CDL format) will be shown here after processing." />
+                  </TabPane>
+                </Tabs>
               </div>
             </TabPane>
             <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2" disabled={disabledUI}>
@@ -1196,3 +1243,4 @@ const MaskOperate = () => {
 };
 
 export default MaskOperate;
+// END OF FILE: src/pages/MaskOperate/index.tsx

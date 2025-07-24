@@ -19,7 +19,7 @@
 /* --- Base Layout --- */
 .unified-layout {
   height: 100vh;
-  overflow: hidden;
+  /* overflow: hidden; */ /* Bedrock Change: Allow scrolling of entire layout if content overflows */
   background-color: var(--layout-background-color);
 }
 
@@ -191,8 +191,9 @@
 
 .inspector-tabs .ant-tabs-content-holder {
   flex-grow: 1;
-  overflow: hidden;
-  /* IMPORTANT: This prevents the holder from scrolling */
+  /* overflow: hidden; */ /* IMPORTANT: This prevents the holder from scrolling */
+  /* Bedrock Change: Allow inspector tabs content to scroll if needed */
+  overflow-y: auto;
 }
 
 .tab-pane-content {
@@ -203,6 +204,14 @@
   gap: 16px;
   overflow-y: auto;
 }
+
+/* Bedrock Change: Ensure inactive nested tab panes are hidden properly */
+/* This targets TabPanes within a .tab-pane-content that is itself a TabPane holder */
+/* This is crucial to prevent content overlap when switching nested tabs. */
+.tab-pane-content .ant-tabs-tabpane:not(.ant-tabs-tabpane-active) {
+  display: none !important;
+}
+
 
 .class-list-container {
   max-height: calc(100vh - 350px);
@@ -236,23 +245,7 @@
   background-color: var(--background-color);
 }
 
-/* Bedrock Change: New styles for data view container (shared) */
-.data-view-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  height: 100%;
-}
-
-.data-view-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-  /* Each item takes equal space */
-  min-height: 0;
-  /* Crucial for flexbox resizing in a scrolling container */
-}
+/* Bedrock Change: Removed .data-view-container and .data-view-item as layout is now handled by nested Tabs */
 
 /* --- Data Textareas (Shared) --- */
 .data-content-textarea {
@@ -270,7 +263,7 @@
   resize: none;
 }
 
-/* --- Annotation List (Shared) --- */
+/* --- Annotation List (Shared) */
 .annotation-panel-item .ant-collapse-header {
   padding: 8px 12px !important;
 }

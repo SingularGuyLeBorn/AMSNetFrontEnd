@@ -325,3 +325,5 @@ export const workspaceService = {
     clearWorkspace,
     saveWorkspace,
 };
+
+// FILE: src/models/annotationStore.tsx

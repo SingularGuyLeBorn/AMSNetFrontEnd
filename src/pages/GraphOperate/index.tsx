@@ -1,42 +1,119 @@
-// index.tsx
+// FILE: src/pages/GraphOperate/index.tsx
 
 import React, { useEffect, useState } from 'react';
-import { useModel } from 'umi';
-import {
-  createNode, deleteNode, updateNode, findNode,
-  getAllNodes,
-  createRelationship, deleteRelationship, updateRelationship, findRelationship,
-  getAllRelationships
-} from '@/pages/GraphOperate/Components/apiFunctions';
+import { useModel } from '@umijs/max';
 import './index.css';
-import { DeleteOutlined, PlusOutlined, FullscreenOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
-import { Button, Card, Input, Layout, message, Space, Typography, Select, Tabs } from 'antd';
-import Neo4jVisualization from './Components/Neo4jVisualization';
+import {
+  DeleteOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SyncOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+} from '@ant-design/icons';
+import { Button, Input, Layout, message, Tabs, Typography, Space } from 'antd';
+import GraphVisualization from './GraphVisualization';
 
 const { Title } = Typography;
-const { Content } = Layout;
-const { Option } = Select;
+const { Content, Sider } = Layout;
 const { TabPane } = Tabs;
 
 // ===================================================================
-// 接口与类型定义 (Interfaces & Type Definitions)
+// 前端内部接口与类型定义 (Component-Internal Interfaces & Types)
 // ===================================================================
-interface Node {
+interface Property {
+  key: string;
+  value: string;
+}
+
+export interface Node {
   id: string;
   name: string;
   properties: { [key: string]: any };
 }
 
-interface Relationship {
+export interface Relationship {
+  id: string;
   name: string;
   properties: { [key: string]: any };
 }
+
+// 模仿后端的VO结构以保持类型一致性
+export declare namespace API {
+  type NodeVO = {
+    name?: string;
+    properties?: Record<string, any>;
+  };
+  type RelationshipVO = {
+    name?: string;
+    properties?: Record<string, any>;
+  };
+}
+
+export interface GraphData {
+  nodes: Node[];
+  relationships: Relationship[];
+}
+
+type LoadingActions = Record<string, boolean>;
+
+// ===================================================================
+// 模拟数据生成 (Mock Data Generation)
+// ===================================================================
+const getMockData = (): Promise<{ nodes: API.NodeVO[]; relationships: API.RelationshipVO[] }> => {
+  const nodes: API.NodeVO[] = [
+    { name: 'Bedrock Project', properties: { type: 'Project', status: 'Active', budget: 500000, team: 'CoreDev' } },
+    { name: 'John Doe', properties: { type: 'Developer', role: 'Lead Engineer', expertise: 'Frontend', team: 'CoreDev' } },
+    { name: 'Jane Smith', properties: { type: 'Developer', role: 'Backend Engineer', expertise: 'Database', team: 'CoreDev' } },
+    { name: 'Alpha Module', properties: { type: 'Module', parent: 'Bedrock Project', status: 'In Progress' } },
+    { name: 'Beta Module', properties: { type: 'Module', parent: 'Bedrock Project', status: 'Completed' } },
+    { name: 'AntV G6', properties: { type: 'Technology', domain: 'Frontend', language: 'TypeScript' } },
+    { name: 'React', properties: { type: 'Technology', domain: 'Frontend', language: 'JavaScript' } },
+    { name: 'TypeScript', properties: { type: 'Technology', domain: 'Language', creator: 'Microsoft' } },
+    { name: 'Alibaba', properties: { type: 'Company', industry: 'Technology', location: 'Hangzhou' } },
+    { name: 'Meta', properties: { type: 'Company', industry: 'Technology', location: 'Menlo Park' } },
+    { name: 'Customer A', properties: { type: 'Customer', region: 'North', level: 'VIP' } },
+    { name: 'Customer B', properties: { type: 'Customer', region: 'South', level: 'Standard' } },
+    { name: 'Product X', properties: { type: 'Product', category: 'Software' } },
+    { name: 'Service Y', properties: { type: 'Service', provider: 'Cloud Solutions Inc.' } },
+    { name: 'Cloud Solutions Inc.', properties: { type: 'Company', industry: 'Cloud Computing' } },
+  ];
+
+  const relationships: API.RelationshipVO[] = [
+    { name: 'WORKS_ON', properties: { fromNode: 'John Doe', toNode: 'Bedrock Project', role: 'Lead' } },
+    { name: 'WORKS_ON', properties: { fromNode: 'Jane Smith', toNode: 'Bedrock Project', role: 'Backend Dev' } },
+    { name: 'HAS_MODULE', properties: { fromNode: 'Bedrock Project', toNode: 'Alpha Module' } },
+    { name: 'HAS_MODULE', properties: { fromNode: 'Bedrock Project', toNode: 'Beta Module' } },
+    { name: 'DEPENDS_ON', properties: { fromNode: 'Alpha Module', toNode: 'Beta Module', reason: 'Shared logic' } },
+    { name: 'USES_TECH', properties: { fromNode: 'Bedrock Project', toNode: 'AntV G6' } },
+    { name: 'USES_TECH', properties: { fromNode: 'Bedrock Project', toNode: 'React' } },
+    { name: 'USES_TECH', properties: { fromNode: 'Bedrock Project', toNode: 'TypeScript' } },
+    { name: 'SKILLED_IN', properties: { fromNode: 'John Doe', toNode: 'React' } },
+    { name: 'SKILLED_IN', properties: { fromNode: 'John Doe', toNode: 'AntV G6' } },
+    { name: 'SKILLED_IN', properties: { fromNode: 'Jane Smith', toNode: 'AntV G6' } },
+    { name: 'SKILLED_IN', properties: { fromNode: 'John Doe', toNode: 'TypeScript' } },
+    { name: 'DEVELOPED_BY', properties: { fromNode: 'React', toNode: 'Meta' } },
+    { name: 'MAINTAINS', properties: { fromNode: 'Alibaba', toNode: 'AntV G6' } },
+    { name: 'SERVES', properties: { fromNode: 'Bedrock Project', toNode: 'Customer A' } },
+    { name: 'CONSUMES', properties: { fromNode: 'Customer B', toNode: 'Product X' } },
+    { name: 'PROVIDES', properties: { fromNode: 'Cloud Solutions Inc.', toNode: 'Service Y' } },
+    { name: 'RELATED_TO', properties: { fromNode: 'Product X', toNode: 'Service Y' } },
+  ];
+
+  return new Promise(resolve => {
+    setTimeout(() => {
+      resolve({ nodes, relationships });
+    }, 500);
+  });
+};
+
 
 // ===================================================================
 // 国际化文本 (i18n Translations)
 // ===================================================================
 const translations = {
   zh: {
+    controls: '操作面板',
     createNode: '创建节点',
     deleteNode: '删除节点',
     updateNode: '更新节点',
@@ -47,17 +124,22 @@ const translations = {
     findRelationship: '查询关系',
     getAllGraph: '获取/刷新全图',
     nodeName: '节点名称',
-    key: '键',
-    value: '值',
+    relationshipName: '关系名称',
+    key: '属性名',
+    value: '属性值',
     addProperty: '添加属性',
     nodeOperations: '节点操作',
     relationshipOperations: '关系操作',
-    nodeSuccessMessage: '节点查找成功',
-    nodeNotExistMessage: '节点不存在',
-    relationshipName: '关系名称',
-    graphVisualization: '图谱可视化',
+    graphVisualization: '知识图谱可视化',
+    nodeNameRequired: '节点名称不能为空',
+    relationshipNameRequired: '关系名称不能为空',
+    fromToRequired: '创建关系必须在属性中指定 fromNode 和 toNode',
+    loadingData: '正在加载图谱数据...',
+    dataLoaded: '图谱数据加载完成',
+    initialPrompt: '请点击“获取/刷新全图”按钮以加载知识图谱',
   },
   en: {
+    controls: 'Controls',
     createNode: 'Create Node',
     deleteNode: 'Delete Node',
     updateNode: 'Update Node',
@@ -68,228 +150,129 @@ const translations = {
     findRelationship: 'Find Relationship',
     getAllGraph: 'Get/Refresh Full Graph',
     nodeName: 'Node Name',
-    key: 'Key',
-    value: 'Value',
+    relationshipName: 'Relationship Name',
+    key: 'Property Key',
+    value: 'Property Value',
     addProperty: 'Add Property',
     nodeOperations: 'Node Operations',
     relationshipOperations: 'Relationship Operations',
-    nodeSuccessMessage: 'Node found successfully',
-    nodeNotExistMessage: 'Node does not exist',
-    relationshipName: 'Relationship Name',
-    graphVisualization: 'Graph Visualization',
-  }
+    graphVisualization: 'Knowledge Graph Visualization',
+    nodeNameRequired: 'Node name is required',
+    relationshipNameRequired: 'Relationship name is required',
+    fromToRequired: 'Must specify fromNode and toNode in properties to create a relationship',
+    loadingData: 'Loading graph data...',
+    dataLoaded: 'Graph data loaded successfully',
+    initialPrompt: 'Click "Get/Refresh Full Graph" to load the knowledge graph',
+  },
 };
 
 // ===================================================================
 // 主组件 (Main Component)
 // ===================================================================
-const GraphOperate = () => {
-  // --- 状态管理 (State Management) ---
+const GraphOperate: React.FC = () => {
   const { initialState } = useModel('@@initialState');
   const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
   const t = translations[currentLang as keyof typeof translations];
 
-  // 节点相关状态
-  const [name, setName] = useState('');
-  const [nodeProperties, setNodeProperties] = useState<{ key: string, value: string }[]>([]);
-  const [nodeResult, setNodeResult] = useState<Node | null>(null);
-  const [allNodes, setAllNodes] = useState<Node[]>([]);
+  const [collapsed, setCollapsed] = useState(false);
+  const [nodeName, setNodeName] = useState('');
+  const [nodeProperties, setNodeProperties] = useState<Property[]>([{ key: '', value: '' }]);
 
-  // 关系相关状态
   const [relationshipName, setRelationshipName] = useState('');
-  const [relationshipProperties, setRelationshipProperties] = useState<{ key: string, value: string }[]>([]);
-  const [relationshipResult, setRelationshipResult] = useState<Relationship | null>(null);
-  const [allRelationships, setAllRelationships] = useState<Relationship[]>([]);
+  const [relationshipProperties, setRelationshipProperties] = useState<Property[]>([
+    { key: 'fromNode', value: '' },
+    { key: 'toNode', value: '' },
+  ]);
 
-  // --- 副作用钩子 (useEffect Hooks) ---
+  const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const [loadingActions, setLoadingActions] = useState<LoadingActions>({});
+
   useEffect(() => {
-    const handleLanguageChange = (event: Event) => setCurrentLang((event as CustomEvent).detail.language);
-    window.addEventListener('languageChange', handleLanguageChange);
     setCurrentLang(initialState?.language || 'zh');
-    return () => window.removeEventListener('languageChange', handleLanguageChange);
   }, [initialState?.language]);
 
-  // --- 属性处理函数 (Property Handlers) ---
-  const handleAddProperty = (type: 'node' | 'relationship') => {
-    if (type === 'node') {
-      setNodeProperties([...nodeProperties, { key: '', value: '' }]);
-    } else {
-      setRelationshipProperties([...relationshipProperties, { key: '', value: '' }]);
+  const handleGetAllGraph = async () => {
+    setLoadingActions(prev => ({ ...prev, getAllGraph: true }));
+    message.loading({ content: t.loadingData, key: 'loading' });
+    try {
+      const { nodes: nodesRes, relationships: relsRes } = await getMockData();
+
+      const transformedNodes: Node[] = (nodesRes || []).map((node: API.NodeVO) => ({
+        id: node.name!,
+        name: node.name!,
+        properties: { ...node.properties, name: node.name },
+      }));
+
+      const transformedRelationships: Relationship[] = (relsRes || []).map(
+        (rel: API.RelationshipVO, index: number) => ({
+          id: `${rel.properties?.fromNode}-${rel.name}-${rel.properties?.toNode}-${index}`,
+          name: rel.name || 'unnamed_relationship',
+          properties: rel.properties || {},
+        }),
+      );
+
+      setGraphData({ nodes: transformedNodes, relationships: transformedRelationships });
+      message.success({ content: t.dataLoaded, key: 'loading', duration: 2 });
+    } catch (error) {
+      message.error({ content: '加载图谱数据失败', key: 'loading', duration: 2 });
+    } finally {
+      setLoadingActions(prev => ({ ...prev, getAllGraph: false }));
     }
   };
 
-  const handleUpdateProperty = (type: 'node' | 'relationship', index: number, field: 'key' | 'value', val: string) => {
-    if (type === 'node') {
-      const newProps = [...nodeProperties];
-      newProps[index][field] = val;
-      setNodeProperties(newProps);
-    } else {
-      const newProps = [...relationshipProperties];
-      newProps[index][field] = val;
-      setRelationshipProperties(newProps);
-    }
-  };
-
-  const handleRemoveProperty = (type: 'node' | 'relationship', index: number) => {
-    if (type === 'node') {
-      setNodeProperties(nodeProperties.filter((_, i) => i !== index));
-    } else {
-      setRelationshipProperties(relationshipProperties.filter((_, i) => i !== index));
-    }
-  };
-
-  const propertiesToObject = (props: { key: string, value: string }[]) => {
+  const propertiesToObject = (props: Property[]) => {
     return props.reduce((acc, prop) => {
-      if (prop.key) acc[prop.key] = prop.value;
+      if (prop.key) acc[prop.key.trim()] = prop.value;
       return acc;
     }, {} as { [key: string]: any });
   };
 
-  // --- 核心API操作函数 (Core API Operations) ---
-  const handleCreateNode = async () => {
-    if (!name) { message.warn('节点名称不能为空'); return; }
-    const propertiesObj = propertiesToObject(nodeProperties);
-    const newNode = { name, properties: propertiesObj };
-    try {
-      const result = await createNode(newNode);
-      // API的返回格式可能不一致，这里做兼容处理
-      if (result === true || (result && result.code === 0)) {
-        message.success(`节点 "${name}" 创建成功`);
-        setNodeResult(newNode as Node);
-        // 创建成功后自动刷新全图，以便看到新节点
-        await handleGetAllGraph();
-      } else {
-        message.error(`创建节点失败: ${JSON.stringify(result)}`);
-      }
-    } catch (error) {
-      message.error(`创建节点时发生网络或未知错误`);
-    }
+  const handleAddProperty = (type: 'node' | 'relationship') => {
+    const setter = type === 'node' ? setNodeProperties : setRelationshipProperties;
+    setter(prev => [...prev, { key: '', value: '' }]);
   };
 
-  const handleDeleteNode = async () => {
-    if (!name) { message.warn('请输入要删除的节点名称'); return; }
-    await deleteNode({ name });
-    message.success(`删除节点 "${name}" 的请求已发送`);
-    await handleGetAllGraph();
+  const handleUpdateProperty = (
+    type: 'node' | 'relationship',
+    index: number,
+    field: 'key' | 'value',
+    val: string,
+  ) => {
+    const setter = type === 'node' ? setNodeProperties : setRelationshipProperties;
+    setter(prev => {
+      const newProps = [...prev];
+      newProps[index][field] = val;
+      return newProps;
+    });
   };
 
-  const handleUpdateNode = async () => {
-    if (!name) { message.warn('请输入要更新的节点名称'); return; }
-    const propertiesObj = propertiesToObject(nodeProperties);
-    const updatedNode: Node = { id: '', name, properties: propertiesObj };
-    await updateNode(updatedNode);
-    message.success(`更新节点 "${name}" 的请求已发送`);
-    setNodeResult(updatedNode);
-    await handleGetAllGraph();
+  const handleRemoveProperty = (type: 'node' | 'relationship', index: number) => {
+    const setter = type === 'node' ? setNodeProperties : setRelationshipProperties;
+    setter(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleFindNode = async () => {
-    if (!name) { message.warn('请输入要查询的节点名称'); return; }
-    const result = await findNode({ name });
-    // API返回格式兼容
-    const foundNode = result?.data || result;
-    if (foundNode && Object.keys(foundNode).length > 0) {
-      setNodeResult(foundNode);
-      message.success(t.nodeSuccessMessage);
-    } else {
-      setNodeResult(null);
-      message.warn(t.nodeNotExistMessage);
-    }
-  };
+  // 模拟的 CRUD 操作
+  const handleCreateNode = () => { if (!nodeName) { message.warning(t.nodeNameRequired); return; } message.info(`(模拟) 创建节点: ${nodeName}`); };
+  const handleDeleteNode = () => { if (!nodeName) { message.warning(t.nodeNameRequired); return; } message.info(`(模拟) 删除节点: ${nodeName}`); };
+  const handleUpdateNode = () => { if (!nodeName) { message.warning(t.nodeNameRequired); return; } message.info(`(模拟) 更新节点: ${nodeName}`); };
+  const handleCreateRelationship = () => { if (!relationshipName) { message.warning(t.relationshipNameRequired); return; } const props = propertiesToObject(relationshipProperties); if (!props.fromNode || !props.toNode) { message.warning(t.fromToRequired); return; } message.info(`(模拟) 创建关系: ${relationshipName}`); };
+  const handleDeleteRelationship = () => { if (!relationshipName) { message.warning(t.relationshipNameRequired); return; } message.info(`(模拟) 删除关系: ${relationshipName}`); };
+  const handleUpdateRelationship = () => { if (!relationshipName) { message.warning(t.relationshipNameRequired); return; } message.info(`(模拟) 更新关系: ${relationshipName}`); };
 
-  const handleCreateRelationship = async () => {
-    if (!relationshipName) { message.warn('关系名称不能为空'); return; }
-    const propertiesObj = propertiesToObject(relationshipProperties);
-    // 关系创建通常需要源节点和目标节点，这里假设API封装了此逻辑
-    // 原始代码中fromNode, toNode在属性中，保持一致
-    if (!propertiesObj.fromNode || !propertiesObj.toNode) {
-      message.warn('创建关系必须在属性中指定 fromNode 和 toNode');
-      return;
-    }
-    const newRelationship: Relationship = { name: relationshipName, properties: propertiesObj };
-    await createRelationship(newRelationship);
-    message.success(`创建关系 "${relationshipName}" 的请求已发送`);
-    setRelationshipResult(newRelationship);
-    await handleGetAllGraph();
-  };
-
-  const handleDeleteRelationship = async () => {
-    if (!relationshipName) { message.warn('请输入要删除的关系名称'); return; }
-    await deleteRelationship({ name: relationshipName });
-    message.success(`删除关系 "${relationshipName}" 的请求已发送`);
-    await handleGetAllGraph();
-  };
-
-  const handleUpdateRelationship = async () => {
-    if (!relationshipName) { message.warn('请输入要更新的关系名称'); return; }
-    const propertiesObj = propertiesToObject(relationshipProperties);
-    const updatedRelationship: Relationship = { name: relationshipName, properties: propertiesObj };
-    await updateRelationship(updatedRelationship);
-    message.success(`更新关系 "${relationshipName}" 的请求已发送`);
-    setRelationshipResult(updatedRelationship);
-    await handleGetAllGraph();
-  };
-
-  const handleFindRelationship = async () => {
-    if (!relationshipName) { message.warn('请输入要查询的关系名称'); return; }
-    const result = await findRelationship({ name: relationshipName });
-    const foundRel = result?.data || result;
-    if (foundRel) {
-      setRelationshipResult(foundRel);
-      message.success('关系查找成功');
-    } else {
-      setRelationshipResult(null);
-      message.warn('关系不存在');
-    }
-  };
-
-  const handleGetAllNodes = async () => {
-    const result = await getAllNodes({ includeProperties: true });
-    setAllNodes(result?.data || []);
-  };
-
-  const handleGetAllRelationships = async () => {
-    const result = await getAllRelationships({ includeProperties: true });
-    setAllRelationships(result?.data || []);
-  };
-
-  const handleGetAllGraph = async () => {
-    message.loading('正在加载图谱数据...', 0);
-    await Promise.all([handleGetAllNodes(), handleGetAllRelationships()]);
-    message.destroy();
-    message.success('图谱数据加载完成');
-  };
-
-  // --- 渲染函数 (Render Functions) ---
   const renderPropertiesEditor = (type: 'node' | 'relationship') => {
-    const props = type === 'node' ? nodeProperties : relationshipProperties;
+    const properties = type === 'node' ? nodeProperties : relationshipProperties;
     return (
-      <div className="properties-list">
-        {props.map((prop, index) => (
-          <div key={index} className="property-row">
-            <Input
-              placeholder={t.key}
-              value={prop.key}
-              onChange={(e) => handleUpdateProperty(type, index, 'key', e.target.value)}
-            />
-            <Input
-              placeholder={t.value}
-              value={prop.value}
-              onChange={(e) => handleUpdateProperty(type, index, 'value', e.target.value)}
-            />
-            <Button
-              type="text"
-              danger
-              onClick={() => handleRemoveProperty(type, index)}
-              icon={<DeleteOutlined />}
-            />
-          </div>
-        ))}
-        <Button
-          type="dashed"
-          onClick={() => handleAddProperty(type)}
-          icon={<PlusOutlined />}
-        >
+      <div className="properties-editor">
+        <div className="properties-list">
+          {properties.map((prop, index) => (
+            <Space.Compact key={index} block>
+              <Input placeholder={t.key} value={prop.key} onChange={e => handleUpdateProperty(type, index, 'key', e.target.value)} />
+              <Input placeholder={t.value} value={prop.value} onChange={e => handleUpdateProperty(type, index, 'value', e.target.value)} />
+              <Button danger icon={<DeleteOutlined />} onClick={() => handleRemoveProperty(type, index)} />
+            </Space.Compact>
+          ))}
+        </div>
+        <Button type="dashed" onClick={() => handleAddProperty(type)} icon={<PlusOutlined />} block>
           {t.addProperty}
         </Button>
       </div>
@@ -297,66 +280,74 @@ const GraphOperate = () => {
   };
 
   return (
-    <Layout>
-      <Content className="graph-operate-container">
-        <Card className="control-panel-card">
-          <Tabs defaultActiveKey="1">
-            <TabPane tab={t.nodeOperations} key="1">
-              <div className="tab-pane-content">
-                <div className="input-section">
-                  <Input
-                    size="large"
-                    placeholder={t.nodeName}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                  {renderPropertiesEditor('node')}
-                </div>
+    <Layout className="graph-operate-layout">
+      <Sider
+        theme="light"
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        width={350}
+        className="control-sider"
+        trigger={null}
+      >
+        <div className="control-sider-header">
+          {!collapsed && <Title level={5}>{t.controls}</Title>}
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setCollapsed(!collapsed)}
+          />
+        </div>
+        {!collapsed && (
+          <Tabs defaultActiveKey="node-ops" type="card" className="control-tabs">
+            <TabPane tab={t.nodeOperations} key="node-ops">
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Input size="large" placeholder={t.nodeName} value={nodeName} onChange={e => setNodeName(e.target.value)} />
+                {renderPropertiesEditor('node')}
                 <div className="action-buttons">
                   <Button type="primary" onClick={handleCreateNode} icon={<PlusOutlined />}>{t.createNode}</Button>
-                  <Button onClick={handleFindNode} icon={<SearchOutlined />}>{t.findNode}</Button>
+                  <Button onClick={() => message.info(`(模拟) 查询节点: ${nodeName}`)} icon={<SearchOutlined />}>{t.findNode}</Button>
                   <Button onClick={handleUpdateNode}>{t.updateNode}</Button>
                   <Button danger onClick={handleDeleteNode}>{t.deleteNode}</Button>
                 </div>
-              </div>
+              </Space>
             </TabPane>
-            <TabPane tab={t.relationshipOperations} key="2">
-              <div className="tab-pane-content">
-                <div className="input-section">
-                  <Input
-                    size="large"
-                    placeholder={t.relationshipName}
-                    value={relationshipName}
-                    onChange={(e) => setRelationshipName(e.target.value)}
-                  />
-                  {renderPropertiesEditor('relationship')}
-                </div>
+            <TabPane tab={t.relationshipOperations} key="rel-ops">
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Input size="large" placeholder={t.relationshipName} value={relationshipName} onChange={e => setRelationshipName(e.target.value)} />
+                {renderPropertiesEditor('relationship')}
                 <div className="action-buttons">
                   <Button type="primary" onClick={handleCreateRelationship} icon={<PlusOutlined />}>{t.createRelationship}</Button>
-                  <Button onClick={handleFindRelationship} icon={<SearchOutlined />}>{t.findRelationship}</Button>
+                  <Button onClick={() => message.info(`(模拟) 查询关系: ${relationshipName}`)} icon={<SearchOutlined />}>{t.findRelationship}</Button>
                   <Button onClick={handleUpdateRelationship}>{t.updateRelationship}</Button>
                   <Button danger onClick={handleDeleteRelationship}>{t.deleteRelationship}</Button>
                 </div>
-              </div>
+              </Space>
             </TabPane>
           </Tabs>
-        </Card>
-
-        <div className="visualization-wrapper">
-          <div className="visualization-header">
-            <Title level={4} style={{ margin: 0 }}>{t.graphVisualization}</Title>
-            <Button type="primary" onClick={handleGetAllGraph} icon={<SyncOutlined />}>{t.getAllGraph}</Button>
+        )}
+      </Sider>
+      <Layout>
+        <Content className="visualization-content">
+          <div className="visualization-wrapper">
+            <div className="visualization-header">
+              <Title level={4}>{t.graphVisualization}</Title>
+              <Button type="primary" onClick={handleGetAllGraph} icon={<SyncOutlined />} loading={loadingActions.getAllGraph}>
+                {t.getAllGraph}
+              </Button>
+            </div>
+            <div className="visualization-container">
+              {graphData ? (
+                <GraphVisualization data={graphData} />
+              ) : (
+                <div className="initial-prompt-container">
+                  <p>{t.initialPrompt}</p>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="visualization-container">
-            <Neo4jVisualization
-              nodes={allNodes}
-              relationships={allRelationships}
-              // 添加一个key，当数据变化时强制重新渲染组件，解决可视化库可能不更新的问题
-              key={allNodes.length + allRelationships.length}
-            />
-          </div>
-        </div>
-      </Content>
+        </Content>
+      </Layout>
     </Layout>
   );
 };

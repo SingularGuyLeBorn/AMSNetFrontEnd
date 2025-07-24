@@ -103,3 +103,5 @@ export default function useAnnotationStore() {
     mask_redoHistory, setMask_redoHistory,
   };
 }
+
+// FILE: src/pages/FileOperate/constants.ts

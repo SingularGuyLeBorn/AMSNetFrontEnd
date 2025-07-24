@@ -140,6 +140,8 @@ export const parseJsonContent = (jsonContent: string | null): JsonData => {
         }
         const parsed = JSON.parse(jsonContent);
         if (!parsed.local && !parsed.global && (parsed.cpnts || parsed.segments)) {
+            // Bedrock Change: If it's a raw API response without local/global, return default.
+            // This happens if the AI returns only cpnts/segments at root level.
             return { local: { buildingBlocks: {}, constants: {} }, global: {} };
         }
         parsed.local = parsed.local || { buildingBlocks: {}, constants: {} };
@@ -417,15 +419,17 @@ const FileOperate: React.FC = () => {
         const lines = standardYoloContent.split('\n').filter(line => line.trim() !== '');
         if (lines.length === 0) return '';
         const firstLineParts = lines[0].split(' ');
+        // If the first part of the line is a number, assume it's standard YOLO (class_id x_center y_center width height)
+        // Otherwise, assume it's already in our internal format (unique_name class_id x_center y_center width height)
         if (firstLineParts.length !== 5 || isNaN(parseFloat(firstLineParts[0]))) {
-            return standardYoloContent;
+            return standardYoloContent; // Already in internal format or invalid standard format
         }
         const nameCounters: { [key: string]: number } = {};
         const internalYoloLines = lines.map(line => {
             const parts = line.split(' ');
-            if (parts.length !== 5) return line;
+            if (parts.length !== 5) return line; // Invalid line, keep as is
             const classIndex = parseInt(parts[0], 10);
-            if (isNaN(classIndex)) return line;
+            if (isNaN(classIndex)) return line; // Invalid class index, keep as is
             const classLabel = classMap[classIndex]?.label || `class_${classIndex}`;
             const counter = nameCounters[classLabel] || 0;
             nameCounters[classLabel] = counter + 1;
@@ -600,6 +604,7 @@ const FileOperate: React.FC = () => {
             const parsedJson = parseJsonContent(currentJsonContent);
             Object.keys(parsedJson.local).forEach(typeKey => {
                 const type = typeKey as keyof typeof parsedJson.local;
+                parsedJson.local[type] = { ...parsedJson.local[type] }; // Ensure immutability for safe updates
                 Object.keys(parsedJson.local[type]).forEach(nameKey => {
                     parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
                         (bName: string) => bName !== boxNameToDelete
@@ -964,6 +969,7 @@ const FileOperate: React.FC = () => {
                     const parsedJson = parseJsonContent(currentJsonContent);
                     Object.keys(parsedJson.local).forEach(typeKey => {
                         const type = typeKey as keyof typeof parsedJson.local;
+                        parsedJson.local[type] = { ...parsedJson.local[type] }; // Ensure immutability for safe updates
                         Object.keys(parsedJson.local[type]).forEach(nameKey => {
                             parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
                                 (bName: string) => !boxNamesToDelete.includes(bName)
@@ -1092,7 +1098,7 @@ const FileOperate: React.FC = () => {
                     newClassMap[lastIndex] = { label, color: generateRandomColor() };
                 });
                 setClassMap(newClassMap);
-                currentClassMap = newClassMap;
+                currentClassMap = newClassMap; // Use the updated map for conversion
             }
 
             const newYoloContent = convertCpntsToYolo(resultData.cpnts, width, height, currentClassMap);
@@ -1102,10 +1108,12 @@ const FileOperate: React.FC = () => {
                 return;
             }
 
+            // Bedrock Change: Ensure only relevant API fields are kept for display/storage in currentJsonContent
             const displayData: { [key: string]: any } = {};
             const allowedKeys = ['cpnts', 'key_points', 'ports', 'segments', 'schematic_h', 'schematic_w', 'name'];
             allowedKeys.forEach(key => { if (key in resultData) { displayData[key] = (resultData as any)[key]; } });
             const displayJsonContent = JSON.stringify(displayData, null, 2);
+
 
             setCurrentYoloContent(newYoloContent);
             setCurrentJsonContent(displayJsonContent);
@@ -1149,6 +1157,8 @@ const FileOperate: React.FC = () => {
                 if (!jsonStringMatch || !jsonStringMatch[1]) throw new Error("无效格式：找不到对象字面量 '{...}'。");
 
                 const jsonString = jsonStringMatch[1];
+                // Using new Function() to parse JSON-like string which might contain unquoted keys or comments
+                // This is generally unsafe if the source is untrusted, but for local file import, it's often used.
                 const parsedObject = new Function(`return ${jsonString}`)();
 
                 if (typeof parsedObject !== 'object' || parsedObject === null) throw new Error("解析的内容不是有效的对象。");
@@ -1168,7 +1178,10 @@ const FileOperate: React.FC = () => {
                 if (!hasEntries) throw new Error("在文件中未找到有效的类别条目。");
 
                 setClassMap(newClassMap);
-                setCurrentClassIndex(0);
+                // Set current class index to the first available, or 0 if map is empty
+                const firstKey = Object.keys(newClassMap)[0];
+                setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0);
+
                 message.success(`成功导入 ${Object.keys(newClassMap).length} 个类别。`);
             } catch (error: any) {
                 console.error("导入类别失败:", error);
@@ -1176,7 +1189,7 @@ const FileOperate: React.FC = () => {
             }
         };
         reader.readAsText(file);
-        if (event.target) event.target.value = '';
+        if (event.target) event.target.value = ''; // Clear the input so same file can be selected again
     };
 
     const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName;
@@ -1252,7 +1265,7 @@ const FileOperate: React.FC = () => {
                 <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none', cursor: 'ew-resize' }} />
                 <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsible collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
                     <Tabs defaultActiveKey="1" className="inspector-tabs"
-                        tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}
+                          tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}
                     >
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1" disabled={disabledUI}>
                             <div className="tab-pane-content">
@@ -1308,24 +1321,25 @@ const FileOperate: React.FC = () => {
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4" disabled={disabledUI}>
                             <div className="tab-pane-content">
-                                <div className="data-view-container">
-                                    <div className="data-view-item">
-                                        <Title level={5}>YOLO Data (.txt)</Title>
-                                        <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly />
-                                    </div>
-                                    <div className="data-view-item">
-                                        <Title level={5}>Annotation Data (.json)</Title>
-                                        <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly />
-                                    </div>
-                                    <div className="data-view-item">
-                                        <Title level={5}>Netlist (.scs)</Title>
+                                {/* Bedrock Change: Replaced vertical stack with nested tabs */}
+                                <Tabs defaultActiveKey="yolo" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                    <TabPane tab="YOLO Data (.txt)" key="yolo" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        {/* Bedrock Change: Added specific placeholder */}
+                                        <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly placeholder="YOLO format data (e.g., box coordinates and class IDs) will appear here." />
+                                    </TabPane>
+                                    <TabPane tab="Annotation Data (.json)" key="json" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        {/* Bedrock Change: Added specific placeholder */}
+                                        <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly placeholder="JSON annotation data will appear here." />
+                                    </TabPane>
+                                    <TabPane tab="Netlist (.scs)" key="scs" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        {/* Bedrock Change: Added specific placeholder */}
                                         <textarea value={netlistScsContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (SCS format) will be shown here after processing." />
-                                    </div>
-                                    <div className="data-view-item">
-                                        <Title level={5}>Netlist (.cdl)</Title>
+                                    </TabPane>
+                                    <TabPane tab="Netlist (.cdl)" key="cdl" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        {/* Bedrock Change: Added specific placeholder */}
                                         <textarea value={netlistCdlContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (CDL format) will be shown here after processing." />
-                                    </div>
-                                </div>
+                                    </TabPane>
+                                </Tabs>
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2" disabled={disabledUI}>
