@@ -7,76 +7,134 @@
  */
 :root {
   --primary-color: #1677ff;
-  --danger-color: #ff4d4f;
-  --success-color: #52c41a;
-  --background-color: #f5f7fa;
+  --primary-color-hover: #4096ff;
+  --background-color-light: #f7f8fa;
   --component-background: #ffffff;
-  --border-color: #d9d9d9;
-  --text-primary: #333333;
-  --text-secondary: #666666;
-  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --border-radius: 8px;
+  --border-color-base: #e8e8e8;
+  --border-color-split: #f0f0f0;
+  --text-primary: rgba(0, 0, 0, 0.88);
+  --text-secondary: rgba(0, 0, 0, 0.65);
+  --text-tertiary: rgba(0, 0, 0, 0.45);
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.09);
+  --border-radius-base: 8px;
+  --layout-header-height: 64px;
 }
 
 body {
-  background-color: var(--background-color);
+  background-color: var(--background-color-light);
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  margin: 0;
 }
 
 /*
  * ===================================================================
- * 页面布局容器 (Page Layout Container)
+ * 新增：页面整体包裹容器 (New: Page Wrapper Container)
  * ===================================================================
  */
-.graph-operate-container {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 48px); /* 减去通常的页头高度 */
+.graph-operate-page-wrapper {
+  width: 100%;
+  height: 100%; /* 占据父容器的100%高度 */
+  overflow: hidden; /* 核心：防止内部内容溢出 */
+}
+
+/*
+ * ===================================================================
+ * 页面整体布局 (Page Layout)
+ * ===================================================================
+ */
+.graph-page-layout {
+  height: 100%; /* 修改：从 100vh 改为 100% 以适应父容器 */
+}
+
+.graph-page-sider {
+  background: var(--component-background) !important;
   padding: 24px;
-  gap: 24px;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.graph-page-content-layout {
+  padding: 24px;
+  background-color: var(--background-color-light);
+  display: flex; /* 使用flex布局使内部content能撑满 */
+  flex-direction: column;
+}
+
+.graph-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0;
+  height: auto;
+  margin-bottom: 24px;
+  background: transparent;
+  flex-shrink: 0; /* 防止header被压缩 */
+}
+
+.graph-page-main-content {
+  background: var(--component-background);
+  padding: 24px;
+  border-radius: var(--border-radius-base);
+  box-shadow: var(--card-shadow);
+  height: 100%;
+  display: flex;
+  flex-direction: column; /* 确保内部元素垂直排列 */
+  flex-grow: 1; /* 占据所有剩余空间 */
 }
 
 /*
  * ===================================================================
- * 操作面板卡片 (Control Panel Card)
+ * 操作面板 (Operation Panel)
  * ===================================================================
  */
-.control-panel-card {
-  background: var(--component-background);
-  border-radius: var(--border-radius);
-  box-shadow: var(--card-shadow);
-  border: none;
-  flex-shrink: 0; /* 防止在flex布局中被压缩 */
+.operation-panel .ant-tabs-nav {
+  margin-bottom: 24px !important;
 }
 
-.control-panel-card .ant-tabs-nav {
-  margin-bottom: 24px;
+.operation-panel .ant-form-item {
+  margin-bottom: 16px;
 }
 
-.tab-pane-content {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.operation-panel-title {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 20px;
 }
 
-.input-section {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.properties-list {
+.properties-list-container {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 16px;
+  background-color: var(--background-color-light);
+  border: 1px solid var(--border-color-split);
+  border-radius: var(--border-radius-base);
 }
 
-.action-buttons {
+.property-item-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  gap: 8px;
+  align-items: center;
+}
+
+.property-item-row .ant-form-item {
+  flex: 1;
+  margin: 0;
+}
+
+.action-buttons-group {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color-split);
+}
+
+.action-buttons-group .ant-space-item {
+  width: 100%;
+}
+.action-buttons-group .ant-btn {
+  width: 100%;
 }
 
 /*
@@ -84,50 +142,13 @@ body {
  * 图谱可视化区域 (Graph Visualization Area)
  * ===================================================================
  */
-.visualization-wrapper {
-  flex-grow: 1; /* 占据所有剩余的垂直空间 */
-  background: var(--component-background);
-  border-radius: var(--border-radius);
-  box-shadow: var(--card-shadow);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  position: relative; /* 为全屏按钮定位提供基础 */
-}
-
-.visualization-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
 .visualization-container {
   flex-grow: 1;
   width: 100%;
   height: 100%;
 }
 
-/*
- * ===================================================================
- * 通用组件样式 (General Component Styles)
- * ===================================================================
- */
-.property-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.property-row .ant-input {
-  flex: 1;
-}
-
-.fullscreen-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
+.visualization-container .vis-network {
+  border-radius: var(--border-radius-base);
+  border: 1px solid var(--border-color-split);
 }

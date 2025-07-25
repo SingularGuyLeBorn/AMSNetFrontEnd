@@ -1,49 +1,101 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Card, Descriptions, Image } from 'antd';
+import { Card, Descriptions, Image, Typography } from 'antd';
+// 导入 vis-network 的核心库和样式文件
+// standalone/esm/vis-network 包含了所有模块，方便使用
 import { Network, DataSet } from 'vis-network/standalone/esm/vis-network';
 import 'vis-network/styles/vis-network.css';
 
-// 定义节点的接口
+const { Title } = Typography;
+
+// 辅助组件：用于截断长文本并提供悬浮提示，以优化UI显示
+const TruncatedText: React.FC<{ text: any; maxWidth?: number }> = ({ text, maxWidth = 280 }) => {
+  // 确保所有传入的 text 都被转换为字符串
+  const stringText = String(text);
+  return (
+    <span
+      title={stringText} // 鼠标悬浮时，在原生 tooltip 中完整显示文本
+      style={{
+        display: 'inline-block',
+        maxWidth: maxWidth,
+        whiteSpace: 'nowrap',    // 防止文本换行
+        overflow: 'hidden',      // 隐藏超出部分
+        textOverflow: 'ellipsis',// 超出部分显示省略号
+        verticalAlign: 'bottom', // 保证与其他内联元素对齐
+      }}
+    >
+      {stringText}
+    </span>
+  );
+};
+
+
+// 定义节点的接口，规范节点数据结构
 interface Node {
-  name: string; // 节点的名称
-  properties: { [key: string]: any }; // 节点的属性
+  name: string; // 节点的唯一标识符和显示名称
+  properties: { [key: string]: any }; // 节点的属性，一个键值对集合
 }
 
-// 定义关系的接口
+// 定义关系的接口，规范关系数据结构
 interface Relationship {
-  name: string; // 关系的名称
-  properties: { [key: string]: any }; // 关系的属性
+  name: string; // 关系的类型名称
+  properties: { [key: string]: any }; // 关系的属性，通常包含 fromNode 和 toNode
 }
 
 // 定义组件的属性接口
 interface Neo4jVisualizationProps {
-  nodes?: Node[]; // 可选的节点数组
-  relationships?: Relationship[]; // 可选的关系数组
+  nodes?: Node[]; // 节点数组，可选
+  relationships?: Relationship[]; // 关系数组，可选
 }
 
 const Neo4jVisualization: React.FC<Neo4jVisualizationProps> = ({ nodes = [], relationships = [] }) => {
-  const cardRef = useRef<HTMLDivElement>(null); // 用于引用图表容器的 ref
-  const networkRef = useRef<Network | null>(null); // 用于引用 vis-network 实例的 ref
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null); // 当前选中的节点
-  const [selectedLink, setSelectedLink] = useState<Relationship | null>(null); // 当前选中的关系
+  // 创建一个 ref 来引用图表容器的 DOM 元素
+  const cardRef = useRef<HTMLDivElement>(null);
+  // 创建一个 ref 来持有 vis-network 的实例，以便在组件的生命周期内访问它
+  const networkRef = useRef<Network | null>(null);
+  // 使用 state 来存储当前被选中的节点信息
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  // 使用 state 来存储当前被选中的关系（边）信息
+  const [selectedLink, setSelectedLink] = useState<Relationship | null>(null);
+
+  // 【核心优化】将传入的`nodes`和`relationships`数据序列化为JSON字符串。
+  // 这么做的目的是为了给`useEffect`一个稳定可靠的依赖项。
+  // 如果直接使用 `[nodes, relationships]` 作为依赖，父组件的任何重渲染都可能导致 `nodes` 和 `relationships` 的引用地址发生变化（即使内容完全相同），
+  // 这会触发`useEffect`不必要地重新执行，导致图表频繁且昂贵的重绘。
+  // 通过`JSON.stringify`，我们得到一个原始的字符串值，只有当数据内容真正改变时，这个字符串才会改变，从而精确控制图表的更新。
+  const dataSignature = JSON.stringify({ nodes, relationships });
 
   useEffect(() => {
-    // 建立一个不作为节点延伸出去的属性名列表
-    const excludedProperties = ['annotatedImage', 'ImgName']
-    if (cardRef.current) {
-      const container = cardRef.current; // 获取图表容器的 DOM 元素
+    // 定义不作为独立属性节点展示的属性名，例如图片这种特殊处理的属性
+    const excludedProperties = ['annotatedImage', 'ImgName'];
 
-      // 提取具有相同属性名和属性值的节点，并创建新的节点和边
+    if (cardRef.current) {
+      const container = cardRef.current;
+
+      // =================================================================
+      // 数据转换逻辑：
+      // 为了实现“实体节点-属性-实体节点”的可视化模式，我们需要对原始数据进行处理。
+      // 这里的核心思想是：将节点的每个“属性”也变成一个可视化的“属性节点”。
+      // 例如，一个名为 "Alice" 的节点，有属性 { city: "New York" }，
+      // 我们会创建一个新的、形状为方块的“属性节点”，标签为 "New York"，
+      // 然后在 "Alice" 和 "New York" 之间创建一条边，表示从属关系。
+      // 这使得具有相同属性值的节点可以被清晰地组织在一起。
+      // =================================================================
+
+      // 用于收集所有具有相同'属性键:属性值'的节点
       const propertyToNodesMap: { [key: string]: Node[] } = {};
+      // 存储新创建的“属性节点”
       const newNodes: Node[] = [];
+      // 存储从原始节点指向新“属性节点”的关系
       const newRelationships: Relationship[] = [];
 
+      // 第一步：遍历所有原始节点，构建 propertyToNodesMap
       nodes.forEach(node => {
         Object.entries(node.properties).forEach(([key, value]) => {
-          if (excludedProperties.includes(key)) {
+          // 排除掉指定的属性和空值属性
+          if (excludedProperties.includes(key) || value === null || value === undefined) {
             return;
           }
-          const propertyValue = `${key}:${value}`;
+          const propertyValue = `${key}:${value}`; // 创建一个唯一的属性标识符
           if (!propertyToNodesMap[propertyValue]) {
             propertyToNodesMap[propertyValue] = [];
           }
@@ -51,206 +103,137 @@ const Neo4jVisualization: React.FC<Neo4jVisualizationProps> = ({ nodes = [], rel
         });
       });
 
-      Object.entries(propertyToNodesMap).forEach(([propertyValue, nodes]) => {
-        if (nodes.length > 1) {
-          const [key, value] = propertyValue.split(':');
-          const newNode: Node = {
-            name: propertyValue, // 使用属性名和属性值作为新节点的名称
-            properties: {
-              belongTo: key
-            },
-          };
+      // 第二步：根据 propertyToNodesMap 创建新的“属性节点”和它们与原始节点的关系
+      Object.entries(propertyToNodesMap).forEach(([propertyValue, currentNodes]) => {
+        const [key, value] = propertyValue.split(':');
+        const newNode: Node = {
+          name: propertyValue, // "属性节点"的内部名称，如 "city:New York"
+          properties: { belongTo: key }, // "属性节点"的属性，表明它属于哪一类属性（如 "city"）
+        };
 
-          // 检查新节点是否已经存在，考虑 name 和 properties.belongTo
-          const existingNode = newNodes.find(n => n.name === newNode.name && n.properties.belongTo === newNode.properties.belongTo);
-          if (!existingNode) {
-            newNodes.push(newNode);
-          }
+        // 避免重复创建相同的属性节点
+        const existingNode = newNodes.find(n => n.name === newNode.name && n.properties.belongTo === newNode.properties.belongTo);
+        if (!existingNode) {
+          newNodes.push(newNode);
+        }
 
-          nodes.forEach(node => {
-            const newRelationship: Relationship = {
-              name: key,
-              properties: {
-                fromNode: node.name,
-                toNode: newNode.name,
-              },
-            };
-            newRelationships.push(newRelationship);
-          });
-        } else {
-          // 如果没有重复的属性值，创建一个新的节点并与原始节点相连
-          const [key, value] = propertyValue.split(':');
-          const newNode: Node = {
-            name: propertyValue, // 使用属性名和属性值作为新节点的名称
-            properties: {
-              belongTo: key
-            },
-          };
-
-          // 检查新节点是否已经存在，考虑 name 和 properties.belongTo
-          const existingNode = newNodes.find(n => n.name === newNode.name && n.properties.belongTo === newNode.properties.belongTo);
-          if (!existingNode) {
-            newNodes.push(newNode);
-          }
-
-          const node = nodes[0];
+        // 为每个共享此属性的原始节点，创建一个指向新“属性节点”的关系
+        currentNodes.forEach(node => {
           const newRelationship: Relationship = {
-            name: key,
+            name: key, // 关系名称就是属性的键
             properties: {
               fromNode: node.name,
               toNode: newNode.name,
             },
           };
           newRelationships.push(newRelationship);
-        }
+        });
       });
 
-      // 将节点数据转换为 vis-network 所需的格式
-      const visNodes = new DataSet([
-        ...nodes.map(node => ({
-          id: node.name, // 使用节点的名称作为 ID
-          label: node.name, // 使用节点的名称作为标签
-          ...node.properties, // 添加节点的其他属性
-          shape: 'ellipse', // 节点的形状为椭圆
-          // 设置颜色为淡蓝色
-          color: {
-            background: '#AED6F1', // 淡蓝色背景
-            border: '#3498DB', // 蓝色边框
-            highlight: {
-              background: '#85C1E9', // 高亮淡蓝色背景
-              border: '#2980B9', // 高亮蓝色边框
-            },
-          },
-          borderWidth: 2, // 边框宽度
-          font: {
-            size: 14, // 字体大小
-            color: '#333333', // 字体颜色
-          },
-        })),
-        ...newNodes.map(node => ({
-          id: `${node.name}-${node.properties.belongTo}`, // 使用 name 和 belongTo 组合作为 ID
-          label: node.name.split(':')[1], // 使用节点的名称作为标签
-          ...node.properties, // 添加节点的其他属性
-          shape: 'box', // 新节点的形状为矩形
-          font: {
-            size: 14, // 字体大小
-            color: '#333333', // 字体颜色
-            align: 'middle', // 文字水平居中
-            vadjust: 0, // 文字垂直居中
-          },
-          // 设置颜色为绿色
-          color: {
-            background: '#A9DFBF', // 淡绿色背景
-            border: '#27AE60', // 绿色边框
-            highlight: {
-              background: '#7DCEA0', // 高亮淡绿色背景
-              border: '#1E8449', // 高亮绿色边框
-            },
-          },
-          borderWidth: 2, // 边框宽度
-        })),
-      ]);
-
-      // 将关系数据转换为 vis-network 所需的格式
-      let edgeIdCounter = 0; // 用于生成唯一边 ID 的计数器
-      const visEdges = new DataSet([
-        ...relationships.map(rel => {
-          const sourceNode = nodes.find(node => node.name === rel.properties.fromNode); // 查找源节点
-          const targetNode = nodes.find(node => node.name === rel.properties.toNode); // 查找目标节点
-
-          // 确保 source 和 target 是有效的节点 ID
-          if (sourceNode && targetNode) {
-            return {
-              id: `edge-${edgeIdCounter++}`, // 使用唯一的 ID
-              from: sourceNode.name, // 使用源节点的名称作为 from
-              to: targetNode.name, // 使用目标节点的名称作为 to
-              label: rel.name, // 使用关系的名称作为标签
-              ...rel.properties, // 添加关系的其他属性
-            };
-          } else {
-            // 如果找不到对应的节点，跳过该链接
-            console.warn(`Skipping relationship ${rel.name} because one or both nodes are missing.`);
-            return null;
-          }
-        }).filter(link => link !== null) as { id: string; from: string; to: string; label: string }[],
-        ...newRelationships.map(rel => {
-          const sourceNode = nodes.find(node => node.name === rel.properties.fromNode); // 查找源节点
-          const targetNode = newNodes.find(node => node.name === rel.properties.toNode); // 查找目标节点
-
-          // 确保 source 和 target 是有效的节点 ID
-          if (sourceNode && targetNode) {
-            return {
-              id: `edge-${edgeIdCounter++}`, // 使用唯一的 ID
-              from: sourceNode.name, // 使用源节点的名称作为 from
-              to: `${targetNode.name}-${targetNode.properties.belongTo}`, // 使用目标节点的 name 和 belongTo 组合作为 to
-              label: rel.name, // 使用关系的名称作为标签
-              ...rel.properties, // 添加关系的其他属性
-            };
-          } else {
-            // 如果找不到对应的节点，跳过该链接
-            console.warn(`Skipping relationship ${rel.name} because one or both nodes are missing.`);
-            return null;
-          }
-        }).filter(link => link !== null) as { id: string; from: string; to: string; label: string }[],
-      ]);
-
-      // 配置 vis-network
-      const data = {
-        nodes: visNodes, // 节点数据
-        edges: visEdges, // 关系数据
+      // 定义两种节点的颜色方案，以作区分
+      const primaryNodeColor = { // 主要实体节点的颜色
+        background: '#EBF5FB',
+        border: '#85C1E9',
+        highlight: { background: '#D6EAF8', border: '#3498DB' },
+      };
+      const propertyNodeColor = { // "属性节点"的颜色
+        background: '#E8F8F5',
+        border: '#7DCEA0',
+        highlight: { background: '#D4EFDF', border: '#2ECC71' },
       };
 
-      // 打印所有的节点和边
-      console.log('Nodes:', visNodes.get());
-      console.log('Edges:', visEdges.get());
+      // 使用 vis-network 的 DataSet 来管理节点数据，这样可以方便地进行增删改查
+      const visNodes = new DataSet([
+        // 添加原始的实体节点
+        ...nodes.map(node => ({
+          id: node.name,
+          label: node.name, // 节点上显示的文本
+          ...node.properties, // 将原始属性附加到vis节点对象上，方便点击时获取
+          shape: 'ellipse', // 实体节点形状为椭圆
+          color: primaryNodeColor,
+          margin: 10,
+          font: { size: 16, color: '#34495E', face: 'Arial, sans-serif' },
+          shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 5, x: 2, y: 2 },
+        })),
+        // 添加新创建的“属性节点”
+        ...newNodes.map(node => ({
+          id: `${node.name}-${node.properties.belongTo}`, // 为属性节点创建唯一ID，防止与主节点或其他属性节点冲突
+          label: node.name.split(':')[1], // 属性节点的标签只显示属性值
+          ...node.properties,
+          shape: 'box', // 属性节点形状为方块
+          color: propertyNodeColor,
+          margin: 10,
+          font: { size: 14, color: '#34495E', face: 'Arial, sans-serif' },
+          shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 5, x: 2, y: 2 },
+        })),
+      ]);
 
+      let edgeIdCounter = 0; // 用于为边生成唯一ID
+      // 使用 vis-network 的 DataSet 来管理边数据
+      const visEdges = new DataSet([
+        // 添加原始关系
+        ...relationships.map(rel => {
+          const sourceNode = nodes.find(node => node.name === rel.properties.fromNode);
+          const targetNode = nodes.find(node => node.name === rel.properties.toNode);
+          if (sourceNode && targetNode) {
+            return {
+              id: `edge-${edgeIdCounter++}`,
+              from: sourceNode.name,
+              to: targetNode.name,
+              label: rel.name,
+              ...rel.properties, // 附加原始属性
+            };
+          }
+          return null;
+        }).filter(Boolean) as { id: string; from: string; to: string; label: string }[],
+        // 添加连接原始节点和“属性节点”的新关系
+        ...newRelationships.map(rel => {
+          const sourceNode = nodes.find(node => node.name === rel.properties.fromNode);
+          const targetNode = newNodes.find(node => node.name === rel.properties.toNode);
+          if (sourceNode && targetNode) {
+            return {
+              id: `edge-${edgeIdCounter++}`,
+              from: sourceNode.name,
+              to: `${targetNode.name}-${targetNode.properties.belongTo}`, // 目标是属性节点的唯一ID
+              label: rel.name,
+              ...rel.properties,
+            };
+          }
+          return null;
+        }).filter(Boolean) as { id: string; from: string; to: string; label: string }[],
+      ]);
+
+      const data = { nodes: visNodes, edges: visEdges };
+
+      // vis-network 的配置选项
       const options = {
         interaction: {
+          hover: true, // 启用悬停效果
+          tooltipDelay: 200, // 悬停提示延迟
           dragNodes: true, // 允许拖动节点
           dragView: true, // 允许拖动视图
-          hover: true, // 允许悬停
         },
         physics: {
           enabled: true, // 启用物理引擎
+          // 配置物理引擎，使用 barnesHut 算法可以高效地模拟节点间的引力和斥力，防止节点重叠
           barnesHut: {
-            gravitationalConstant: -200, // 重力常数
-            centralGravity: 0, // 中心重力
-            springLength: 200, // 弹簧长度
-            springConstant: 0.04, // 弹簧常数
-            damping: 0.09, // 阻尼
-            avoidOverlap: 0.5, // 避免重叠
+            gravitationalConstant: -1000,
+            centralGravity: 0.01,
+            springLength: 250,
+            springConstant: 0.05,
+            damping: 0.1,
+            avoidOverlap: 0.8,
           },
+          solver: 'barnesHut',
+          stabilization: { iterations: 2000 }, // 稳定化迭代次数
         },
-        nodes: {
-          shape: 'dot', // 节点形状为圆点
-          size: 20, // 节点大小
-          font: {
-            size: 12, // 字体大小
-          },
-          borderWidth: 2, // 边框宽度
-          color: {
-            background: 'lightgreen', // 背景颜色
-            border: 'green', // 边框颜色
-            highlight: {
-              background: 'lightblue', // 高亮背景颜色
-              border: 'blue', // 高亮边框颜色
-            },
-          },
-        },
+        nodes: { borderWidth: 2, size: 30 },
         edges: {
-          arrows: {
-            to: {
-              enabled: true, // 启用箭头
-              scaleFactor: 1, // 箭头缩放因子
-            },
-          },
-          color: {
-            color: 'gray', // 默认颜色
-            highlight: 'lightblue', // 高亮颜色
-          },
-          font: {
-            align: 'middle', // 标签对齐方式
-          },
+          arrows: { to: { enabled: true, scaleFactor: 0.7 } }, // 箭头配置
+          color: { color: '#BDC3C7', highlight: '#85C1E9', hover: '#85C1E9' },
+          font: { align: 'middle', size: 12, color: '#7F8C8D' },
+          // 边使用平滑曲线，'cubicBezier' 提供了较好的视觉效果
+          smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 },
         },
       };
 
@@ -258,81 +241,121 @@ const Neo4jVisualization: React.FC<Neo4jVisualizationProps> = ({ nodes = [], rel
       const network = new Network(container, data, options);
       networkRef.current = network;
 
-      // 监听节点点击事件
+      // 监听 'stabilized' 事件，当物理引擎计算稳定后，关闭它以提高性能，避免不必要的CPU消耗
+      network.once('stabilized', () => {
+        network.setOptions({ physics: false });
+      });
+
+      // 注册点击事件监听器，这是组件交互的核心
       network.on('click', (params) => {
         if (params.nodes.length > 0) {
-          const nodeId = params.nodes[0]; // 获取点击的节点 ID
-          const node = nodes.find(n => n.name === nodeId) || newNodes.find(n => `${n.name}-${n.properties.belongTo}` === nodeId); // 查找对应的节点
+          // 如果点击的是节点
+          const nodeId = params.nodes[0];
+          // 在原始节点和新创建的属性节点中查找被点击的节点
+          const node = nodes.find(n => n.name === nodeId) || newNodes.find(n => `${n.name}-${n.properties.belongTo}` === nodeId);
           if (node) {
-            setSelectedNode(node); // 设置选中的节点
-            setSelectedLink(null); // 清除选中的关系
+            setSelectedNode(node); // 更新React state，触发右侧详情面板的渲染
+            setSelectedLink(null);
           }
         } else if (params.edges.length > 0) {
-          const edgeId = params.edges[0]; // 获取点击的关系 ID
-          const edge = relationships.find(r => r.name === edgeId) || newRelationships.find(r => r.name === edgeId);
-          if (edge) {
-            setSelectedLink(edge); // 设置选中的关系
-            setSelectedNode(null); // 清除选中的节点
+          // 如果点击的是边
+          const edgeId = params.edges[0];
+          const edgeData = visEdges.get(edgeId); // 从DataSet中获取边的完整数据
+          if (edgeData) {
+            // 在原始关系和新创建的关系中查找对应的关系数据
+            const edge = relationships.find(r => r.name === edgeData.label && r.properties.fromNode === edgeData.from && r.properties.toNode === edgeData.to) ||
+              newRelationships.find(r => r.name === edgeData.label && r.properties.fromNode === edgeData.from);
+            if (edge) {
+              setSelectedLink(edge); // 更新React state
+              setSelectedNode(null);
+            }
           }
+        } else {
+          // 如果点击的是画布空白处
+          setSelectedNode(null);
+          setSelectedLink(null);
         }
       });
 
+      // 【重要】返回一个清理函数。
+      // 在React组件卸载时（或useEffect下次执行前），这个函数会被调用。
+      // `network.destroy()` 会清理vis-network创建的所有DOM元素和事件监听器，释放资源，防止内存泄漏。
       return () => {
-        network.destroy(); // 销毁 vis-network 实例
+        if (networkRef.current) {
+          networkRef.current.destroy();
+          networkRef.current = null;
+        }
       };
     }
-  }, [nodes, relationships]);
-
-  // 限制属性显示的长度
-  const truncateString = (str: string, maxLength: number) => {
-    return str.length > maxLength ? str.substring(0, maxLength) + '...' : str;
-  };
+    // 【核心修改】使用 dataSignature 作为唯一的依赖项，确保只有在数据内容实际变化时才重建图表
+  }, [dataSignature]);
 
   return (
-    <div style={{ height: '100%', width: 1700, display: 'flex', overflow: 'hidden' }}>
-      <Card ref={cardRef} style={{ width:1000, height: 800 }} /> {/* 图表容器 */}
-      <Card style={{ width: 700, height: 800, overflowY: 'auto' }}>
-        {/* 如果选中了节点，显示节点详情 */}
+    <div style={{ height: '100%', width: '100%', display: 'flex', overflow: 'hidden', background: '#F8F9F9' }}>
+      {/* 左侧图表容器，ref 指向此 div，vis-network 将在此处渲染 */}
+      <Card ref={cardRef} style={{ flexGrow: 1, height: '100%', border: 'none', background: 'transparent' }} bodyStyle={{ padding: 0, height: '100%', width: '100%' }} />
+
+      {/* 右侧详情显示面板 */}
+      <Card style={{ width: 450, minWidth: 400, height: '100%', overflowY: 'auto', border: 'none', borderLeft: '1px solid #EAECEE' }}>
+        {/* 条件渲染：当有节点被选中时，显示节点详细信息 */}
         {selectedNode && (
-          <Descriptions title="Node Details" bordered>
-            {/* 显示节点的名称，独占一行 */}
-            <Descriptions.Item label="Name" span={2}>
-              {selectedNode.name}
-            </Descriptions.Item>
-            {/*空白占位*/}<Descriptions.Item label="" span={2}>{}</Descriptions.Item>
-            {/* 显示节点的属性，每个属性单独一行并缩进显示 */}
-            {Object.entries(selectedNode.properties).map(([key, value]) => (
-              <Descriptions.Item key={key} label={key} span={2} style={{ paddingLeft: '20px' }}>
-                {truncateString(value, 30)}
+          <>
+            <Title level={4} style={{ padding: '16px 24px 0' }}>节点详情</Title>
+            <Descriptions bordered column={1} style={{ margin: '0 24px 24px' }} size="small">
+              <Descriptions.Item label="名称">
+                <TruncatedText text={selectedNode.name} />
               </Descriptions.Item>
-            ))}
-            {/* 如果节点包含 annotatedImage 属性，显示图片 */}
-            {selectedNode.properties.annotatedImage && (
-              <Descriptions.Item label="Annotated Image" span={2}>
-                <Image src={selectedNode.properties.annotatedImage} />
-              </Descriptions.Item>
-            )}
-          </Descriptions>
+              {/* 遍历并显示节点的所有属性 */}
+              {Object.entries(selectedNode.properties).map(([key, value]) => {
+                // 对图片属性进行特殊处理，直接显示图片
+                if (key === 'annotatedImage' && value) {
+                  return (
+                    <Descriptions.Item key={key} label="标注图片">
+                      <Image src={value} width={100} />
+                    </Descriptions.Item>
+                  );
+                }
+                // 过滤掉不希望在详情中显示的属性
+                if (key !== 'annotatedImage' && key !== 'ImgName') {
+                  return (
+                    <Descriptions.Item key={key} label={key}>
+                      <TruncatedText text={value} />
+                    </Descriptions.Item>
+                  );
+                }
+                return null;
+              })}
+            </Descriptions>
+          </>
         )}
-        {/* 如果选中了链接，显示链接详情 */}
+        {/* 条件渲染：当有关系被选中时，显示关系详细信息 */}
         {selectedLink && (
-          <Descriptions title="Link Details" bordered>
-            {/* 显示链接的名称，独占一行 */}
-            <Descriptions.Item label="Name" span={2}>
-              {selectedLink.name}
-            </Descriptions.Item>
-            {/*空白占位*/}<Descriptions.Item label="" span={2}>{}</Descriptions.Item>
-            {/* 显示链接的属性，每个属性单独一行并缩进显示 */}
-            {Object.entries(selectedLink.properties).map(([key, value]) => (
-              <Descriptions.Item key={key} label={key} span={2} style={{ paddingLeft: '20px' }}>
-                {truncateString(value, 30)}
+          <>
+            <Title level={4} style={{ padding: '16px 24px 0' }}>关系详情</Title>
+            <Descriptions bordered column={1} style={{ margin: '0 24px 24px' }} size="small">
+              <Descriptions.Item label="类型">
+                <TruncatedText text={selectedLink.name} />
               </Descriptions.Item>
-            ))}
-          </Descriptions>
+              {Object.entries(selectedLink.properties).map(([key, value]) => (
+                <Descriptions.Item key={key} label={key}>
+                  <TruncatedText text={value} />
+                </Descriptions.Item>
+              ))}
+            </Descriptions>
+          </>
+        )}
+        {/* 条件渲染：当没有元素被选中时，显示占位提示信息 */}
+        {!selectedNode && !selectedLink && (
+          <div style={{ textAlign: 'center', color: '#999', paddingTop: '45%', paddingLeft: 20, paddingRight: 20 }}>
+            <Title level={5} style={{ color: '#B2BABB' }}>
+              请选择一个节点或关系
+            </Title>
+            <p>点击图中的元素以在此处查看其详细信息。</p>
+          </div>
         )}
       </Card>
     </div>
   );
 };
 
-export default Neo4jVisualization; // 导出组件
+export default Neo4jVisualization;
