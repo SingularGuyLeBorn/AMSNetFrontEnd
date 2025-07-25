@@ -6,8 +6,7 @@ import {
     faCogs,
     faDatabase, faEraser,
     faFileExport,
-    faFileImport,
-    faList, faMinusCircle, faMousePointer,
+    faFileImport, faFolderTree, faHistory, faList, faMinusCircle, faMousePointer,
     faPaintBrush,
     faPen,
     faPlus,
@@ -160,7 +159,7 @@ export const stringifyJsonContent = (jsonObj: JsonData | null): string => {
     return JSON.stringify(jsonObj, null, 2);
 };
 
-const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeight: number, classMap: { [key: number]: ClassInfo }): string => {
+const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeight: number, file_classMap: { [key: number]: ClassInfo }): string => {
     if (!Array.isArray(cpnts) || imageWidth === 0 || imageHeight === 0) {
         return "";
     }
@@ -174,7 +173,7 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
         const { t: top, b: bottom, l: left, r: right, type } = cpnt;
         let classIndex = -1;
         let classLabel = '';
-        for (const [idx, info] of Object.entries(classMap)) {
+        for (const [idx, info] of Object.entries(file_classMap)) {
             if (info.label === type) {
                 classIndex = parseInt(idx, 10);
                 classLabel = info.label;
@@ -182,7 +181,7 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
             }
         }
         if (classIndex === -1) {
-            console.warn(`在 classMap 中未找到类别 "${type}"`);
+            console.warn(`在 file_classMap 中未找到类别 "${type}"`);
             return;
         }
         const absWidth = right - left;
@@ -207,13 +206,16 @@ const FileOperate: React.FC = () => {
     const { initialState } = useModel('@@initialState');
     const {
         imageKeys,
-        file_classMap: classMap, setFile_classMap: setClassMap,
-        file_currentIndex: currentIndex, setFile_currentIndex: setCurrentIndex,
+        file_classMap, setFile_classMap,
+        file_currentIndex, setFile_currentIndex,
         file_dirtyYolo, setFile_dirtyYolo,
         file_dirtyJson, setFile_dirtyJson,
-        file_operationHistory: operationHistory, setFile_operationHistory: setOperationHistory,
-        file_redoHistory: redoHistory, setFile_redoHistory: setRedoHistory,
+        // file_operationHistory: file_operationHistory, setFile_operationHistory: setFile_operationHistory,
+        // file_redoHistory: file_redoHistory, setFile_redoHistory: setFile_redoHistory,
         isAppBusy, setAppBusy, // Bedrock Change: Use global lock
+
+        file_operationHistory, setFile_operationHistory,
+        file_redoHistory, setFile_redoHistory,
     } = useModel('annotationStore');
 
     const [currentLang, setCurrentLang] = useState(initialState?.language || 'zh');
@@ -239,6 +241,9 @@ const FileOperate: React.FC = () => {
     const [inspectorWidth, setInspectorWidth] = useState<number>(350);
     const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
     const [isInspectorVisible, setIsInspectorVisible] = useState<boolean>(true);
+    const [explorerWidth, setExplorerWidth] = useState<number>(250);
+    const [isResizingExplorer, setIsResizingExplorer] = useState<boolean>(false);
+    const [isExplorerVisible, setIsExplorerVisible] = useState<boolean>(true);
     const [isAiAnnotating, setIsAiAnnotating] = useState(false);
     const classImportRef = useRef<HTMLInputElement>(null);
 
@@ -253,12 +258,13 @@ const FileOperate: React.FC = () => {
     const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
     const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
     const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
+    const [fileSearchTerm, setFileSearchTerm] = useState('');
 
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
     const hasWorkspace = imageKeys.length > 0;
-    const currentImageKey = hasWorkspace ? imageKeys[currentIndex] : null;
+    const currentImageKey = hasWorkspace ? imageKeys[file_currentIndex] : null;
     const disabledUI = isAppBusy; // Bedrock Change: UI lock is now driven by global state
 
     useEffect(() => {
@@ -307,7 +313,7 @@ const FileOperate: React.FC = () => {
                 const absLeft = (relX - relW / 2) * canvas.width;
                 const absTop = (relY - relH / 2) * canvas.height;
                 const isSelected = selectedBoxName === name;
-                const color = classMap[classIdx]?.color || '#808080';
+                const color = file_classMap[classIdx]?.color || '#808080';
                 ctx.beginPath();
                 ctx.strokeStyle = isSelected ? '#0958d9' : color;
                 ctx.lineWidth = isSelected ? 3 : 2;
@@ -362,7 +368,7 @@ const FileOperate: React.FC = () => {
             ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
-    }, [currentImageDetails, parsedYoloData, currentJsonContent, classMap, t.noImages, selectedBoxName, regionSelectBox, isTransitioning]);
+    }, [currentImageDetails, parsedYoloData, currentJsonContent, file_classMap, t.noImages, selectedBoxName, regionSelectBox, isTransitioning]);
 
     const getScaledCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
@@ -415,7 +421,7 @@ const FileOperate: React.FC = () => {
     }, [canvasMousePos, drawMagnifier]);
 
 
-    const convertStandardYoloToInternal = useCallback((standardYoloContent: string, classMap: { [key: number]: ClassInfo }): string => {
+    const convertStandardYoloToInternal = useCallback((standardYoloContent: string, file_classMap: { [key: number]: ClassInfo }): string => {
         const lines = standardYoloContent.split('\n').filter(line => line.trim() !== '');
         if (lines.length === 0) return '';
         const firstLineParts = lines[0].split(' ');
@@ -430,7 +436,7 @@ const FileOperate: React.FC = () => {
             if (parts.length !== 5) return line; // Invalid line, keep as is
             const classIndex = parseInt(parts[0], 10);
             if (isNaN(classIndex)) return line; // Invalid class index, keep as is
-            const classLabel = classMap[classIndex]?.label || `class_${classIndex}`;
+            const classLabel = file_classMap[classIndex]?.label || `class_${classIndex}`;
             const counter = nameCounters[classLabel] || 0;
             nameCounters[classLabel] = counter + 1;
             const uniqueName = `${classLabel}_${counter}`;
@@ -456,7 +462,7 @@ const FileOperate: React.FC = () => {
             const yoloToLoad = dirtyYolo ?? sourceData.yoloContent ?? '';
             const jsonToLoad = dirtyJson ?? sourceData.jsonContent ?? '{}';
 
-            const internalYolo = convertStandardYoloToInternal(yoloToLoad, classMap);
+            const internalYolo = convertStandardYoloToInternal(yoloToLoad, file_classMap);
             setCurrentYoloContent(internalYolo);
             setCurrentJsonContent(jsonToLoad);
 
@@ -491,23 +497,35 @@ const FileOperate: React.FC = () => {
                 setIsTransitioning(false);
             }
         }
-    }, [imageKeys, classMap, file_dirtyYolo, file_dirtyJson, convertStandardYoloToInternal]);
+    }, [imageKeys, file_classMap, file_dirtyYolo, file_dirtyJson, convertStandardYoloToInternal]);
 
     const handleNavigation = useCallback(async (offset: number) => {
         if (isAppBusy) return; // Use global lock
-        const newIndex = currentIndex + offset;
+        const newIndex = file_currentIndex + offset;
         if (newIndex >= 0 && newIndex < imageKeys.length) {
             if (currentImageKey) {
                 setFile_dirtyYolo(prev => ({ ...prev, [currentImageKey]: currentYoloContent || '' }));
                 setFile_dirtyJson(prev => ({ ...prev, [currentImageKey]: currentJsonContent || '{}' }));
             }
             await workspaceService.saveLastIndices({ fileOperateIndex: newIndex });
-            setCurrentIndex(newIndex);
+            setFile_currentIndex(newIndex);
         }
-    }, [isAppBusy, currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setCurrentIndex]);
+    }, [isAppBusy, file_currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setFile_currentIndex]);
+
+    const handleNavigateToIndex = useCallback(async (index: number) => {
+        if (isAppBusy || file_currentIndex === index) return;
+        if (index >= 0 && index < imageKeys.length) {
+            if (currentImageKey) {
+                setFile_dirtyYolo(prev => ({ ...prev, [currentImageKey]: currentYoloContent || '' }));
+                setFile_dirtyJson(prev => ({ ...prev, [currentImageKey]: currentJsonContent || '{}' }));
+            }
+            await workspaceService.saveLastIndices({ fileOperateIndex: index });
+            setFile_currentIndex(index);
+        }
+    }, [isAppBusy, file_currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setFile_currentIndex]);
 
     useEffect(() => {
-        if (!hasWorkspace || currentIndex < 0) {
+        if (!hasWorkspace || file_currentIndex < 0) {
             return;
         }
 
@@ -519,7 +537,7 @@ const FileOperate: React.FC = () => {
 
         setAppBusy(true); // Lock the app
 
-        loadDataForIndex(currentIndex, controller.signal).finally(() => {
+        loadDataForIndex(file_currentIndex, controller.signal).finally(() => {
             if (!controller.signal.aborted) {
                 setAppBusy(false); // Unlock the app
             }
@@ -528,7 +546,7 @@ const FileOperate: React.FC = () => {
         return () => {
             controller.abort();
         }
-    }, [currentIndex, hasWorkspace, loadDataForIndex, setAppBusy]);
+    }, [file_currentIndex, hasWorkspace, loadDataForIndex, setAppBusy]);
 
 
     useEffect(() => { redrawCanvas(); }, [redrawCanvas, redrawTrigger]);
@@ -540,12 +558,22 @@ const FileOperate: React.FC = () => {
 
     useEffect(() => {
         const handleMouseMove = (e: globalThis.MouseEvent) => {
-            if (!isResizingInspector) return;
-            const newWidth = window.innerWidth - e.clientX;
-            if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
+            if (!isResizingInspector && !isResizingExplorer) return;
+            if(isResizingInspector){
+                const newWidth = window.innerWidth - e.clientX;
+                if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
+            }
+            if(isResizingExplorer){
+                const newWidth = e.clientX - 60; // 60 is the tool sider width
+                if (newWidth > 150 && newWidth < 600) setExplorerWidth(newWidth);
+            }
         };
-        const handleMouseUp = () => setIsResizingInspector(false);
-        if (isResizingInspector) {
+        const handleMouseUp = () => {
+            setIsResizingInspector(false);
+            setIsResizingExplorer(false);
+        };
+
+        if (isResizingInspector || isResizingExplorer) {
             document.body.style.userSelect = 'none';
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
@@ -555,7 +583,7 @@ const FileOperate: React.FC = () => {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isResizingInspector]);
+    }, [isResizingInspector, isResizingExplorer]);
 
     useEffect(() => {
         const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
@@ -622,8 +650,8 @@ const FileOperate: React.FC = () => {
                 previousYoloContent: previousYoloContentForUndo,
                 previousJsonContent: previousJsonContentForUndo,
             };
-            setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-            setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+            setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+            setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
         }
 
         if (selectedBoxName === boxNameToDelete) {
@@ -632,7 +660,7 @@ const FileOperate: React.FC = () => {
 
         message.success(`标注 '${boxNameToDelete}' 已删除`);
         setRedrawTrigger(p => p + 1);
-    }, [currentYoloContent, currentJsonContent, currentIndex, selectedBoxName, setOperationHistory, setRedoHistory]);
+    }, [currentYoloContent, currentJsonContent, file_currentIndex, selectedBoxName, setFile_operationHistory, setFile_redoHistory]);
 
 
     const handleCanvasAction = (e: MouseEvent<HTMLCanvasElement>) => {
@@ -666,8 +694,8 @@ const FileOperate: React.FC = () => {
                     })());
                     setCurrentJsonContent(newJson);
                     const newOp: Operation = { type: 'stain', boxName, jsonType: selectedJsonType, jsonName: selectedJsonName, previousJsonContent: previousJson };
-                    setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                    setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                    setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+                    setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
                     setRedrawTrigger(p => p + 1);
                     break;
                 }
@@ -744,8 +772,8 @@ const FileOperate: React.FC = () => {
                             startFullYoloLine: selectedBoxLine
                         });
                         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-                        setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                        setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                        setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+                        setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
                         return;
                     }
                 }
@@ -781,8 +809,8 @@ const FileOperate: React.FC = () => {
                     startYoloData: clickedYoloData,
                 });
                 const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+                setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
             } else {
                 setDraggingState(null);
             }
@@ -798,7 +826,7 @@ const FileOperate: React.FC = () => {
             const ctx = canvas.getContext('2d');
             if (ctx && canvasImageData) {
                 ctx.putImageData(canvasImageData, 0, 0); ctx.beginPath();
-                ctx.strokeStyle = classMap[currentClassIndex]?.color || '#262626';
+                ctx.strokeStyle = file_classMap[currentClassIndex]?.color || '#262626';
                 ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
                 ctx.rect(mouseDownCoords.x, mouseDownCoords.y, currentPos.x - mouseDownCoords.x, currentPos.y - mouseDownCoords.y);
                 ctx.stroke(); ctx.setLineDash([]);
@@ -881,7 +909,7 @@ const FileOperate: React.FC = () => {
             const width = Math.abs(upPos.x - mouseDownCoords.x); const height = Math.abs(upPos.y - mouseDownCoords.y);
 
             if (width > 2 && height > 2) {
-                const classLabel = classMap[currentClassIndex]?.label || `class_${currentClassIndex}`;
+                const classLabel = file_classMap[currentClassIndex]?.label || `class_${currentClassIndex}`;
                 const yoloLines = currentYoloContent?.split('\n').filter(l => l.trim() !== '') || [];
 
                 const existingCounters = yoloLines
@@ -901,8 +929,8 @@ const FileOperate: React.FC = () => {
                 setCurrentYoloContent(prev => (prev ? `${prev}\n${yoloFormatData}` : yoloFormatData));
 
                 const newOp: Operation = { type: 'draw', yoloData: [yoloFormatData], previousYoloContent: previousYolo };
-                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+                setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
             }
             setCanvasImageData(null); setRedrawTrigger(prev => prev + 1);
         } else if (draggingState && draggingState.type === 'region-select') {
@@ -986,8 +1014,8 @@ const FileOperate: React.FC = () => {
                     previousYoloContent: previousYoloContentForUndo,
                     previousJsonContent: previousJsonContentForUndo,
                 };
-                setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-                setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+                setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+                setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
                 message.success(`删除了 ${boxNamesToDelete.length} 个标注。`);
             }
         }
@@ -998,9 +1026,9 @@ const FileOperate: React.FC = () => {
 
     const addUndoRecord = useCallback(() => {
         const newOp: Operation = { type: 'move', previousYoloContent: currentYoloContent };
-        setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-        setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
-    }, [currentYoloContent, currentIndex, setOperationHistory, setRedoHistory]);
+        setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+        setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
+    }, [currentYoloContent, file_currentIndex, setFile_operationHistory, setFile_redoHistory]);
 
     const handleEditFocus = useCallback((boxName: string) => {
         if (isCurrentlyEditingId !== boxName) {
@@ -1023,25 +1051,25 @@ const FileOperate: React.FC = () => {
     }, [currentYoloContent]);
 
     const handleUndo = () => {
-        const currentImageHistory = operationHistory[currentIndex] || [];
+        const currentImageHistory = file_operationHistory[file_currentIndex] || [];
         if (currentImageHistory.length === 0) { message.info(t.noUndoOperations); return; }
         const lastOperation = currentImageHistory[currentImageHistory.length - 1];
         let redoOp: Operation;
         switch (lastOperation.type) { case 'draw': case 'ai_annotate': case 'move': redoOp = { ...lastOperation, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': redoOp = { ...lastOperation, previousJsonContent: currentJsonContent }; break; case 'delete': redoOp = { ...lastOperation, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
-        setRedoHistory(prev => ({ ...prev, [currentIndex]: [redoOp, ...(prev[currentIndex] || [])] }));
-        setOperationHistory(prev => ({ ...prev, [currentIndex]: currentImageHistory.slice(0, -1) }));
+        setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [redoOp, ...(prev[file_currentIndex] || [])] }));
+        setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: currentImageHistory.slice(0, -1) }));
         if ('previousYoloContent' in lastOperation) { setCurrentYoloContent(lastOperation.previousYoloContent); }
         if ('previousJsonContent' in lastOperation) { setCurrentJsonContent(lastOperation.previousJsonContent); }
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
     };
     const handleRedo = () => {
-        const currentImageRedoHistory = redoHistory[currentIndex] || [];
+        const currentImageRedoHistory = file_redoHistory[file_currentIndex] || [];
         if (currentImageRedoHistory.length === 0) { message.info(t.noRedoOperations); return; }
         const operationToRedo = currentImageRedoHistory[0];
         let undoOp: Operation;
         switch (operationToRedo.type) { case 'draw': case 'ai_annotate': case 'move': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent }; break; case 'stain': case 'json_change': undoOp = { ...operationToRedo, previousJsonContent: currentJsonContent }; break; case 'delete': undoOp = { ...operationToRedo, previousYoloContent: currentYoloContent, previousJsonContent: currentJsonContent }; break; default: return; }
-        setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), undoOp] }));
-        setRedoHistory(prev => ({ ...prev, [currentIndex]: currentImageRedoHistory.slice(1) }));
+        setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), undoOp] }));
+        setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: currentImageRedoHistory.slice(1) }));
         if ('previousYoloContent' in operationToRedo) { setCurrentYoloContent(operationToRedo.previousYoloContent); }
         if ('previousJsonContent' in operationToRedo) { setCurrentJsonContent(operationToRedo.previousJsonContent); }
         setRedrawTrigger(p => p + 1); message.success(t.operationSuccessful);
@@ -1086,18 +1114,18 @@ const FileOperate: React.FC = () => {
             const { width, height } = canvasRef.current;
 
             const newLabels = [...new Set(resultData.cpnts.map(c => c.type))];
-            const existingLabels = Object.values(classMap).map(c => c.label);
+            const existingLabels = Object.values(file_classMap).map(c => c.label);
             const newlyDiscovered = newLabels.filter(l => !existingLabels.includes(l));
 
-            let currentClassMap = classMap;
+            let currentClassMap = file_classMap;
             if (newlyDiscovered.length > 0) {
-                let newClassMap = { ...classMap };
-                let lastIndex = Object.keys(classMap).length > 0 ? Math.max(...Object.keys(classMap).map(Number)) : -1;
+                let newClassMap = { ...file_classMap };
+                let lastIndex = Object.keys(file_classMap).length > 0 ? Math.max(...Object.keys(file_classMap).map(Number)) : -1;
                 newlyDiscovered.forEach(label => {
                     lastIndex++;
                     newClassMap[lastIndex] = { label, color: generateRandomColor() };
                 });
-                setClassMap(newClassMap);
+                setFile_classMap(newClassMap);
                 currentClassMap = newClassMap; // Use the updated map for conversion
             }
 
@@ -1121,8 +1149,8 @@ const FileOperate: React.FC = () => {
             setNetlistCdlContent(resultData.netlist_cdl || '');
 
             const newOp: Operation = { type: 'ai_annotate', yoloData: (newYoloContent || '').split('\n'), previousYoloContent: previousYolo };
-            setOperationHistory(prev => ({ ...prev, [currentIndex]: [...(prev[currentIndex] || []), newOp] }));
-            setRedoHistory(prev => ({ ...prev, [currentIndex]: [] }));
+            setFile_operationHistory(prev => ({ ...prev, [file_currentIndex]: [...(prev[file_currentIndex] || []), newOp] }));
+            setFile_redoHistory(prev => ({ ...prev, [file_currentIndex]: [] }));
             setRedrawTrigger(p => p + 1);
             message.success({ content: t.operationSuccessful, key: 'ai-annotation' });
 
@@ -1135,13 +1163,13 @@ const FileOperate: React.FC = () => {
         }
     };
 
-    const handleAddClass = () => { const existingIndices = Object.keys(classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setClassMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomColor() } })); };
-    const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setClassMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
-    const handleDeleteClass = (indexToDelete: number) => { const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${classMap[indexToDelete]?.label}`) : `确认删除类别 [${indexToDelete}] ${classMap[indexToDelete]?.label}?`; Modal.confirm({ title: title, content: t.deleteClassConfirmContent, okText: t.confirmDelete, cancelText: t.cancel, okType: 'danger', onOk: () => { const newClassMap = { ...classMap }; delete newClassMap[indexToDelete]; setClassMap(newClassMap); if (currentClassIndex === indexToDelete) { const firstKey = Object.keys(newClassMap)[0]; setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0); } message.success(t.classDeleted.replace('%s', classMap[indexToDelete]?.label || '')); } }); };
+    const handleAddClass = () => { const existingIndices = Object.keys(file_classMap).map(Number); const newIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0; setFile_classMap(prev => ({ ...prev, [newIndex]: { label: 'new_class', color: generateRandomColor() } })); };
+    const handleUpdateClass = (index: number, field: 'label' | 'color', value: string) => { setFile_classMap(prev => ({ ...prev, [index]: { ...prev[index], [field]: value } })); };
+    const handleDeleteClass = (indexToDelete: number) => { const title = t.deleteClassConfirmTitle ? t.deleteClassConfirmTitle.replace('%s', `[${indexToDelete}] ${file_classMap[indexToDelete]?.label}`) : `确认删除类别 [${indexToDelete}] ${file_classMap[indexToDelete]?.label}?`; Modal.confirm({ title: title, content: t.deleteClassConfirmContent, okText: t.confirmDelete, cancelText: t.cancel, okType: 'danger', onOk: () => { const newClassMap = { ...file_classMap }; delete newClassMap[indexToDelete]; setFile_classMap(newClassMap); if (currentClassIndex === indexToDelete) { const firstKey = Object.keys(newClassMap)[0]; setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0); } message.success(t.classDeleted.replace('%s', file_classMap[indexToDelete]?.label || '')); } }); };
 
     const handleExportClasses = () => {
         const exportObj: { [key: string]: string } = {};
-        for (const key in classMap) { exportObj[key] = classMap[key].label; }
+        for (const key in file_classMap) { exportObj[key] = file_classMap[key].label; }
         const classText = `classes = ${JSON.stringify(exportObj, null, 4)}`;
         const blob = new Blob([classText], { type: 'text/plain;charset=utf-8' });
         saveAs(blob, 'classes.txt');
@@ -1177,7 +1205,7 @@ const FileOperate: React.FC = () => {
                 }
                 if (!hasEntries) throw new Error("在文件中未找到有效的类别条目。");
 
-                setClassMap(newClassMap);
+                setFile_classMap(newClassMap);
                 // Set current class index to the first available, or 0 if map is empty
                 const firstKey = Object.keys(newClassMap)[0];
                 setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0);
@@ -1191,6 +1219,18 @@ const FileOperate: React.FC = () => {
         reader.readAsText(file);
         if (event.target) event.target.value = ''; // Clear the input so same file can be selected again
     };
+
+    const getOperationDescription = useCallback((op: Operation): string => {
+        switch (op.type) {
+            case 'draw': return t.opDraw.replace('%s', op.yoloData.map(line => line.split(' ')[0]).join(', '));
+            case 'ai_annotate': return t.opAi.replace('%s', String(op.yoloData.length));
+            case 'stain': return t.opStain.replace('%s', op.boxName);
+            case 'delete': return t.opDelete.replace('%s', op.deletedLines.map(l => l.content.split(' ')[0]).join(', '));
+            case 'json_change': return t.opJson;
+            case 'move': return t.opMove;
+            default: return 'Unknown Operation';
+        }
+    }, [t]);
 
     const isSelectedForEdit = (item: { name: string }) => activeTool === 'select' && item.name === selectedBoxName;
 
@@ -1209,15 +1249,20 @@ const FileOperate: React.FC = () => {
         <Layout className="unified-layout">
             <Header className="unified-top-header">
                 <div className="header-left-controls">
+                    {!isExplorerVisible && (
+                        <Tooltip title={t.showExplorer} placement="right">
+                            <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsExplorerVisible(true)} />
+                        </Tooltip>
+                    )}
                 </div>
                 <Space className="header-center-controls">
-                    <Button onClick={() => handleNavigation(-1)} disabled={currentIndex === 0 || !hasWorkspace || disabledUI} icon={<FontAwesomeIcon icon={faArrowLeft} />} />
-                    <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentFile}: ${currentImageDetails.name} (${currentIndex + 1}/${imageKeys.length})` : t.noImages}</Text>
-                    <Button onClick={() => handleNavigation(1)} disabled={currentIndex >= imageKeys.length - 1 || !hasWorkspace || disabledUI} icon={<FontAwesomeIcon icon={faArrowRight} />} />
+                    <Button onClick={() => handleNavigation(-1)} disabled={file_currentIndex === 0 || !hasWorkspace || disabledUI} icon={<FontAwesomeIcon icon={faArrowLeft} />} />
+                    <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentFile}: ${currentImageDetails.name} (${file_currentIndex + 1}/${imageKeys.length})` : t.noImages}</Text>
+                    <Button onClick={() => handleNavigation(1)} disabled={file_currentIndex >= imageKeys.length - 1 || !hasWorkspace || disabledUI} icon={<FontAwesomeIcon icon={faArrowRight} />} />
                 </Space>
                 <div className="header-right-controls">
-                    <Tooltip title={t.undo}><Button onClick={handleUndo} icon={<FontAwesomeIcon icon={faUndo} />} disabled={(operationHistory[currentIndex] || []).length === 0 || disabledUI} /></Tooltip>
-                    <Tooltip title={t.redo}><Button onClick={handleRedo} icon={<FontAwesomeIcon icon={faRedo} />} disabled={(redoHistory[currentIndex] || []).length === 0 || disabledUI} /></Tooltip>
+                    <Tooltip title={t.undo}><Button onClick={handleUndo} icon={<FontAwesomeIcon icon={faUndo} />} disabled={(file_operationHistory[file_currentIndex] || []).length === 0 || disabledUI} /></Tooltip>
+                    <Tooltip title={t.redo}><Button onClick={handleRedo} icon={<FontAwesomeIcon icon={faRedo} />} disabled={(file_redoHistory[file_currentIndex] || []).length === 0 || disabledUI} /></Tooltip>
                 </div>
             </Header>
             <Layout hasSider>
@@ -1233,6 +1278,56 @@ const FileOperate: React.FC = () => {
                         <Tooltip title={t.aiAnnotation} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentImageDetails || disabledUI} /></Tooltip>
                     </Space>
                 </Sider>
+                <Sider
+                    width={isExplorerVisible ? explorerWidth : 0}
+                    className="unified-explorer-sider"
+                    theme="light"
+                    collapsible
+                    collapsed={!isExplorerVisible}
+                    trigger={null}
+                    collapsedWidth={0}
+                >
+                    <div className="file-explorer-container">
+                        <Flex justify="space-between" align="center" style={{ marginBottom: 8 }}>
+                            <Title level={5} style={{ margin: 0 }} >{t.fileExplorer}</Title>
+                            <Tooltip title={t.hideExplorer}>
+                                <Button type="text" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsExplorerVisible(false)} />
+                            </Tooltip>
+                        </Flex>
+                        <Input.Search
+                            placeholder={t.searchFiles}
+                            onChange={(e) => setFileSearchTerm(e.target.value)}
+                            allowClear
+                        />
+                        <div className="file-list-container">
+                            <List
+                                size="small"
+                                dataSource={imageKeys.filter(key => key.toLowerCase().includes(fileSearchTerm.toLowerCase()))}
+                                renderItem={(item, index) => {
+                                    const originalIndex = imageKeys.findIndex(key => key === item);
+                                    return (
+                                        <List.Item
+                                            onClick={() => handleNavigateToIndex(originalIndex)}
+                                            style={{
+                                                cursor: 'pointer',
+                                                backgroundColor: originalIndex === file_currentIndex ? 'var(--primary-color-light)' : 'transparent',
+                                                padding: '4px 8px',
+                                                borderRadius: '4px'
+                                            }}
+                                        >
+                                            <Text ellipsis title={item}>
+                                                {`[${originalIndex + 1}] ${item}`}
+                                            </Text>
+                                        </List.Item>
+                                    );
+                                }}
+                                locale={{ emptyText: <Text type="secondary">{t.noFile}</Text> }}
+                            />
+                        </div>
+                    </div>
+                </Sider>
+                <div className="resizer-horizontal" onMouseDown={() => setIsResizingExplorer(true)} style={{ display: isExplorerVisible ? 'flex' : 'none' }} />
+
                 <Layout className="main-content-wrapper">
                     <Content className="canvas-content">
                         {isTransitioning && <div className="transition-overlay"><Spin size="large" /></div>}
@@ -1256,23 +1351,19 @@ const FileOperate: React.FC = () => {
                             </div>
                         )}
                     </Content>
-                    {!isInspectorVisible && (
-                        <Tooltip title={t.showPanel} placement="left">
-                            <Button className="show-inspector-handle" type="primary" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsInspectorVisible(true)} />
-                        </Tooltip>
-                    )}
                 </Layout>
-                <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none', cursor: 'ew-resize' }} />
+
+                <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none' }} />
                 <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsible collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
                     <Tabs defaultActiveKey="1" className="inspector-tabs"
-                          tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}
+                          tabBarExtraContent={ <Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip> }
                     >
                         <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1" disabled={disabledUI}>
                             <div className="tab-pane-content">
                                 <div style={{ flexShrink: 0 }}>
                                     <Form layout="vertical">
                                         <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
-                                            <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
+                                            <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(file_classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
                                         </Form.Item>
                                         <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
                                         <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
@@ -1295,7 +1386,7 @@ const FileOperate: React.FC = () => {
                                                     header={
                                                         <Flex justify="space-between" align="center" style={{ width: '100%' }}>
                                                             <Space>
-                                                                <div className="color-indicator" style={{ backgroundColor: classMap[item.classIdx]?.color || '#808080' }} />
+                                                                <div className="color-indicator" style={{ backgroundColor: file_classMap[item.classIdx]?.color || '#808080' }} />
                                                                 <Text className="category-name-text" title={item.name} ellipsis>{item.name}</Text>
                                                             </Space>
                                                             <Tooltip title={t.deleteAnnotationTooltip}>
@@ -1306,7 +1397,7 @@ const FileOperate: React.FC = () => {
                                                     className="annotation-panel-item"
                                                 >
                                                     <Descriptions bordered size="small" column={1} className="annotation-details">
-                                                        <Descriptions.Item label={t.category}>{classMap[item.classIdx]?.label || 'N/A'}</Descriptions.Item>
+                                                        <Descriptions.Item label={t.category}>{file_classMap[item.classIdx]?.label || 'N/A'}</Descriptions.Item>
                                                         <Descriptions.Item label="Center X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.x} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 2, v)} /> : item.x.toFixed(4)}</Descriptions.Item>
                                                         <Descriptions.Item label="Center Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.y} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 3, v)} /> : item.y.toFixed(4)}</Descriptions.Item>
                                                         <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.w} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 4, v)} /> : item.w.toFixed(4)}</Descriptions.Item>
@@ -1321,22 +1412,17 @@ const FileOperate: React.FC = () => {
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4" disabled={disabledUI}>
                             <div className="tab-pane-content">
-                                {/* Bedrock Change: Replaced vertical stack with nested tabs */}
                                 <Tabs defaultActiveKey="yolo" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                                     <TabPane tab="YOLO Data (.txt)" key="yolo" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                        {/* Bedrock Change: Added specific placeholder */}
                                         <textarea value={currentYoloContent || ""} className="data-content-textarea" readOnly placeholder="YOLO format data (e.g., box coordinates and class IDs) will appear here." />
                                     </TabPane>
                                     <TabPane tab="Annotation Data (.json)" key="json" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                        {/* Bedrock Change: Added specific placeholder */}
                                         <textarea value={currentJsonContent || "{}"} className="data-content-textarea" readOnly placeholder="JSON annotation data will appear here." />
                                     </TabPane>
                                     <TabPane tab="Netlist (.scs)" key="scs" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                        {/* Bedrock Change: Added specific placeholder */}
                                         <textarea value={netlistScsContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (SCS format) will be shown here after processing." />
                                     </TabPane>
                                     <TabPane tab="Netlist (.cdl)" key="cdl" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                        {/* Bedrock Change: Added specific placeholder */}
                                         <textarea value={netlistCdlContent || ""} className="data-content-textarea" readOnly placeholder="Netlist (CDL format) will be shown here after processing." />
                                     </TabPane>
                                 </Tabs>
@@ -1347,7 +1433,7 @@ const FileOperate: React.FC = () => {
                                 <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
                                 <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
                                 <div className="class-list-container">
-                                    <List size="small" dataSource={Object.entries(classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
+                                    <List size="small" dataSource={Object.entries(file_classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
                                 </div>
                                 <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16 }}>{t.addClass}</Button>
                             </div>
@@ -1356,6 +1442,23 @@ const FileOperate: React.FC = () => {
                             <div className="tab-pane-content">
                                 <Title level={5}>{t.settings}</Title>
                                 <p>此页面暂无特定设置。</p>
+                            </div>
+                        </TabPane>
+                        <TabPane tab={<Tooltip title={t.annotationHistory} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="5" disabled={disabledUI}>
+                            <div className="tab-pane-content" style={{ padding: '8px', gap: '8px' }}>
+                                <div className="history-list-container">
+                                    <List
+                                        size="small"
+                                        dataSource={file_operationHistory[file_currentIndex] || []}
+                                        renderItem={(op, index) => (
+                                            <List.Item style={{ padding: '4px 8px' }}>
+                                                <Text ellipsis title={getOperationDescription(op)}>{`${index + 1}. ${getOperationDescription(op)}`}</Text>
+                                            </List.Item>
+                                        )}
+                                        locale={{ emptyText: <Text type="secondary">{t.noHistory}</Text> }}
+                                        // reversed
+                                    />
+                                </div>
                             </div>
                         </TabPane>
                     </Tabs>

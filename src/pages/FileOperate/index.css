@@ -77,6 +77,27 @@
   border-color: var(--primary-color-light) !important;
 }
 
+/* Bedrock Change: Left Explorer Sider */
+.unified-explorer-sider {
+  background-color: var(--background-color) !important;
+  border-right: 1px solid var(--border-color);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.show-explorer-handle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 0 8px 8px 0 !important;
+  z-index: 10;
+  width: 24px;
+  height: 48px;
+  padding: 0;
+}
+
 /* --- Main Content & Canvas --- */
 .main-content-wrapper {
   position: relative;
@@ -334,5 +355,35 @@
 .ant-collapse-ghost>.ant-collapse-item>.ant-collapse-content {
   padding: 0;
 }
+
+/* Bedrock Change: File Explorer & History List Styles */
+.file-explorer-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+}
+
+.file-list-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.history-list-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+  min-height: 100px; /* Ensure it has some height */
+}
+
+.file-list-container .ant-list-item:hover {
+  background-color: var(--primary-color-light) !important;
+}
+
 
 /* END OF FILE: src/pages/FileOperate/index.css */

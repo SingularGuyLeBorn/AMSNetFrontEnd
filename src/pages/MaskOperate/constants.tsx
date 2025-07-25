@@ -157,6 +157,13 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     regionDeleteMode: '区域删除模式',
     fullyContained: '全包删除',
     intersecting: '接触删除',
+    fileExplorer: '文件浏览器',
+    searchFiles: '搜索文件...',
+    annotationHistory: '标注历史',
+    noHistory: '此图片无历史记录',
+    showExplorer: '显示文件浏览器',
+    hideExplorer: '隐藏文件浏览器',
+    historyEntry: '新增 %s, 删除 %s, 修改 %s',
   },
   en: {
     appName: 'Bedrock Annotator',
@@ -205,6 +212,13 @@ export const translations: { [key: string]: { [key: string]: string } } = {
     regionDeleteMode: 'Region Delete Mode',
     fullyContained: 'Fully Contained',
     intersecting: 'Intersecting',
+    fileExplorer: 'File Explorer',
+    searchFiles: 'Search files...',
+    annotationHistory: 'Annotation History',
+    noHistory: 'No history for this image',
+    showExplorer: 'Show File Explorer',
+    hideExplorer: 'Hide File Explorer',
+    historyEntry: 'Added: %s, Removed: %s, Changed: %s',
   },
 };
 // END OF FILE: src/pages/MaskOperate/constants.tsx

@@ -1,4 +1,4 @@
-// FILE: src / pages / MaskOperate / index.tsx
+// FILE: src/pages/MaskOperate/index.tsx
 import { workspaceService } from "@/models/workspaceService";
 import {
   faChevronLeft, faChevronRight,
@@ -8,6 +8,8 @@ import {
   faEraser,
   faFileExport,
   faFileImport,
+  faFolderTree,
+  faHistory,
   faList,
   faMinusCircle,
   faMousePointer,
@@ -188,12 +190,39 @@ export const convertViewToApi = (viewAnnotations: ViewAnnotation[]): Pick<ApiRes
   return { key_points, segments, cpnts };
 };
 
+const diffAnnotations = (before: ViewAnnotation[], after: ViewAnnotation[]): { added: number, removed: number, changed: number } => {
+  const beforeIds = new Map(before.map(a => [a.id, a]));
+  const afterIds = new Map(after.map(a => [a.id, a]));
+
+  let added = 0;
+  let removed = 0;
+  let changed = 0;
+
+  afterIds.forEach((anno, id) => {
+    if (!beforeIds.has(id)) {
+      added++;
+    } else {
+      // Simple check for changes by stringifying. More robust checks could be implemented.
+      if (JSON.stringify(beforeIds.get(id)) !== JSON.stringify(anno)) {
+        changed++;
+      }
+    }
+  });
+
+  beforeIds.forEach((_, id) => {
+    if (!afterIds.has(id)) {
+      removed++;
+    }
+  });
+
+  return { added, removed, changed };
+};
 
 const MaskOperate = () => {
   const { initialState } = useModel('@@initialState');
   const {
     imageKeys,
-    mask_currentIndex: currentImageIndex, setMask_currentIndex: setCurrentImageIndex,
+    mask_currentIndex, setMask_currentIndex,
     mask_allImageAnnotations, setMask_allImageAnnotations,
     mask_categories, setMask_categories,
     mask_categoryColors, setMask_categoryColors,
@@ -221,23 +250,33 @@ const MaskOperate = () => {
   const [isInspectorVisible, setIsInspectorVisible] = useState<boolean>(true);
   const [inspectorWidth, setInspectorWidth] = useState<number>(350);
   const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
+  const [explorerWidth, setExplorerWidth] = useState<number>(250);
+  const [isResizingExplorer, setIsResizingExplorer] = useState<boolean>(false);
+  const [isExplorerVisible, setIsExplorerVisible] = useState<boolean>(true);
   const [draggingState, setDraggingState] = useState<DraggingState>(null);
   const [regionSelectBox, setRegionSelectBox] = useState<RegionSelectBox | null>(null);
   const [regionDeleteMode, setRegionDeleteMode] = useState<RegionDeleteMode>('contain');
   const [canvasMousePos, setCanvasMousePos] = useState<Point>({ x: 0, y: 0 });
   const [isAiAnnotating, setIsAiAnnotating] = useState(false);
   const [isCurrentlyEditingId, setIsCurrentlyEditingId] = useState<string | null>(null);
+  const [fileSearchTerm, setFileSearchTerm] = useState('');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const magnifierCanvasRef = useRef<HTMLCanvasElement>(null);
   const classesFileRef = useRef<HTMLInputElement>(null);
+
+  // State for non-flicker drawing
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [mouseDownCoords, setMouseDownCoords] = useState<Point>({ x: 0, y: 0 });
+  const [canvasImageData, setCanvasImageData] = useState<ImageData | null>(null);
+
 
   const [isMagnifierVisible, setIsMagnifierVisible] = useState(false);
   const [magnifierPos, setMagnifierPos] = useState<Point>({ x: 900, y: 200 });
   const [isMouseOnCanvas, setIsMouseOnCanvas] = useState(false);
 
   const hasWorkspace = imageKeys.length > 0;
-  const currentImageKey = hasWorkspace ? imageKeys[currentImageIndex] : null;
+  const currentImageKey = hasWorkspace ? imageKeys[mask_currentIndex] : null;
   const disabledUI = isAppBusy; // Bedrock Change: UI lock is now driven by global state
 
   const currentApiJson = useMemo(() => {
@@ -252,8 +291,8 @@ const MaskOperate = () => {
     };
   }, [currentImageDetails, currentImageKey, mask_allImageAnnotations, localAnnotations, netlistScsContent, netlistCdlContent]);
 
-  const currentUndoStackSize = (mask_operationHistory[currentImageIndex] || []).length;
-  const currentRedoStackSize = (mask_redoHistory[currentImageIndex] || []).length;
+  const currentUndoStackSize = (mask_operationHistory[mask_currentIndex] || []).length;
+  const currentRedoStackSize = (mask_redoHistory[mask_currentIndex] || []).length;
 
   const loadDataForIndex = useCallback(async (index: number, signal: AbortSignal) => {
     setIsTransitioning(true); // For visual spinner
@@ -310,7 +349,7 @@ const MaskOperate = () => {
 
   const handleNavigation = useCallback(async (offset: number) => {
     if (isAppBusy) return;
-    const newIndex = currentImageIndex + offset;
+    const newIndex = mask_currentIndex + offset;
     if (newIndex >= 0 && newIndex < imageKeys.length) {
       if (currentImageKey) {
         const dirtyData: ImageAnnotationData = {
@@ -320,12 +359,27 @@ const MaskOperate = () => {
         setMask_allImageAnnotations(prev => ({ ...prev, [currentImageKey]: dirtyData }));
       }
       await workspaceService.saveLastIndices({ maskOperateIndex: newIndex });
-      setCurrentImageIndex(newIndex);
+      setMask_currentIndex(newIndex);
     }
-  }, [isAppBusy, currentImageIndex, imageKeys.length, currentImageKey, localAnnotations, currentApiJson, setMask_allImageAnnotations, setCurrentImageIndex]);
+  }, [isAppBusy, mask_currentIndex, imageKeys.length, currentImageKey, localAnnotations, currentApiJson, setMask_allImageAnnotations, setMask_currentIndex]);
+
+  const handleNavigateToIndex = useCallback(async (index: number) => {
+    if (isAppBusy || mask_currentIndex === index) return;
+    if (index >= 0 && index < imageKeys.length) {
+      if (currentImageKey) {
+        const dirtyData: ImageAnnotationData = {
+          viewAnnotations: localAnnotations,
+          apiJson: currentApiJson,
+        };
+        setMask_allImageAnnotations(prev => ({ ...prev, [currentImageKey]: dirtyData }));
+      }
+      await workspaceService.saveLastIndices({ maskOperateIndex: index });
+      setMask_currentIndex(index);
+    }
+  }, [isAppBusy, mask_currentIndex, imageKeys.length, currentImageKey, localAnnotations, currentApiJson, setMask_allImageAnnotations, setMask_currentIndex]);
 
   useEffect(() => {
-    if (!hasWorkspace || currentImageIndex < 0) {
+    if (!hasWorkspace || mask_currentIndex < 0) {
       return;
     }
 
@@ -337,7 +391,7 @@ const MaskOperate = () => {
 
     setAppBusy(true); // Lock the app
 
-    loadDataForIndex(currentImageIndex, controller.signal).finally(() => {
+    loadDataForIndex(mask_currentIndex, controller.signal).finally(() => {
       if (!controller.signal.aborted) {
         setAppBusy(false); // Unlock the app
       }
@@ -346,7 +400,7 @@ const MaskOperate = () => {
     return () => {
       controller.abort();
     }
-  }, [currentImageIndex, hasWorkspace, loadDataForIndex, setAppBusy]);
+  }, [mask_currentIndex, hasWorkspace, loadDataForIndex, setAppBusy]);
 
 
   const getResizeHandles = (box: ViewBoxAnnotation): { [key in ResizeHandle]?: { x: number, y: number, size: number, cursor: string } } => {
@@ -457,17 +511,6 @@ const MaskOperate = () => {
         else renderRectangle(selectedAnno, ctx, false, true);
       }
 
-      if (draggingState && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
-        const { startMousePos } = draggingState;
-        if (activeTool === 'rectangle') {
-          const previewRect: ViewBoxAnnotation = { id: 'preview', x: Math.min(startMousePos.x, canvasMousePos.x), y: Math.min(startMousePos.y, canvasMousePos.y), width: Math.abs(startMousePos.x - canvasMousePos.x), height: Math.abs(startMousePos.y - canvasMousePos.y), category: currentCategory, color: 'preview', sourceLineWidth: currentLineWidth };
-          renderRectangle(previewRect, ctx, true);
-        } else {
-          const previewDiag: ViewDiagonalAnnotation = { id: 'preview', points: [startMousePos, canvasMousePos], category: currentCategory, color: 'preview', thickness: currentLineWidth };
-          renderDiagonal(previewDiag, ctx, true);
-        }
-      }
-
       if (regionSelectBox) {
         ctx.fillStyle = 'rgba(64, 150, 255, 0.3)';
         ctx.strokeStyle = 'rgba(64, 150, 255, 0.8)';
@@ -490,7 +533,7 @@ const MaskOperate = () => {
       ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
       ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
     }
-  }, [currentImageDetails, localAnnotations, mask_selectedAnnotationId, activeTool, draggingState, canvasMousePos, t.noImages, renderDiagonal, renderRectangle, currentCategory, currentLineWidth, regionSelectBox, isTransitioning]);
+  }, [currentImageDetails, localAnnotations, mask_selectedAnnotationId, t.noImages, renderDiagonal, renderRectangle, regionSelectBox, isTransitioning]);
 
   const getScaledCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement> | { clientX: number, clientY: number }): Point => {
     const canvas = canvasRef.current;
@@ -522,9 +565,9 @@ const MaskOperate = () => {
     const sHeight = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
 
     magCtx.drawImage(
-      mainCanvas,
-      sx, sy, sWidth, sHeight,
-      0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE
+        mainCanvas,
+        sx, sy, sWidth, sHeight,
+        0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE
     );
 
     magCtx.strokeStyle = 'red';
@@ -559,12 +602,21 @@ const MaskOperate = () => {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizingInspector) return;
-      const newWidth = window.innerWidth - e.clientX;
-      if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
+      if (!isResizingInspector && !isResizingExplorer) return;
+      if (isResizingInspector) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
+      }
+      if(isResizingExplorer){
+        const newWidth = e.clientX - 60; // 60 is the tool sider width
+        if (newWidth > 150 && newWidth < 600) setExplorerWidth(newWidth);
+      }
     };
-    const handleMouseUp = () => setIsResizingInspector(false);
-    if (isResizingInspector) {
+    const handleMouseUp = () => {
+      setIsResizingInspector(false);
+      setIsResizingExplorer(false);
+    };
+    if (isResizingInspector || isResizingExplorer) {
       document.body.style.userSelect = 'none';
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
@@ -574,7 +626,7 @@ const MaskOperate = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingInspector]);
+  }, [isResizingInspector, isResizingExplorer]);
 
   useEffect(() => {
     const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
@@ -605,9 +657,9 @@ const MaskOperate = () => {
   const addUndoRecord = useCallback(() => {
     if (!currentImageDetails) return;
     const operation: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
-    setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: [...(prev[currentImageIndex] || []), operation] }));
-    setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: [] }));
-  }, [currentImageDetails, currentImageIndex, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory]);
+    setMask_operationHistory(prev => ({ ...prev, [mask_currentIndex]: [...(prev[mask_currentIndex] || []), operation] }));
+    setMask_redoHistory(prev => ({ ...prev, [mask_currentIndex]: [] }));
+  }, [currentImageDetails, mask_currentIndex, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory]);
 
   const updateGlobalAnnotations = useCallback((newViewAnnotations: ViewAnnotation[]) => {
     if (!currentImageKey) return;
@@ -655,24 +707,32 @@ const MaskOperate = () => {
   }, [localAnnotations, addUndoRecord, updateGlobalAnnotations, t, mask_selectedAnnotationId, setMask_selectedAnnotationId]);
 
   const performUndo = useCallback(() => {
-    const history = mask_operationHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
+    const history = mask_operationHistory[mask_currentIndex] || []; if (history.length === 0 || !currentImageDetails) return;
     const lastOp = history[history.length - 1];
     const redoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
-    setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: [redoOp, ...(prev[currentImageIndex] || [])] }));
+    setMask_redoHistory(prev => ({ ...prev, [mask_currentIndex]: [redoOp, ...(prev[mask_currentIndex] || [])] }));
     setLocalAnnotations(lastOp.previousViewAnnotations);
-    setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: history.slice(0, -1) }));
+    setMask_operationHistory(prev => ({ ...prev, [mask_currentIndex]: history.slice(0, -1) }));
     message.success(t.operationSuccessful);
-  }, [mask_operationHistory, currentImageIndex, currentImageDetails, localAnnotations, currentApiJson, setMask_redoHistory, setMask_operationHistory, t.operationSuccessful]);
+  }, [mask_operationHistory, mask_currentIndex, currentImageDetails, localAnnotations, currentApiJson, setMask_redoHistory, setMask_operationHistory, t.operationSuccessful]);
 
   const performRedo = useCallback(() => {
-    const history = mask_redoHistory[currentImageIndex] || []; if (history.length === 0 || !currentImageDetails) return;
+    const history = mask_redoHistory[mask_currentIndex] || []; if (history.length === 0 || !currentImageDetails) return;
     const redoOp = history[0];
     const undoOp: MaskUndoOperation = { imageId: currentImageDetails.name, previousViewAnnotations: localAnnotations, previousApiJson: currentApiJson };
-    setMask_operationHistory(prev => ({ ...prev, [currentImageIndex]: [...(prev[currentImageIndex] || []), undoOp] }));
+    setMask_operationHistory(prev => ({ ...prev, [mask_currentIndex]: [...(prev[mask_currentIndex] || []), undoOp] }));
     setLocalAnnotations(redoOp.previousViewAnnotations);
-    setMask_redoHistory(prev => ({ ...prev, [currentImageIndex]: history.slice(1) }));
+    setMask_redoHistory(prev => ({ ...prev, [mask_currentIndex]: history.slice(1) }));
     message.success(t.operationSuccessful);
-  }, [mask_redoHistory, currentImageIndex, currentImageDetails, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory, t.operationSuccessful]);
+  }, [mask_redoHistory, mask_currentIndex, currentImageDetails, localAnnotations, currentApiJson, setMask_operationHistory, setMask_redoHistory, t.operationSuccessful]);
+
+  const getHistoryEntryDescription = useCallback((before: ViewAnnotation[], after: ViewAnnotation[]): string => {
+    const { added, removed, changed } = diffAnnotations(before, after);
+    if (added === 0 && removed === 0 && changed === 0) {
+      return "No change";
+    }
+    return t.historyEntry.replace('%s', String(added)).replace('%s', String(removed)).replace('%s', String(changed));
+  }, [t.historyEntry]);
 
   const handleMagnifierMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -687,8 +747,19 @@ const MaskOperate = () => {
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!currentImageDetails || !canvasRef.current || e.button !== 0) return;
-
     const mousePos = getScaledCoords(e);
+
+    if (activeTool === 'rectangle' || activeTool === 'diagonal') {
+      if (!currentCategory) { message.warning(t.noCategoriesFound); return; }
+      setIsDrawing(true);
+      setMouseDownCoords(mousePos);
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        setCanvasImageData(ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height));
+      }
+      return;
+    }
+
     if (activeTool === 'select') {
       const selectedAnno = localAnnotations.find(a => a.id === mask_selectedAnnotationId);
       if (selectedAnno) {
@@ -727,9 +798,6 @@ const MaskOperate = () => {
       } else {
         setMask_selectedAnnotationId(null);
       }
-    } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
-      if (!currentCategory) { message.warning(t.noCategoriesFound); return; }
-      setDraggingState({ type: 'move', startMousePos: mousePos });
     } else if (activeTool === 'region-delete') {
       setDraggingState({ type: 'region-select', startMousePos: mousePos });
     }
@@ -738,6 +806,39 @@ const MaskOperate = () => {
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const currentCanvasMousePos = getScaledCoords(e);
     setCanvasMousePos(currentCanvasMousePos);
+
+    if (isDrawing && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
+      const canvas = canvasRef.current;
+      if (!canvas || !canvasImageData) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.putImageData(canvasImageData, 0, 0); // Restore from saved state
+
+      if (activeTool === 'rectangle') {
+        const previewRect: ViewBoxAnnotation = {
+          id: 'preview',
+          x: Math.min(mouseDownCoords.x, currentCanvasMousePos.x),
+          y: Math.min(mouseDownCoords.y, currentCanvasMousePos.y),
+          width: Math.abs(mouseDownCoords.x - currentCanvasMousePos.x),
+          height: Math.abs(mouseDownCoords.y - currentCanvasMousePos.y),
+          category: currentCategory,
+          color: 'preview',
+          sourceLineWidth: currentLineWidth
+        };
+        renderRectangle(previewRect, ctx, true);
+      } else { // 'diagonal'
+        const previewDiag: ViewDiagonalAnnotation = {
+          id: 'preview',
+          points: [mouseDownCoords, currentCanvasMousePos],
+          category: currentCategory,
+          color: 'preview',
+          thickness: currentLineWidth
+        };
+        renderDiagonal(previewDiag, ctx, true);
+      }
+      return;
+    }
 
     if (!draggingState || !currentImageDetails) {
       return;
@@ -780,8 +881,33 @@ const MaskOperate = () => {
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!draggingState || e.button !== 0) return;
+    if (e.button !== 0) return;
     const end = getScaledCoords(e);
+
+    if (isDrawing && (activeTool === 'rectangle' || activeTool === 'diagonal')) {
+      setIsDrawing(false);
+      setCanvasImageData(null);
+
+      const start = mouseDownCoords;
+      const color = mask_categoryColors[currentCategory] || '#cccccc';
+      if (activeTool === 'rectangle') {
+        const width = Math.abs(start.x - end.x);
+        const height = Math.abs(start.y - end.y);
+        if (width > 2 && height > 2) {
+          const newRect: ViewBoxAnnotation = { id: generateUniqueId(), x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width, height, category: currentCategory, color, sourceLineWidth: currentLineWidth };
+          addAnnotation(newRect);
+        }
+      } else { // 'diagonal'
+        const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
+        if (length > 2) {
+          const newDiag: ViewDiagonalAnnotation = { id: generateUniqueId(), points: [start, end], category: currentCategory, color, thickness: currentLineWidth };
+          addAnnotation(newDiag);
+        }
+      }
+      return;
+    }
+
+    if (!draggingState) return;
 
     if (activeTool === 'select') {
       updateGlobalAnnotations(localAnnotations);
@@ -827,22 +953,6 @@ const MaskOperate = () => {
         message.success(`删除了 ${idsToDelete.size} 个标注。`);
       }
       setRegionSelectBox(null);
-    } else if (activeTool === 'rectangle' || activeTool === 'diagonal') {
-      const start = draggingState.startMousePos;
-      const color = mask_categoryColors[currentCategory] || '#cccccc';
-      if (activeTool === 'rectangle') {
-        const width = Math.abs(start.x - end.x); const height = Math.abs(start.y - end.y);
-        if (width > 2 && height > 2) {
-          const newRect: ViewBoxAnnotation = { id: generateUniqueId(), x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width, height, category: currentCategory, color, sourceLineWidth: currentLineWidth };
-          addAnnotation(newRect);
-        }
-      } else if (activeTool === 'diagonal') {
-        const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
-        if (length > 2) {
-          const newDiag: ViewDiagonalAnnotation = { id: generateUniqueId(), points: [start, end], category: currentCategory, color, thickness: currentLineWidth };
-          addAnnotation(newDiag);
-        }
-      }
     }
     setDraggingState(null);
   };
@@ -986,10 +1096,10 @@ const MaskOperate = () => {
               const filteredKeyPoints = (currentAnnos.apiJson.key_points || []).filter(kp => kp.net !== className);
               const filteredKeyPointIds = new Set(filteredKeyPoints.map(kp => kp.id));
               const filteredSegments = (currentAnnos.apiJson.segments || []).filter(
-                seg => filteredKeyPointIds.has(seg.src_key_point_id) && filteredKeyPointIds.has(seg.dst_key_point_id)
+                  seg => filteredKeyPointIds.has(seg.src_key_point_id) && filteredKeyPointIds.has(seg.dst_key_point_id)
               );
               const filteredCpnts = (currentAnnos.apiJson.cpnts || []).filter(
-                cpnt => cpnt.type !== className
+                  cpnt => cpnt.type !== className
               );
 
               currentAnnos.apiJson.key_points = filteredKeyPoints;
@@ -1082,163 +1192,236 @@ const MaskOperate = () => {
     }
   }
 
+  // @ts-ignore
   return (
-    <Layout className="unified-layout">
-      <Header className="unified-top-header">
-        <div className="header-left-controls">
-        </div>
-        <Space className="header-center-controls">
-          <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => handleNavigation(-1)} disabled={!hasWorkspace || currentImageIndex === 0 || disabledUI} />
-          <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage}: ${currentImageDetails.name} (${currentImageIndex + 1}/${imageKeys.length})` : t.noImages}</Text>
-          <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => handleNavigation(1)} disabled={!hasWorkspace || currentImageIndex >= imageKeys.length - 1 || disabledUI} />
-        </Space>
-        <div className="header-right-controls">
-          <Tooltip title={t.undo}><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={currentUndoStackSize === 0 || disabledUI} /></Tooltip>
-          <Tooltip title={t.redo}><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={currentRedoStackSize === 0 || disabledUI} /></Tooltip>
-        </div>
-      </Header>
-      <Layout hasSider>
-        <Sider width={60} className="unified-tool-sider" theme="light">
-          <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
-            <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
-            <Tooltip title={t.magnifier} placement="right"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
-            <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
-            <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
-            <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasWorkspace || disabledUI} /></Tooltip>
-            <Tooltip title={t.regionDelete} placement="right"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={!hasWorkspace || disabledUI} /></Tooltip>
-            <Divider style={{ margin: '8px 0' }} />
-            <Tooltip title={t.aiAnnotate} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentImageDetails || disabledUI} /></Tooltip>
-          </Space>
-        </Sider>
-        <Layout className="main-content-wrapper">
-          <Content className="canvas-content">
-            {isTransitioning && <div className="transition-overlay"><Spin size="large" /></div>}
-            <div className={`canvas-wrapper`}>
-              <canvas ref={canvasRef} onMouseDown={disabledUI ? undefined : handleCanvasMouseDown} onMouseMove={disabledUI ? undefined : handleCanvasMouseMove} onMouseUp={disabledUI ? undefined : handleCanvasMouseUp} onClick={disabledUI ? undefined : handleCanvasClick} className={getCanvasCursor()} onMouseEnter={() => setIsMouseOnCanvas(true)} onMouseLeave={() => setIsMouseOnCanvas(false)} />
-            </div>
-            {isMagnifierVisible && (
-              <div style={{ position: 'fixed', top: magnifierPos.y, left: magnifierPos.x, width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, border: '2px solid #4096ff', borderRadius: '50%', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', cursor: 'move', overflow: 'hidden', }} onMouseDown={handleMagnifierMouseDown} >
-                <canvas ref={magnifierCanvasRef} width={MAGNIFIER_SIZE} height={MAGNIFIER_SIZE} style={{ cursor: 'none' }} />
-              </div>
+      <Layout className="unified-layout">
+        <Header className="unified-top-header">
+          <div className="header-left-controls">
+            {!isExplorerVisible && (
+                <Tooltip title={t.showExplorer} placement="right">
+                  <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsExplorerVisible(true)} />
+                </Tooltip>
             )}
-          </Content>
-          {!isInspectorVisible && (<Tooltip title={t.showPanel} placement="left"><Button className="show-inspector-handle" type="primary" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsInspectorVisible(true)} /></Tooltip>)}
-        </Layout>
-        <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none', cursor: 'ew-resize' }} />
-        <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
-          <Tabs defaultActiveKey="1" className="inspector-tabs" tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}>
-            <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1" disabled={disabledUI}>
-              <div className="tab-pane-content">
-                {hasWorkspace && localAnnotations.length > 0 ? (
-                  <div className="annotation-collapse-container">
-                    <Collapse accordion activeKey={mask_selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setMask_selectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost>
-                      {localAnnotations.map((item) => (
-                        <Panel key={item.id} className="annotation-panel-item" header={
-                          <Flex justify="space-between" align="center" style={{ width: '100%' }}>
-                            <Space onClick={(e) => e.stopPropagation()}>
-                              <div className="color-indicator" style={{ backgroundColor: item.color }} />
-                              <Text className="category-name-text" title={item.category} ellipsis>{item.category}</Text>
-                            </Space>
-                            <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
-                          </Flex>}>
-                          <Descriptions bordered size="small" column={1} className="annotation-details">
-                            {'width' in item ? (
-                              <>
-                                <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
-                                <Descriptions.Item label="X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { x: v || 0 })} /> : item.x.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { y: v || 0 })} /> : item.y.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.width} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { width: v || 1 })} /> : item.width.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.height} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { height: v || 1 })} /> : item.height.toFixed(1)}</Descriptions.Item>
-                              </>
-                            ) : (
-                              <>
-                                <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
-                                <Descriptions.Item label="P1.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], x: v || 0 }, item.points[1]] })} /> : item.points[0].x.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="P1.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], y: v || 0 }, item.points[1]] })} /> : item.points[0].y.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="P2.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], x: v || 0 }] })} /> : item.points[1].x.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label="P2.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], y: v || 0 }] })} /> : item.points[1].y.toFixed(1)}</Descriptions.Item>
-                                <Descriptions.Item label={t.thicknessLabel}>{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.thickness} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { thickness: v || 1 })} /> : item.thickness}</Descriptions.Item>
-                              </>
-                            )}
-                          </Descriptions>
-                        </Panel>
-                      ))}
-                    </Collapse>
+          </div>
+          <Space className="header-center-controls">
+            <Button icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => handleNavigation(-1)} disabled={!hasWorkspace || mask_currentIndex === 0 || disabledUI} />
+            <Text className="current-file-text" title={currentImageDetails?.name}>{currentImageDetails ? `${t.currentImage}: ${currentImageDetails.name} (${mask_currentIndex + 1}/${imageKeys.length})` : t.noImages}</Text>
+            <Button icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => handleNavigation(1)} disabled={!hasWorkspace || mask_currentIndex >= imageKeys.length - 1 || disabledUI} />
+          </Space>
+          <div className="header-right-controls">
+            <Tooltip title={t.undo}><Button icon={<FontAwesomeIcon icon={faUndo} />} onClick={performUndo} disabled={currentUndoStackSize === 0 || disabledUI} /></Tooltip>
+            <Tooltip title={t.redo}><Button icon={<FontAwesomeIcon icon={faRedo} />} onClick={performRedo} disabled={currentRedoStackSize === 0 || disabledUI} /></Tooltip>
+          </div>
+        </Header>
+        <Layout hasSider>
+          <Sider width={60} className="unified-tool-sider" theme="light">
+            <Space direction="vertical" align="center" style={{ width: '100%', paddingTop: '16px' }}>
+              <Tooltip title={t.selectTool} placement="right"><Button onClick={() => setActiveTool('select')} type={activeTool === 'select' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faMousePointer} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
+              <Tooltip title={t.magnifier} placement="right"><Button onClick={() => setIsMagnifierVisible(p => !p)} type={isMagnifierVisible ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faSearchPlus} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
+              <Tooltip title={t.rectTool} placement="right"><Button onClick={() => setActiveTool('rectangle')} type={activeTool === 'rectangle' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faPaintBrush} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
+              <Tooltip title={t.diagonalTool} placement="right"><Button onClick={() => setActiveTool('diagonal')} type={activeTool === 'diagonal' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faDrawPolygon} />} disabled={!hasWorkspace || disabledUI} /></Tooltip>
+              <Tooltip title={t.deleteTool} placement="right"><Button onClick={() => setActiveTool('delete')} type={activeTool === 'delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faTrash} />} danger={activeTool === 'delete'} disabled={!hasWorkspace || disabledUI} /></Tooltip>
+              <Tooltip title={t.regionDelete} placement="right"><Button onClick={() => setActiveTool('region-delete')} type={activeTool === 'region-delete' ? 'primary' : 'text'} className="tool-button" icon={<FontAwesomeIcon icon={faEraser} />} danger={activeTool === 'region-delete'} disabled={!hasWorkspace || disabledUI} /></Tooltip>
+              <Divider style={{ margin: '8px 0' }} />
+              <Tooltip title={t.aiAnnotate} placement="right"><Button onClick={handleAiAnnotation} type="text" className="tool-button" icon={<FontAwesomeIcon icon={faRobot} />} loading={isAiAnnotating} disabled={!currentImageDetails || disabledUI} /></Tooltip>
+            </Space>
+          </Sider>
+          <Sider
+              width={isExplorerVisible ? explorerWidth : 0}
+              className="unified-explorer-sider"
+              theme="light"
+              collapsible
+              collapsed={!isExplorerVisible}
+              trigger={null}
+              collapsedWidth={0}
+          >
+            <div className="file-explorer-container">
+              <Flex justify="space-between" align="center" style={{ marginBottom: 8 }}>
+                <Title level={5} style={{ margin: 0 }} >{t.fileExplorer}</Title>
+                <Tooltip title={t.hideExplorer}>
+                  <Button type="text" icon={<FontAwesomeIcon icon={faChevronLeft} />} onClick={() => setIsExplorerVisible(false)} />
+                </Tooltip>
+              </Flex>
+              <Input.Search
+                  placeholder={t.searchFiles}
+                  onChange={(e) => setFileSearchTerm(e.target.value)}
+                  allowClear
+              />
+              <div className="file-list-container">
+                <List
+                    size="small"
+                    dataSource={imageKeys.filter(key => key.toLowerCase().includes(fileSearchTerm.toLowerCase()))}
+                    renderItem={(item) => {
+                      const originalIndex = imageKeys.findIndex(key => key === item);
+                      return (
+                          <List.Item
+                              onClick={() => handleNavigateToIndex(originalIndex)}
+                              style={{
+                                cursor: 'pointer',
+                                backgroundColor: originalIndex === mask_currentIndex ? 'var(--primary-color-light)' : 'transparent',
+                                padding: '4px 8px',
+                                borderRadius: '4px'
+                              }}
+                          >
+                            <Text ellipsis title={item}>
+                              {`[${originalIndex + 1}] ${item}`}
+                            </Text>
+                          </List.Item>
+                      );
+                    }}
+                    locale={{ emptyText: <Text type="secondary">{t.noImages}</Text> }}
+                />
+              </div>
+            </div>
+          </Sider>
+          <div className="resizer-horizontal" onMouseDown={() => setIsResizingExplorer(true)} style={{ display: isExplorerVisible ? 'flex' : 'none' }} />
+          <Layout className="main-content-wrapper">
+            <Content className="canvas-content">
+              {isTransitioning && <div className="transition-overlay"><Spin size="large" /></div>}
+              <div className={`canvas-wrapper`}>
+                <canvas ref={canvasRef} onMouseDown={disabledUI ? undefined : handleCanvasMouseDown} onMouseMove={disabledUI ? undefined : handleCanvasMouseMove} onMouseUp={disabledUI ? undefined : handleCanvasMouseUp} onClick={disabledUI ? undefined : handleCanvasClick} className={getCanvasCursor()} onMouseEnter={() => setIsMouseOnCanvas(true)} onMouseLeave={() => setIsMouseOnCanvas(false)} />
+              </div>
+              {isMagnifierVisible && (
+                  <div style={{ position: 'fixed', top: magnifierPos.y, left: magnifierPos.x, width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, border: '2px solid #4096ff', borderRadius: '50%', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', cursor: 'move', overflow: 'hidden', }} onMouseDown={handleMagnifierMouseDown} >
+                    <canvas ref={magnifierCanvasRef} width={MAGNIFIER_SIZE} height={MAGNIFIER_SIZE} style={{ cursor: 'none' }} />
                   </div>
-                ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{hasWorkspace ? t.noAnnotations : t.noImages}</Text>}
-              </div>
-            </TabPane>
-            <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4" disabled={disabledUI}>
-              <div className="tab-pane-content">
-                {/* Bedrock Change: Replaced vertical stack with nested tabs */}
-                <Tabs defaultActiveKey="core" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <TabPane tab="Core Annotation Data" key="core" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                    {/* Bedrock Change: Added specific placeholder */}
-                    <textarea className="data-content-textarea" readOnly value={JSON.stringify(convertViewToApi(localAnnotations), null, 2)} placeholder="Core annotation data (key points, segments, components) will appear here." />
-                  </TabPane>
-                  <TabPane tab="Netlist (.scs)" key="scs" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                    {/* Bedrock Change: Added specific placeholder */}
-                    <textarea className="data-content-textarea" readOnly value={netlistScsContent || ""} placeholder="Netlist (SCS format) will be shown here after processing." />
-                  </TabPane>
-                  <TabPane tab="Netlist (.cdl)" key="cdl" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                    {/* Bedrock Change: Added specific placeholder */}
-                    <textarea className="data-content-textarea" readOnly value={netlistCdlContent || ""} placeholder="Netlist (CDL format) will be shown here after processing." />
-                  </TabPane>
-                </Tabs>
-              </div>
-            </TabPane>
-            <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2" disabled={disabledUI}>
-              <div className="tab-pane-content">
-                <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
-                  <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
-                  <Space.Compact>
-                    <Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
-                    <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
-                  </Space.Compact>
-                </Flex>
-                <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{ display: 'none' }} />
-                <div className="class-list-container">
-                  <List size="small" dataSource={mask_categories} renderItem={(cat: string) => (
-                    <List.Item>
-                      <div className="class-management-item">
-                        <input type="color" value={mask_categoryColors[cat] || '#cccccc'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value)} className="color-picker-input" />
-                        <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} placeholder={t.className} />
-                        <Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
+              )}
+            </Content>
+          </Layout>
+          <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none' }} />
+          <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
+            <Tabs defaultActiveKey="1" className="inspector-tabs" tabBarExtraContent={<Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip>}>
+              <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1" disabled={disabledUI}>
+                <div className="tab-pane-content">
+                  {hasWorkspace && localAnnotations.length > 0 ? (
+                      <div className="annotation-collapse-container">
+                        <Collapse accordion activeKey={mask_selectedAnnotationId || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setMask_selectedAnnotationId(newKey); setIsCurrentlyEditingId(null); }} ghost>
+                          {localAnnotations.map((item) => (
+                              <Panel key={item.id} className="annotation-panel-item" header={
+                                <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+                                  <Space onClick={(e) => e.stopPropagation()}>
+                                    <div className="color-indicator" style={{ backgroundColor: item.color }} />
+                                    <Text className="category-name-text" title={item.category} ellipsis>{item.category}</Text>
+                                  </Space>
+                                  <Tooltip title={t.deleteAnnotationTooltip}><Button size="small" type="text" danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={(e) => { e.stopPropagation(); removeAnnotationById(item.id); }} /></Tooltip>
+                                </Flex>}>
+                                <Descriptions bordered size="small" column={1} className="annotation-details">
+                                  {'width' in item ? (
+                                      <>
+                                        <Descriptions.Item label="Type">Rectangle</Descriptions.Item>
+                                        <Descriptions.Item label="X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { x: v || 0 })} /> : item.x.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { y: v || 0 })} /> : item.y.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.width} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { width: v || 1 })} /> : item.width.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.height} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { height: v || 1 })} /> : item.height.toFixed(1)}</Descriptions.Item>
+                                      </>
+                                  ) : (
+                                      <>
+                                        <Descriptions.Item label="Type">Diagonal</Descriptions.Item>
+                                        <Descriptions.Item label="P1.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], x: v || 0 }, item.points[1]] })} /> : item.points[0].x.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="P1.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[0].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [{ ...item.points[0], y: v || 0 }, item.points[1]] })} /> : item.points[0].y.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="P2.X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].x} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], x: v || 0 }] })} /> : item.points[1].x.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label="P2.Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} value={item.points[1].y} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { points: [item.points[0], { ...item.points[1], y: v || 0 }] })} /> : item.points[1].y.toFixed(1)}</Descriptions.Item>
+                                        <Descriptions.Item label={t.thicknessLabel}>{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" controls={false} min={1} value={item.thickness} onFocus={() => handleEditFocus(item.id)} onChange={(v) => handleAnnotationPropertyUpdate(item.id, { thickness: v || 1 })} /> : item.thickness}</Descriptions.Item>
+                                      </>
+                                  )}
+                                </Descriptions>
+                              </Panel>
+                          ))}
+                        </Collapse>
                       </div>
-                    </List.Item>
-                  )} />
+                  ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{hasWorkspace ? t.noAnnotations : t.noImages}</Text>}
                 </div>
-                <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ marginTop: 16 }}>{t.addClass}</Button>
-              </div>
-            </TabPane>
-            <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCog} /></Tooltip>} key="3" disabled={disabledUI}>
-              <div className="tab-pane-content">
-                <Form layout="vertical">
-                  <Title level={5}>{t.viewSettings || 'View & Annotation Settings'}</Title>
-                  <Form.Item label={t.category}>
-                    <Select value={currentCategory} onChange={(value: string) => setCurrentCategory(value)} disabled={!hasWorkspace || mask_categories.length === 0} placeholder={t.noCategoriesFound}>
-                      {mask_categories.map((cat, index) => <Option key={cat} value={cat}> <Space> <div style={{ width: '14px', height: '14px', backgroundColor: mask_categoryColors[cat] || '#ccc', borderRadius: '3px', border: '1px solid #ccc' }} /> {`[${index}] ${cat}`} </Space> </Option>)}
-                    </Select>
-                  </Form.Item>
-                  <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} disabled={!hasWorkspace} /></Form.Item>
-                  <Form.Item label={t.toggleCategoryInBox} valuePropName="checked"><Switch checked={showCategoryInBox} onChange={setShowCategoryInBox} /></Form.Item>
-                  <Divider />
-                  <Title level={5}>{t.regionDelete}</Title>
-                  <Form.Item label={t.regionDeleteMode}>
-                    <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode} disabled={!hasWorkspace}>
-                      <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
-                      <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
-                    </Radio.Group>
-                  </Form.Item>
-                  <Divider />
-                  <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearAnnotations} block disabled={!hasWorkspace || localAnnotations.length === 0}>{t.clearAnnotationsButton}</Button></Form.Item>
-                </Form>
-              </div>
-            </TabPane>
-          </Tabs>
-        </Sider>
+              </TabPane>
+              <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4" disabled={disabledUI}>
+                <div className="tab-pane-content">
+                  <Tabs defaultActiveKey="core" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <TabPane tab="Core Annotation Data" key="core" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                      <textarea className="data-content-textarea" readOnly value={JSON.stringify(convertViewToApi(localAnnotations), null, 2)} placeholder="Core annotation data (key points, segments, components) will appear here." />
+                    </TabPane>
+                    <TabPane tab="Netlist (.scs)" key="scs" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                      <textarea className="data-content-textarea" readOnly value={netlistScsContent || ""} placeholder="Netlist (SCS format) will be shown here after processing." />
+                    </TabPane>
+                    <TabPane tab="Netlist (.cdl)" key="cdl" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                      <textarea className="data-content-textarea" readOnly value={netlistCdlContent || ""} placeholder="Netlist (CDL format) will be shown here after processing." />
+                    </TabPane>
+                  </Tabs>
+                </div>
+              </TabPane>
+              <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2" disabled={disabledUI}>
+                <div className="tab-pane-content">
+                  <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
+                    <Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title>
+                    <Space.Compact>
+                      <Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classesFileRef.current?.click()} /></Tooltip>
+                      <Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip>
+                    </Space.Compact>
+                  </Flex>
+                  <input ref={classesFileRef} type="file" accept=".txt" onChange={handleImportClasses} style={{ display: 'none' }} />
+                  <div className="class-list-container">
+                    <List size="small" dataSource={mask_categories} renderItem={(cat: string) => (
+                        <List.Item>
+                          <div className="class-management-item">
+                            <input type="color" value={mask_categoryColors[cat] || '#cccccc'} onChange={(e: ChangeEvent<HTMLInputElement>) => handleUpdateColor(cat, e.target.value)} className="color-picker-input" />
+                            <Input defaultValue={cat} onPressEnter={(e: React.KeyboardEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateClass(cat, e.currentTarget.value)} placeholder={t.className} />
+                            <Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(cat)} danger /></Tooltip>
+                          </div>
+                        </List.Item>
+                    )} />
+                  </div>
+                  <Button icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddClass} block style={{ marginTop: 16 }}>{t.addClass}</Button>
+                </div>
+              </TabPane>
+              <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCog} /></Tooltip>} key="3" disabled={disabledUI}>
+                <div className="tab-pane-content">
+                  <Form layout="vertical">
+                    <Title level={5}>{t.viewSettings || 'View & Annotation Settings'}</Title>
+                    <Form.Item label={t.category}>
+                      <Select value={currentCategory} onChange={(value: string) => setCurrentCategory(value)} disabled={!hasWorkspace || mask_categories.length === 0} placeholder={t.noCategoriesFound}>
+                        {mask_categories.map((cat, index) => <Option key={cat} value={cat}> <Space> <div style={{ width: '14px', height: '14px', backgroundColor: mask_categoryColors[cat] || '#ccc', borderRadius: '3px', border: '1px solid #ccc' }} /> {`[${index}] ${cat}`} </Space> </Option>)}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item label={t.lineWidth}><InputNumber min={1} max={50} value={currentLineWidth} onChange={(val) => setCurrentLineWidth(val || 1)} style={{ width: '100%' }} disabled={!hasWorkspace} /></Form.Item>
+                    <Form.Item label={t.toggleCategoryInBox} valuePropName="checked"><Switch checked={showCategoryInBox} onChange={setShowCategoryInBox} /></Form.Item>
+                    <Divider />
+                    <Title level={5}>{t.regionDelete}</Title>
+                    <Form.Item label={t.regionDeleteMode}>
+                      <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode} disabled={!hasWorkspace}>
+                        <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
+                        <Radio.Button value="intersect">{t.intersecting}</Radio.Button>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Divider />
+                    <Form.Item><Button danger icon={<FontAwesomeIcon icon={faEraser} />} onClick={handleClearAnnotations} block disabled={!hasWorkspace || localAnnotations.length === 0}>{t.clearAnnotationsButton}</Button></Form.Item>
+                  </Form>
+                </div>
+              </TabPane>
+              <TabPane tab={<Tooltip title={t.annotationHistory} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="5" disabled={disabledUI}>
+                <div className="tab-pane-content" style={{ padding: '8px', gap: '8px' }}>
+                  <div className="history-list-container">
+                    <List
+                        size="small"
+                        dataSource={[...(mask_operationHistory[mask_currentIndex] || [])].reverse()}
+                        renderItem={(op, index) => {
+                          const history = mask_operationHistory[mask_currentIndex];
+                          const beforeState = index > 0 ? history[index - 1].previousViewAnnotations : [];
+                          const afterState = op.previousViewAnnotations;
+                          const description = getHistoryEntryDescription(beforeState, afterState);
+                          return (
+                              <List.Item style={{ padding: '4px 8px' }}>
+                                <Text ellipsis title={description}>{`${index + 1}. ${description}`}</Text>
+                              </List.Item>
+                          );
+                        }}
+                        locale={{ emptyText: <Text type="secondary">{t.noHistory}</Text> }}
+                        // reversed
+                    />
+                  </div>
+                </div>
+              </TabPane>
+            </Tabs>
+          </Sider>
+        </Layout>
       </Layout>
-    </Layout>
   );
 };
 

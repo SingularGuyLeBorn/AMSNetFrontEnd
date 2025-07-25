@@ -38,12 +38,12 @@ export interface ApiResponse {
  * @description 操作历史记录的类型定义
  */
 export type Operation =
-  | { type: 'draw'; yoloData: string[]; previousYoloContent: string | null }
-  | { type: 'ai_annotate'; yoloData: string[]; previousYoloContent: string | null }
-  | { type: 'stain'; boxName: string; jsonType: 'buildingBlocks' | 'constants'; jsonName: string; previousJsonContent: string | null }
-  | { type: 'delete'; deletedLines: { index: number; content: string }[]; previousYoloContent: string | null; previousJsonContent: string | null; }
-  | { type: 'json_change'; previousJsonContent: string | null; currentJsonContent: string | null }
-  | { type: 'move'; previousYoloContent: string | null };
+    | { type: 'draw'; yoloData: string[]; previousYoloContent: string | null }
+    | { type: 'ai_annotate'; yoloData: string[]; previousYoloContent: string | null }
+    | { type: 'stain'; boxName: string; jsonType: 'buildingBlocks' | 'constants'; jsonName: string; previousJsonContent: string | null }
+    | { type: 'delete'; deletedLines: { index: number; content: string }[]; previousYoloContent: string | null; previousJsonContent: string | null; }
+    | { type: 'json_change'; previousJsonContent: string | null; currentJsonContent: string | null }
+    | { type: 'move'; previousYoloContent: string | null };
 
 /**
  * @description 初始的标注类别索引与其颜色、标签的映射关系。
@@ -84,7 +84,7 @@ interface TranslationSet {
 
 export const translations: { [key: string]: TranslationSet } = {
   zh: {
-    uploadFolder: '上传文件夹', undo: '撤销', redo: '重做', save: '保存', deleteBox: '删除框', category: '标注类别', previous: '上一张', next: '下一张', currentFile: '当前文件', coloringMode: '染色模式', drawingMode: '绘制模式', delete: '删除', saveAll: '导出全部 (ZIP)', chooseJsonName: '选择组件名称 (染色用)', chooseJsonType: '选择组件类型 (染色用)', noFile: '没有可操作的文件', dataExplorer: '数据浏览', settings: '设置', annotations: '标注列表', currentImage: "当前:", noAnnotations: "当前图片无标注", noImages: "请先上传文件夹", selectTool: "选择/移动", operationSuccessful: "操作成功", noUndoOperations: "没有可撤销的操作", noRedoOperations: "没有可重做的的操作", aiAnnotation: 'AI 自动标注', aiAnnotating: 'AI 标注中...', aiFailed: "AI标注失败", apiMode: 'API 模式', apiModeAuto: '自动', apiModeManual: '手动', manualApiEndpoint: '手动选择 API', apiForNew: '新图标注 API', apiForIncremental: '增量标注 API', classManagement: '类别管理', addClass: '新增类别', importClasses: '导入类别', exportClasses: '导出类别', className: '类别名称', hidePanel: '隐藏面板', showPanel: '显示面板', rawData: '原始数据',
+    uploadFolder: '上传文件夹', undo: '撤销', redo: '重做', save: '保存', deleteBox: '删除框', category: '标注类别', previous: '上一张', next: '下一张', currentFile: '当前文件', coloringMode: '知识图谱标注', drawingMode: '绘制模式', delete: '删除', saveAll: '导出全部 (ZIP)', chooseJsonName: '选择组件名称 ', chooseJsonType: '选择组件类型 ', noFile: '没有可操作的文件', dataExplorer: '数据浏览', settings: '设置', annotations: '标注列表', currentImage: "当前:", noAnnotations: "当前图片无标注", noImages: "请先上传文件夹", selectTool: "选择/移动", operationSuccessful: "操作成功", noUndoOperations: "没有可撤销的操作", noRedoOperations: "没有可重做的的操作", aiAnnotation: 'AI 自动标注', aiAnnotating: 'AI 标注中...', aiFailed: "AI标注失败", apiMode: 'API 模式', apiModeAuto: '自动', apiModeManual: '手动', manualApiEndpoint: '手动选择 API', apiForNew: '新图标注 API', apiForIncremental: '增量标注 API', classManagement: '类别管理', addClass: '新增类别', importClasses: '导入类别', exportClasses: '导出类别', className: '类别名称', hidePanel: '隐藏面板', showPanel: '显示面板', rawData: '原始数据',
     deleteClassConfirmTitle: '确认删除类别 %s?',
     deleteClassConfirmContent: '此操作不可恢复，将删除所有图片中属于该类别的标注。',
     confirmDelete: '确认删除',
@@ -96,9 +96,21 @@ export const translations: { [key: string]: TranslationSet } = {
     regionDeleteMode: '区域删除模式',
     fullyContained: '全包删除',
     intersecting: '接触删除',
+    fileExplorer: '文件浏览器',
+    searchFiles: '搜索文件...',
+    annotationHistory: '标注历史',
+    noHistory: '此图片无历史记录',
+    showExplorer: '显示文件浏览器',
+    hideExplorer: '隐藏文件浏览器',
+    opDraw: '绘制: %s',
+    opAi: 'AI标注: 新增 %s 个',
+    opStain: '染色: %s',
+    opDelete: '删除: %s',
+    opJson: 'JSON变更',
+    opMove: '移动/缩放',
   },
   en: {
-    uploadFolder: 'Upload Folder', undo: 'Undo', redo: 'Redo', save: 'Save', deleteBox: 'Delete Box', category: 'Category', previous: 'Previous', next: 'Next', currentFile: 'Current File', coloringMode: 'Coloring Mode', drawingMode: 'Drawing Mode', delete: 'Delete', saveAll: 'Export All (ZIP)', chooseJsonName: 'Choose Component (for coloring)', chooseJsonType: 'Choose Type (for coloring)', noFile: 'No files to operate on', dataExplorer: 'Data Explorer', settings: 'Settings', annotations: 'Annotations', currentImage: "Current:", noAnnotations: "No annotations for this image", noImages: "Please upload a folder first", selectTool: "Select/Move", operationSuccessful: "Operation successful", noUndoOperations: "No operations to undo", noRedoOperations: "No operations to redo", aiAnnotation: 'AI Auto-Annotation', aiAnnotating: 'AI Annotating...', aiFailed: "AI Annotation Failed", apiMode: 'API Mode', apiModeAuto: 'Auto', apiModeManual: 'Manual', manualApiEndpoint: 'Manual API Selection', apiForNew: 'API for New Image', apiForIncremental: 'API for Incremental', classManagement: 'Class Management', addClass: 'Add Class', importClasses: 'Import Classes', exportClasses: 'Export Classes', className: 'Class Name', hidePanel: 'Hide Panel', showPanel: 'Show Panel', rawData: 'Raw Data',
+    uploadFolder: 'Upload Folder', undo: 'Undo', redo: 'Redo', save: 'Save', deleteBox: 'Delete Box', category: 'Category', previous: 'Previous', next: 'Next', currentFile: 'Current File', coloringMode: 'KG Annotation', drawingMode: 'Drawing Mode', delete: 'Delete', saveAll: 'Export All (ZIP)', chooseJsonName: 'Choose Component ', chooseJsonType: 'Choose Type ', noFile: 'No files to operate on', dataExplorer: 'Data Explorer', settings: 'Settings', annotations: 'Annotations', currentImage: "Current:", noAnnotations: "No annotations for this image", noImages: "Please upload a folder first", selectTool: "Select/Move", operationSuccessful: "Operation successful", noUndoOperations: "No operations to undo", noRedoOperations: "No operations to redo", aiAnnotation: 'AI Auto-Annotation', aiAnnotating: 'AI Annotating...', aiFailed: "AI Annotation Failed", apiMode: 'API Mode', apiModeAuto: 'Auto', apiModeManual: 'Manual', manualApiEndpoint: 'Manual API Selection', apiForNew: 'API for New Image', apiForIncremental: 'API for Incremental', classManagement: 'Class Management', addClass: 'Add Class', importClasses: 'Import Classes', exportClasses: 'Export Classes', className: 'Class Name', hidePanel: 'Hide Panel', showPanel: 'Show Panel', rawData: 'Raw Data',
     deleteClassConfirmTitle: 'Confirm deletion of class %s?',
     deleteClassConfirmContent: 'This action cannot be undone and will remove all annotations of this class from all images.',
     confirmDelete: 'Confirm Delete',
@@ -110,6 +122,18 @@ export const translations: { [key: string]: TranslationSet } = {
     regionDeleteMode: 'Region Delete Mode',
     fullyContained: 'Fully Contained',
     intersecting: 'Intersecting',
+    fileExplorer: 'File Explorer',
+    searchFiles: 'Search files...',
+    annotationHistory: 'Annotation History',
+    noHistory: 'No history for this image',
+    showExplorer: 'Show File Explorer',
+    hideExplorer: 'Hide File Explorer',
+    opDraw: 'Draw: %s',
+    opAi: 'AI-Annotate: Added %s',
+    opStain: 'Stain: %s',
+    opDelete: 'Delete: %s',
+    opJson: 'JSON Change',
+    opMove: 'Move/Resize',
   }
 };
 // END OF FILE: src/pages/FileOperate/constants.tsx
