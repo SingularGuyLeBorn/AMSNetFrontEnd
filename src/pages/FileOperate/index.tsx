@@ -1,21 +1,36 @@
 // FILE: src / pages / FileOperate / index.tsx
 import { workspaceService } from "@/models/workspaceService";
 import {
+    createNode,
+    deleteNode,
+    findNode,
+    updateNode,
+    createRelationship,
+    updateRelationship,
+    deleteRelationship,
+    findRelationship
+} from "@/pages/GraphOperate/apiFunctions";
+import {
     faArrowLeft, faArrowRight,
+    faBook,
     faChevronLeft, faChevronRight,
     faCogs,
+    faCubes,
     faDatabase, faEraser,
     faFileExport,
-    faFileImport, faFolderTree, faHistory, faList, faMinusCircle, faMousePointer,
+    faFileImport, faFolderTree, faHistory, faLink, faList, faMinusCircle, faMousePointer,
     faPaintBrush,
     faPen,
     faPlus,
+    faProjectDiagram,
     faRedo,
     faRobot,
+    faSearch,
     faSearchPlus,
     faTags,
     faTrash,
-    faUndo
+    faUndo,
+    faEdit
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useModel } from "@umijs/max";
@@ -43,7 +58,7 @@ import {
 } from 'antd';
 import { saveAs } from 'file-saver';
 import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiComponent, ApiResponse, ClassInfo, Operation, jsonNameColorMap, translations } from './constants';
+import { ApiComponent, ApiResponse, ClassInfo, Operation, translations } from './constants';
 import './index.css';
 
 
@@ -58,6 +73,7 @@ type Point = { x: number; y: number };
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
 type RegionSelectBox = { start: Point; end: Point; } | null;
 type RegionDeleteMode = 'contain' | 'intersect';
+type Property = { key: string; value: string };
 
 type DraggingState = {
     type: 'move' | 'resize' | 'region-select' | 'magnifier-drag';
@@ -73,8 +89,7 @@ type DraggingState = {
 
 interface JsonData {
     local: {
-        buildingBlocks: { [key: string]: string[] };
-        constants: { [key: string]: string[] };
+        [key: string]: { [key: string]: string[] }
     };
     global: { [key: string]: any };
 }
@@ -135,22 +150,18 @@ const preloadImage = (file: File, signal?: AbortSignal): Promise<HTMLImageElemen
 export const parseJsonContent = (jsonContent: string | null): JsonData => {
     try {
         if (!jsonContent || jsonContent.trim() === "" || jsonContent.trim() === "{}") {
-            return { local: { buildingBlocks: {}, constants: {} }, global: {} };
+            return { local: {}, global: {} };
         }
         const parsed = JSON.parse(jsonContent);
         if (!parsed.local && !parsed.global && (parsed.cpnts || parsed.segments)) {
-            // Bedrock Change: If it's a raw API response without local/global, return default.
-            // This happens if the AI returns only cpnts/segments at root level.
-            return { local: { buildingBlocks: {}, constants: {} }, global: {} };
+            return { local: {}, global: {} };
         }
-        parsed.local = parsed.local || { buildingBlocks: {}, constants: {} };
-        parsed.local.buildingBlocks = parsed.local.buildingBlocks || {};
-        parsed.local.constants = parsed.local.constants || {};
+        parsed.local = parsed.local || {};
         parsed.global = parsed.global || {};
         return parsed;
     } catch (e) {
         console.error("用于染色工具的JSON解析失败，返回默认对象。", e);
-        return { local: { buildingBlocks: {}, constants: {} }, global: {} };
+        return { local: {}, global: {} };
     }
 };
 
@@ -207,12 +218,12 @@ const FileOperate: React.FC = () => {
     const {
         imageKeys,
         file_classMap, setFile_classMap,
+        file_kgComponentMap, setFile_kgComponentMap,
+        file_kgTypeMap, setFile_kgTypeMap,
         file_currentIndex, setFile_currentIndex,
         file_dirtyYolo, setFile_dirtyYolo,
         file_dirtyJson, setFile_dirtyJson,
-        // file_operationHistory: file_operationHistory, setFile_operationHistory: setFile_operationHistory,
-        // file_redoHistory: file_redoHistory, setFile_redoHistory: setFile_redoHistory,
-        isAppBusy, setAppBusy, // Bedrock Change: Use global lock
+        isAppBusy, setAppBusy,
 
         file_operationHistory, setFile_operationHistory,
         file_redoHistory, setFile_redoHistory,
@@ -235,7 +246,7 @@ const FileOperate: React.FC = () => {
     const [mouseDownCoords, setMouseDownCoords] = useState({ x: 0, y: 0 });
     const [canvasImageData, setCanvasImageData] = useState<ImageData | null>(null);
     const [selectedJsonName, setSelectedJsonName] = useState<string | null>(null);
-    const [selectedJsonType, setSelectedJsonType] = useState<'buildingBlocks' | 'constants' | null>(null);
+    const [selectedJsonType, setSelectedJsonType] = useState<string | null>(null);
     const [activeTool, setActiveTool] = useState<ActiveTool>('select');
     const [redrawTrigger, setRedrawTrigger] = useState(0);
     const [inspectorWidth, setInspectorWidth] = useState<number>(350);
@@ -263,9 +274,16 @@ const FileOperate: React.FC = () => {
     const [netlistScsContent, setNetlistScsContent] = useState<string | null>(null);
     const [netlistCdlContent, setNetlistCdlContent] = useState<string | null>(null);
 
+    const [newComponentName, setNewComponentName] = useState('');
+    const [newComponentType, setNewComponentType] = useState('');
+
+    const [nodeForm] = Form.useForm();
+    const [relationshipForm] = Form.useForm();
+
+
     const hasWorkspace = imageKeys.length > 0;
     const currentImageKey = hasWorkspace ? imageKeys[file_currentIndex] : null;
-    const disabledUI = isAppBusy; // Bedrock Change: UI lock is now driven by global state
+    const disabledUI = isAppBusy;
 
     useEffect(() => {
         setCurrentLang(initialState?.language || 'zh');
@@ -328,10 +346,10 @@ const FileOperate: React.FC = () => {
 
             const parsedStainJson = parseJsonContent(currentJsonContent);
             if (parsedStainJson.local) {
-                Object.values(parsedStainJson.local).forEach(nameMap => {
-                    if (nameMap && typeof nameMap === 'object') {
-                        Object.entries(nameMap).forEach(([name, boxNamesArray]) => {
-                            const color = jsonNameColorMap[name]; if (!color || !Array.isArray(boxNamesArray)) return;
+                Object.values(parsedStainJson.local).forEach(typeDict => {
+                    if (typeDict && typeof typeDict === 'object') {
+                        Object.entries(typeDict).forEach(([name, boxNamesArray]) => {
+                            const color = file_kgComponentMap[name]?.color; if (!color || !Array.isArray(boxNamesArray)) return;
                             boxNamesArray.forEach(boxName => {
                                 const yoloEntry = yoloDataForStain.find(y => y.name === boxName);
                                 if (!yoloEntry) return;
@@ -368,7 +386,7 @@ const FileOperate: React.FC = () => {
             ctx.font = "bold 20px Arial"; ctx.fillStyle = "#0D1A2E"; ctx.textAlign = "center";
             ctx.fillText(t.noImages, canvas.width / 2, canvas.height / 2);
         }
-    }, [currentImageDetails, parsedYoloData, currentJsonContent, file_classMap, t.noImages, selectedBoxName, regionSelectBox, isTransitioning]);
+    }, [currentImageDetails, parsedYoloData, currentJsonContent, file_classMap, t.noImages, selectedBoxName, regionSelectBox, isTransitioning, file_kgComponentMap]);
 
     const getScaledCoords = useCallback((e: MouseEvent | { clientX: number, clientY: number }): Point => {
         const canvas = canvasRef.current;
@@ -425,17 +443,15 @@ const FileOperate: React.FC = () => {
         const lines = standardYoloContent.split('\n').filter(line => line.trim() !== '');
         if (lines.length === 0) return '';
         const firstLineParts = lines[0].split(' ');
-        // If the first part of the line is a number, assume it's standard YOLO (class_id x_center y_center width height)
-        // Otherwise, assume it's already in our internal format (unique_name class_id x_center y_center width height)
         if (firstLineParts.length !== 5 || isNaN(parseFloat(firstLineParts[0]))) {
-            return standardYoloContent; // Already in internal format or invalid standard format
+            return standardYoloContent;
         }
         const nameCounters: { [key: string]: number } = {};
         const internalYoloLines = lines.map(line => {
             const parts = line.split(' ');
-            if (parts.length !== 5) return line; // Invalid line, keep as is
+            if (parts.length !== 5) return line;
             const classIndex = parseInt(parts[0], 10);
-            if (isNaN(classIndex)) return line; // Invalid class index, keep as is
+            if (isNaN(classIndex)) return line;
             const classLabel = file_classMap[classIndex]?.label || `class_${classIndex}`;
             const counter = nameCounters[classLabel] || 0;
             nameCounters[classLabel] = counter + 1;
@@ -446,7 +462,7 @@ const FileOperate: React.FC = () => {
     }, []);
 
     const loadDataForIndex = useCallback(async (index: number, signal: AbortSignal) => {
-        setIsTransitioning(true); // For visual spinner
+        setIsTransitioning(true);
         try {
             const imageKey = imageKeys[index];
             if (!imageKey) throw new Error("无效的图片索引");
@@ -492,7 +508,6 @@ const FileOperate: React.FC = () => {
                 message.error(`加载数据失败: ${error instanceof Error ? error.message : '未知错误'}`);
             }
         } finally {
-            // Bedrock Change: Visual spinner is controlled separately from the app lock
             if (!signal.aborted) {
                 setIsTransitioning(false);
             }
@@ -500,7 +515,7 @@ const FileOperate: React.FC = () => {
     }, [imageKeys, file_classMap, file_dirtyYolo, file_dirtyJson, convertStandardYoloToInternal]);
 
     const handleNavigation = useCallback(async (offset: number) => {
-        if (isAppBusy) return; // Use global lock
+        if (isAppBusy) return;
         const newIndex = file_currentIndex + offset;
         if (newIndex >= 0 && newIndex < imageKeys.length) {
             if (currentImageKey) {
@@ -535,11 +550,11 @@ const FileOperate: React.FC = () => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
 
-        setAppBusy(true); // Lock the app
+        setAppBusy(true);
 
         loadDataForIndex(file_currentIndex, controller.signal).finally(() => {
             if (!controller.signal.aborted) {
-                setAppBusy(false); // Unlock the app
+                setAppBusy(false);
             }
         });
 
@@ -564,7 +579,7 @@ const FileOperate: React.FC = () => {
                 if (newWidth > 200 && newWidth < 800) setInspectorWidth(newWidth);
             }
             if(isResizingExplorer){
-                const newWidth = e.clientX - 60; // 60 is the tool sider width
+                const newWidth = e.clientX - 60;
                 if (newWidth > 150 && newWidth < 600) setExplorerWidth(newWidth);
             }
         };
@@ -631,10 +646,9 @@ const FileOperate: React.FC = () => {
         if (currentJsonContent) {
             const parsedJson = parseJsonContent(currentJsonContent);
             Object.keys(parsedJson.local).forEach(typeKey => {
-                const type = typeKey as keyof typeof parsedJson.local;
-                parsedJson.local[type] = { ...parsedJson.local[type] }; // Ensure immutability for safe updates
-                Object.keys(parsedJson.local[type]).forEach(nameKey => {
-                    parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
+                const typeDict = parsedJson.local[typeKey];
+                Object.keys(typeDict).forEach(nameKey => {
+                    typeDict[nameKey] = typeDict[nameKey].filter(
                         (bName: string) => bName !== boxNameToDelete
                     );
                 });
@@ -683,6 +697,9 @@ const FileOperate: React.FC = () => {
                     const previousJson = currentJsonContent;
                     const newJson = stringifyJsonContent((() => {
                         const jsonObj = parseJsonContent(currentJsonContent);
+                        if (!jsonObj.local[selectedJsonType!]) {
+                            jsonObj.local[selectedJsonType!] = {};
+                        }
                         const targetDict = jsonObj.local[selectedJsonType!];
                         if (!targetDict[selectedJsonName]) targetDict[selectedJsonName] = [];
                         if (!targetDict[selectedJsonName].includes(boxName)) {
@@ -996,10 +1013,9 @@ const FileOperate: React.FC = () => {
                 if (currentJsonContent) {
                     const parsedJson = parseJsonContent(currentJsonContent);
                     Object.keys(parsedJson.local).forEach(typeKey => {
-                        const type = typeKey as keyof typeof parsedJson.local;
-                        parsedJson.local[type] = { ...parsedJson.local[type] }; // Ensure immutability for safe updates
-                        Object.keys(parsedJson.local[type]).forEach(nameKey => {
-                            parsedJson.local[type][nameKey] = parsedJson.local[type][nameKey].filter(
+                        const typeDict = parsedJson.local[typeKey];
+                        Object.keys(typeDict).forEach(nameKey => {
+                            typeDict[nameKey] = typeDict[nameKey].filter(
                                 (bName: string) => !boxNamesToDelete.includes(bName)
                             );
                         });
@@ -1080,7 +1096,7 @@ const FileOperate: React.FC = () => {
         if (isAppBusy) { message.warning("应用正忙，请稍后再试。"); return; }
 
         setIsAiAnnotating(true);
-        setAppBusy(true); // Lock
+        setAppBusy(true);
         message.loading({ content: t.aiAnnotating, key: 'ai-annotation', duration: 0 });
 
         try {
@@ -1126,7 +1142,7 @@ const FileOperate: React.FC = () => {
                     newClassMap[lastIndex] = { label, color: generateRandomColor() };
                 });
                 setFile_classMap(newClassMap);
-                currentClassMap = newClassMap; // Use the updated map for conversion
+                currentClassMap = newClassMap;
             }
 
             const newYoloContent = convertCpntsToYolo(resultData.cpnts, width, height, currentClassMap);
@@ -1136,7 +1152,6 @@ const FileOperate: React.FC = () => {
                 return;
             }
 
-            // Bedrock Change: Ensure only relevant API fields are kept for display/storage in currentJsonContent
             const displayData: { [key: string]: any } = {};
             const allowedKeys = ['cpnts', 'key_points', 'ports', 'segments', 'schematic_h', 'schematic_w', 'name'];
             allowedKeys.forEach(key => { if (key in resultData) { displayData[key] = (resultData as any)[key]; } });
@@ -1159,7 +1174,7 @@ const FileOperate: React.FC = () => {
             message.error({ content: `${t.aiFailed}: ${error.message}`, key: 'ai-annotation', duration: 5 });
         } finally {
             setIsAiAnnotating(false);
-            setAppBusy(false); // Unlock
+            setAppBusy(false);
         }
     };
 
@@ -1185,8 +1200,6 @@ const FileOperate: React.FC = () => {
                 if (!jsonStringMatch || !jsonStringMatch[1]) throw new Error("无效格式：找不到对象字面量 '{...}'。");
 
                 const jsonString = jsonStringMatch[1];
-                // Using new Function() to parse JSON-like string which might contain unquoted keys or comments
-                // This is generally unsafe if the source is untrusted, but for local file import, it's often used.
                 const parsedObject = new Function(`return ${jsonString}`)();
 
                 if (typeof parsedObject !== 'object' || parsedObject === null) throw new Error("解析的内容不是有效的对象。");
@@ -1206,7 +1219,6 @@ const FileOperate: React.FC = () => {
                 if (!hasEntries) throw new Error("在文件中未找到有效的类别条目。");
 
                 setFile_classMap(newClassMap);
-                // Set current class index to the first available, or 0 if map is empty
                 const firstKey = Object.keys(newClassMap)[0];
                 setCurrentClassIndex(firstKey ? parseInt(firstKey) : 0);
 
@@ -1217,7 +1229,7 @@ const FileOperate: React.FC = () => {
             }
         };
         reader.readAsText(file);
-        if (event.target) event.target.value = ''; // Clear the input so same file can be selected again
+        if (event.target) event.target.value = '';
     };
 
     const getOperationDescription = useCallback((op: Operation): string => {
@@ -1244,6 +1256,291 @@ const FileOperate: React.FC = () => {
             default: return 'default';
         }
     }
+
+    const propertiesToObject = (props: Property[] | undefined) => {
+        if (!props) return {};
+        return props.reduce((acc, prop) => {
+            if (prop && prop.key) {
+                acc[prop.key] = prop.value;
+            }
+            return acc;
+        }, {} as { [key: string]: any });
+    };
+
+    const handleNodeAction = async (action: 'create' | 'update' | 'delete' | 'find') => {
+        setAppBusy(true);
+        try {
+            await nodeForm.validateFields(['name']);
+            const values = nodeForm.getFieldsValue();
+            const { name } = values;
+            const properties = propertiesToObject(values.properties);
+
+            switch (action) {
+                case 'create':
+                    await createNode({ name, properties });
+                    break;
+                case 'update':
+                    await updateNode({ name, properties });
+                    break;
+                case 'delete':
+                    await deleteNode({ name });
+                    break;
+                case 'find':
+                    const result = await findNode({ name });
+                    const foundNode = result?.data;
+                    if (foundNode?.name) {
+                        message.success(`节点 "${name}" 已找到`);
+                    } else {
+                        message.warning(result?.message || `节点 "${name}" 不存在`);
+                    }
+                    break;
+            }
+        } catch (errorInfo) {
+            console.log('表单验证失败:', errorInfo);
+        } finally {
+            setAppBusy(false);
+        }
+    };
+
+    const handleRelationshipAction = async (action: 'create' | 'update' | 'delete' | 'find') => {
+        setAppBusy(true);
+        try {
+            await relationshipForm.validateFields(['name']);
+            const values = relationshipForm.getFieldsValue();
+            const { name } = values;
+            const properties = propertiesToObject(values.properties);
+
+            switch (action) {
+                case 'create':
+                    if (!properties.fromNode || !properties.toNode) {
+                        message.warning('创建关系必须在属性中指定 fromNode 和 toNode');
+                        setAppBusy(false);
+                        return;
+                    }
+                    await createRelationship({ name, properties });
+                    break;
+                case 'update':
+                    await updateRelationship({ name, properties });
+                    break;
+                case 'delete':
+                    await deleteRelationship({ name });
+                    break;
+                case 'find':
+                    const result = await findRelationship({ name });
+                    if (result?.data?.name) {
+                        message.success(`关系 "${name}" 已找到`);
+                    } else {
+                        message.warning(result?.message || `关系 "${name}" 不存在`);
+                    }
+                    break;
+            }
+        } catch (errorInfo) {
+            console.log('表单验证失败:', errorInfo);
+        } finally {
+            setAppBusy(false);
+        }
+    };
+
+    const handleAddComponent = () => {
+        if (newComponentName && !file_kgComponentMap[newComponentName]) {
+            setFile_kgComponentMap(prev => ({
+                ...prev,
+                [newComponentName]: { color: generateRandomColor() }
+            }));
+            message.success(`组件 '${newComponentName}' 已添加`);
+            setNewComponentName('');
+        } else if (file_kgComponentMap[newComponentName]) {
+            message.warning(`组件 '${newComponentName}' 已存在`);
+        }
+    };
+
+    const handleUpdateKgComponent = (oldName: string, field: 'name' | 'color', value: string) => {
+        if (field === 'color') {
+            setFile_kgComponentMap(prev => ({ ...prev, [oldName]: { ...prev[oldName], color: value } }));
+            return;
+        }
+
+        const newName = value;
+        if (!newName || newName === oldName) return;
+        if (file_kgComponentMap[newName]) {
+            message.error(`组件名 "${newName}" 已存在。`);
+            return;
+        }
+
+        Modal.confirm({
+            title: `确认重命名组件 "${oldName}" 为 "${newName}"?`,
+            content: `此操作将更新所有图片中对该组件的引用，且无法撤销。`,
+            okText: t.confirmDelete,
+            cancelText: t.cancel,
+            onOk: () => {
+                setAppBusy(true);
+                const updatedMap = { ...file_kgComponentMap };
+                updatedMap[newName] = updatedMap[oldName];
+                delete updatedMap[oldName];
+                setFile_kgComponentMap(updatedMap);
+
+                const updatedDirtyJson: { [key: string]: string } = {};
+                Object.entries(file_dirtyJson).forEach(([key, jsonStr]) => {
+                    const data = parseJsonContent(jsonStr);
+                    let wasUpdated = false;
+                    Object.values(data.local).forEach(typeDict => {
+                        if (typeDict[oldName]) {
+                            typeDict[newName] = typeDict[oldName];
+                            delete typeDict[oldName];
+                            wasUpdated = true;
+                        }
+                    });
+                    updatedDirtyJson[key] = wasUpdated ? stringifyJsonContent(data) : jsonStr;
+                });
+                setFile_dirtyJson(updatedDirtyJson);
+                if (selectedJsonName === oldName) {
+                    setSelectedJsonName(newName);
+                }
+                message.success(`组件已重命名为 "${newName}"`);
+                setAppBusy(false);
+            }
+        });
+    };
+
+    const handleDeleteKgComponent = (nameToDelete: string) => {
+        Modal.confirm({
+            title: t.deleteComponentConfirmTitle.replace('%s', nameToDelete),
+            content: t.deleteComponentConfirmContent,
+            okText: t.confirmDelete,
+            cancelText: t.cancel,
+            okType: 'danger',
+            onOk: () => {
+                setAppBusy(true);
+                const updatedMap = { ...file_kgComponentMap };
+                delete updatedMap[nameToDelete];
+                setFile_kgComponentMap(updatedMap);
+
+                const updatedDirtyJson: { [key: string]: string } = {};
+                Object.entries(file_dirtyJson).forEach(([key, jsonStr]) => {
+                    const data = parseJsonContent(jsonStr);
+                    let wasUpdated = false;
+                    Object.values(data.local).forEach(typeDict => {
+                        if (typeDict[nameToDelete]) {
+                            delete typeDict[nameToDelete];
+                            wasUpdated = true;
+                        }
+                    });
+                    updatedDirtyJson[key] = wasUpdated ? stringifyJsonContent(data) : jsonStr;
+                });
+                setFile_dirtyJson(updatedDirtyJson);
+
+                if (selectedJsonName === nameToDelete) {
+                    setSelectedJsonName(null);
+                }
+                message.success(t.componentDeleted.replace('%s', nameToDelete));
+                setAppBusy(false);
+            }
+        });
+    };
+
+    const handleAddComponentType = () => {
+        if (newComponentType && !file_kgTypeMap.includes(newComponentType)) {
+            setFile_kgTypeMap(prev => [...prev, newComponentType]);
+            message.success(`类型 '${newComponentType}' 已添加`);
+            setNewComponentType('');
+        } else if (file_kgTypeMap.includes(newComponentType)) {
+            message.warning(`类型 '${newComponentType}' 已存在`);
+        }
+    };
+
+    const handleUpdateKgType = (oldType: string, newType: string) => {
+        if (!newType || newType === oldType) return;
+        if (file_kgTypeMap.includes(newType)) {
+            message.error(`类型 "${newType}" 已存在。`);
+            return;
+        }
+
+        Modal.confirm({
+            title: `确认重命名类型 "${oldType}" 为 "${newType}"?`,
+            content: `此操作将更新所有图片中对该类型的引用，且无法撤销。`,
+            okText: t.confirmDelete,
+            cancelText: t.cancel,
+            onOk: () => {
+                setAppBusy(true);
+                setFile_kgTypeMap(prev => prev.map(t => t === oldType ? newType : t));
+
+                const updatedDirtyJson: { [key: string]: string } = {};
+                Object.entries(file_dirtyJson).forEach(([key, jsonStr]) => {
+                    const data = parseJsonContent(jsonStr);
+                    if (data.local[oldType]) {
+                        data.local[newType] = data.local[oldType];
+                        delete data.local[oldType];
+                        updatedDirtyJson[key] = stringifyJsonContent(data);
+                    } else {
+                        updatedDirtyJson[key] = jsonStr;
+                    }
+                });
+                setFile_dirtyJson(updatedDirtyJson);
+
+                if (selectedJsonType === oldType) {
+                    setSelectedJsonType(newType);
+                }
+                message.success(`类型已重命名为 "${newType}"`);
+                setAppBusy(false);
+            }
+        });
+    };
+
+    const handleDeleteKgType = (typeToDelete: string) => {
+        Modal.confirm({
+            title: t.deleteTypeConfirmTitle.replace('%s', typeToDelete),
+            content: t.deleteTypeConfirmContent,
+            okText: t.confirmDelete,
+            cancelText: t.cancel,
+            okType: 'danger',
+            onOk: () => {
+                setAppBusy(true);
+                setFile_kgTypeMap(prev => prev.filter(t => t !== typeToDelete));
+
+                const updatedDirtyJson: { [key: string]: string } = {};
+                Object.entries(file_dirtyJson).forEach(([key, jsonStr]) => {
+                    const data = parseJsonContent(jsonStr);
+                    if (data.local[typeToDelete]) {
+                        delete data.local[typeToDelete];
+                        updatedDirtyJson[key] = stringifyJsonContent(data);
+                    } else {
+                        updatedDirtyJson[key] = jsonStr;
+                    }
+                });
+                setFile_dirtyJson(updatedDirtyJson);
+
+                if (selectedJsonType === typeToDelete) {
+                    setSelectedJsonType(null);
+                }
+                message.success(t.typeDeleted.replace('%s', typeToDelete));
+                setAppBusy(false);
+            }
+        });
+    };
+
+
+    const renderPropertiesEditor = () => (
+        <Form.List name="properties">
+            {(fields, { add, remove }) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {fields.map(({ key, name, ...restField }) => (
+                        <Space key={key} style={{ display: 'flex' }} align="baseline">
+                            <Form.Item {...restField} name={[name, 'key']} style={{ flex: 1, marginBottom: 0 }}>
+                                <Input placeholder={t.propKey} />
+                            </Form.Item>
+                            <Form.Item {...restField} name={[name, 'value']} style={{ flex: 1, marginBottom: 0 }}>
+                                <Input placeholder={t.propValue} />
+                            </Form.Item>
+                            <Button type="text" danger icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => remove(name)} />
+                        </Space>
+                    ))}
+                    <Button type="dashed" onClick={() => add()} block icon={<FontAwesomeIcon icon={faPlus} />}>
+                        {t.addProperty}
+                    </Button>
+                </div>
+            )}
+        </Form.List>
+    );
 
     return (
         <Layout className="unified-layout">
@@ -1329,6 +1626,15 @@ const FileOperate: React.FC = () => {
                 <div className="resizer-horizontal" onMouseDown={() => setIsResizingExplorer(true)} style={{ display: isExplorerVisible ? 'flex' : 'none' }} />
 
                 <Layout className="main-content-wrapper">
+                    {!isExplorerVisible && (
+                        <Tooltip title={t.showExplorer} placement="right">
+                            <Button
+                                className="show-explorer-handle"
+                                icon={<FontAwesomeIcon icon={faChevronRight} />}
+                                onClick={() => setIsExplorerVisible(true)}
+                            />
+                        </Tooltip>
+                    )}
                     <Content className="canvas-content">
                         {isTransitioning && <div className="transition-overlay"><Spin size="large" /></div>}
                         <div className={`canvas-wrapper`}>
@@ -1351,22 +1657,39 @@ const FileOperate: React.FC = () => {
                             </div>
                         )}
                     </Content>
+                    {!isInspectorVisible && (
+                        <Tooltip title={t.showPanel} placement="left">
+                            <Button
+                                className="show-inspector-handle"
+                                icon={<FontAwesomeIcon icon={faChevronLeft} />}
+                                onClick={() => setIsInspectorVisible(true)}
+                            />
+                        </Tooltip>
+                    )}
                 </Layout>
 
                 <div className="resizer-horizontal" onMouseDown={() => setIsResizingInspector(true)} style={{ display: isInspectorVisible ? 'flex' : 'none' }} />
                 <Sider width={isInspectorVisible ? inspectorWidth : 0} className="unified-inspector-sider" theme="light" collapsible collapsed={!isInspectorVisible} trigger={null} collapsedWidth={0}>
-                    <Tabs defaultActiveKey="1" className="inspector-tabs"
+                    <Tabs defaultActiveKey="annotation" className="inspector-tabs"
                           tabBarExtraContent={ <Tooltip title={t.hidePanel}><Button type="text" icon={<FontAwesomeIcon icon={faChevronRight} />} onClick={() => setIsInspectorVisible(false)} /></Tooltip> }
                     >
-                        <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="1" disabled={disabledUI}>
+                        <TabPane tab={<Tooltip title={t.annotations} placement="bottom"><FontAwesomeIcon icon={faList} /></Tooltip>} key="annotation" disabled={disabledUI}>
                             <div className="tab-pane-content">
                                 <div style={{ flexShrink: 0 }}>
                                     <Form layout="vertical">
                                         <Form.Item label={t.category} style={{ display: activeTool === 'draw' ? 'block' : 'none' }}>
                                             <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(file_classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
                                         </Form.Item>
-                                        <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>{Object.keys(jsonNameColorMap).map(name => <Option key={name} value={name}>{name}</Option>)}</Select></Form.Item>
-                                        <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}><Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={(v) => setSelectedJsonType(v as any)} style={{ width: '100%' }}><Option key="buildingBlocks" value="buildingBlocks">Building Blocks</Option><Option key="constants" value="constants">Constants</Option></Select></Form.Item>
+                                        <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}>
+                                            <Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>
+                                                {Object.keys(file_kgComponentMap).map(name => <Option key={name} value={name}>{name}</Option>)}
+                                            </Select>
+                                        </Form.Item>
+                                        <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}>
+                                            <Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={setSelectedJsonType} style={{ width: '100%' }}>
+                                                {file_kgTypeMap.map(type => <Option key={type} value={type}>{type}</Option>)}
+                                            </Select>
+                                        </Form.Item>
                                         <Form.Item label={t.regionDeleteMode} style={{ marginBottom: 8, display: activeTool === 'region-delete' ? 'block' : 'none' }}>
                                             <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode}>
                                                 <Radio.Button value="contain">{t.fullyContained}</Radio.Button>
@@ -1410,7 +1733,7 @@ const FileOperate: React.FC = () => {
                                 ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{t.noAnnotations}</Text>}
                             </div>
                         </TabPane>
-                        <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="4" disabled={disabledUI}>
+                        <TabPane tab={<Tooltip title={t.rawData} placement="bottom"><FontAwesomeIcon icon={faDatabase} /></Tooltip>} key="data" disabled={disabledUI}>
                             <div className="tab-pane-content">
                                 <Tabs defaultActiveKey="yolo" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                                     <TabPane tab="YOLO Data (.txt)" key="yolo" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
@@ -1428,23 +1751,73 @@ const FileOperate: React.FC = () => {
                                 </Tabs>
                             </div>
                         </TabPane>
-                        <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faTags} /></Tooltip>} key="2" disabled={disabledUI}>
+                        <TabPane tab={<Tooltip title={t.classManagement} placement="bottom"><FontAwesomeIcon icon={faBook} /></Tooltip>} key="management" disabled={disabledUI}>
                             <div className="tab-pane-content">
-                                <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
-                                <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
-                                <div className="class-list-container">
-                                    <List size="small" dataSource={Object.entries(file_classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input value={label} onChange={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
-                                </div>
-                                <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 16 }}>{t.addClass}</Button>
+                                <Tabs defaultActiveKey="class" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                    <TabPane tab={<span><FontAwesomeIcon icon={faTags} style={{marginRight: 8}}/>{t.classManagement}</span>} key="class">
+                                        <Flex justify="space-between" align="center"><Title level={5} style={{ margin: 0 }}>{t.classManagement}</Title><Space.Compact><Tooltip title={t.importClasses}><Button icon={<FontAwesomeIcon icon={faFileImport} />} onClick={() => classImportRef.current?.click()} /></Tooltip><Tooltip title={t.exportClasses}><Button icon={<FontAwesomeIcon icon={faFileExport} />} onClick={handleExportClasses} /></Tooltip></Space.Compact></Flex>
+                                        <input type="file" ref={classImportRef} onChange={handleImportClasses} style={{ display: 'none' }} accept=".txt" />
+                                        <div className="class-list-container" style={{ marginTop: 16 }}>
+                                            <List size="small" dataSource={Object.entries(file_classMap)} renderItem={([idx, { label, color }]) => { const index = parseInt(idx); return (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateClass(index, 'color', e.target.value)} /><Input defaultValue={label} onBlur={e => handleUpdateClass(index, 'label', e.target.value)} placeholder={t.className} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteClass(index)} danger /></Tooltip></div></List.Item>); }} />
+                                        </div>
+                                        <Button onClick={handleAddClass} icon={<FontAwesomeIcon icon={faPlus} />} block style={{ marginTop: 8 }}>{t.addClass}</Button>
+                                    </TabPane>
+                                    <TabPane tab={<span><FontAwesomeIcon icon={faCubes} style={{marginRight: 8}}/>{t.componentManagement}</span>} key="component">
+                                        <Title level={5} style={{ margin: 0 }}>{t.componentManagement}</Title>
+                                        <div className="class-list-container" style={{ marginTop: 16 }}>
+                                            <List size="small" dataSource={Object.entries(file_kgComponentMap)} renderItem={([name, { color }]) => (<List.Item><div className="class-management-item"><Input type="color" value={color} className="color-picker-input" onChange={e => handleUpdateKgComponent(name, 'color', e.target.value)} /><Input defaultValue={name} onBlur={e => handleUpdateKgComponent(name, 'name', e.target.value)} placeholder={t.componentName} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteKgComponent(name)} danger /></Tooltip></div></List.Item>)} />
+                                        </div>
+                                        <Space.Compact style={{ width: '100%', marginTop: 8 }}><Input placeholder={t.newComponentName} value={newComponentName} onChange={e => setNewComponentName(e.target.value)} onPressEnter={handleAddComponent} /><Button type="primary" icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddComponent}>{t.addComponent}</Button></Space.Compact>
+                                    </TabPane>
+                                    <TabPane tab={<span><FontAwesomeIcon icon={faFolderTree} style={{marginRight: 8}}/>{t.typeManagement}</span>} key="type">
+                                        <Title level={5} style={{ margin: 0 }}>{t.typeManagement}</Title>
+                                        <div className="class-list-container" style={{ marginTop: 16 }}>
+                                            <List size="small" dataSource={file_kgTypeMap} renderItem={(typeName) => (<List.Item><div className="class-management-item"><Input defaultValue={typeName} onBlur={e => handleUpdateKgType(typeName, e.target.value)} placeholder={t.typeName} /><Tooltip title={t.delete}><Button icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => handleDeleteKgType(typeName)} danger /></Tooltip></div></List.Item>)} />
+                                        </div>
+                                        <Space.Compact style={{ width: '100%', marginTop: 8 }}><Input placeholder={t.newTypeName} value={newComponentType} onChange={e => setNewComponentType(e.target.value)} onPressEnter={handleAddComponentType} /><Button type="primary" icon={<FontAwesomeIcon icon={faPlus} />} onClick={handleAddComponentType}>{t.addType}</Button></Space.Compact>
+                                    </TabPane>
+                                </Tabs>
                             </div>
                         </TabPane>
-                        <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCogs} /></Tooltip>} key="3" disabled={disabledUI}>
+                        <TabPane tab={<Tooltip title={t.knowledgeGraph} placement="bottom"><FontAwesomeIcon icon={faProjectDiagram} /></Tooltip>} key="kg" disabled={disabledUI}>
                             <div className="tab-pane-content">
-                                <Title level={5}>{t.settings}</Title>
-                                <p>此页面暂无特定设置。</p>
+                                <Tabs defaultActiveKey="node" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                    <TabPane tab={<span><FontAwesomeIcon icon={faFolderTree} style={{ marginRight: 8 }} />{t.nodeOperations}</span>} key="node" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        <Form form={nodeForm} layout="vertical" name="node_form" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                            <Form.Item name="name" label={t.nodeName} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                                                <Input placeholder="e.g., ylb_voltage-mode_bandgap_reference_01" />
+                                            </Form.Item>
+                                            <Form.Item label={t.nodeProperties} style={{ marginBottom: 0 }}>
+                                                {renderPropertiesEditor()}
+                                            </Form.Item>
+                                            <Space direction="vertical" style={{ width: '100%', marginTop: 'auto' }}>
+                                                <Button type="primary" icon={<FontAwesomeIcon icon={faPlus} />} onClick={() => handleNodeAction('create')} block>{t.createNode}</Button>
+                                                <Button icon={<FontAwesomeIcon icon={faEdit} />} onClick={() => handleNodeAction('update')} block>{t.updateNode}</Button>
+                                                <Button icon={<FontAwesomeIcon icon={faSearch} />} onClick={() => handleNodeAction('find')} block>{t.findNode}</Button>
+                                                <Button danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={() => handleNodeAction('delete')} block>{t.deleteNode}</Button>
+                                            </Space>
+                                        </Form>
+                                    </TabPane>
+                                    <TabPane tab={<span><FontAwesomeIcon icon={faLink} style={{ marginRight: 8 }} />{t.relationshipOperations}</span>} key="relationship" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        <Form form={relationshipForm} layout="vertical" name="relationship_form" style={{ display: 'flex', flexDirection: 'column', gap: 16 }} initialValues={{ properties: [{ key: 'fromNode', value: '' }, { key: 'toNode', value: '' }] }}>
+                                            <Form.Item name="name" label={t.relationshipName} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                                                <Input placeholder="e.g., PSR" />
+                                            </Form.Item>
+                                            <Form.Item label={t.relationshipProperties} help={t.fromNodeHelp} style={{ marginBottom: 0 }}>
+                                                {renderPropertiesEditor()}
+                                            </Form.Item>
+                                            <Space direction="vertical" style={{ width: '100%', marginTop: 'auto' }}>
+                                                <Button type="primary" icon={<FontAwesomeIcon icon={faPlus} />} onClick={() => handleRelationshipAction('create')} block>{t.createRelationship}</Button>
+                                                <Button icon={<FontAwesomeIcon icon={faEdit} />} onClick={() => handleRelationshipAction('update')} block>{t.updateRelationship}</Button>
+                                                <Button icon={<FontAwesomeIcon icon={faSearch} />} onClick={() => handleRelationshipAction('find')} block>{t.findRelationship}</Button>
+                                                <Button danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={() => handleRelationshipAction('delete')} block>{t.deleteRelationship}</Button>
+                                            </Space>
+                                        </Form>
+                                    </TabPane>
+                                </Tabs>
                             </div>
                         </TabPane>
-                        <TabPane tab={<Tooltip title={t.annotationHistory} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="5" disabled={disabledUI}>
+                        <TabPane tab={<Tooltip title={t.annotationHistory} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="history" disabled={disabledUI}>
                             <div className="tab-pane-content" style={{ padding: '8px', gap: '8px' }}>
                                 <div className="history-list-container">
                                     <List
@@ -1456,9 +1829,14 @@ const FileOperate: React.FC = () => {
                                             </List.Item>
                                         )}
                                         locale={{ emptyText: <Text type="secondary">{t.noHistory}</Text> }}
-                                        // reversed
                                     />
                                 </div>
+                            </div>
+                        </TabPane>
+                        <TabPane tab={<Tooltip title={t.settings} placement="bottom"><FontAwesomeIcon icon={faCogs} /></Tooltip>} key="settings" disabled={disabledUI}>
+                            <div className="tab-pane-content">
+                                <Title level={5}>{t.settings}</Title>
+                                <p>此页面暂无特定设置。</p>
                             </div>
                         </TabPane>
                     </Tabs>
@@ -1469,3 +1847,4 @@ const FileOperate: React.FC = () => {
 };
 
 export default FileOperate;
+// END OF FILE: src/pages/FileOperate/index.tsx

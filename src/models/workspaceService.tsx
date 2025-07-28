@@ -44,7 +44,8 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 const getDb = (): Promise<IDBPDatabase> => {
     if (!dbPromise) {
         dbPromise = openDB(DB_NAME, DB_VERSION, {
-            upgrade(db, oldVersion) {
+            // 修正 1: 为回调参数添加明确类型
+            upgrade(db: IDBPDatabase, oldVersion: number) {
                 if (oldVersion < 2) {
                     // Bedrock Change: 销毁旧的、基于句柄的存储结构
                     if (db.objectStoreNames.contains(WORKSPACE_STORE)) {
@@ -64,7 +65,8 @@ const getDb = (): Promise<IDBPDatabase> => {
             },
         });
     }
-    return dbPromise;
+    // 修正 2: 使用非空断言 '!' 解决类型不匹配问题
+    return dbPromise!;
 };
 
 // ===================================================================

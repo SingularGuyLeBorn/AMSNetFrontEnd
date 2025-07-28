@@ -1,6 +1,6 @@
 // FILE: src/models/annotationStore.tsx
 import type { ClassInfo, Operation } from '@/pages/FileOperate/constants';
-import { initialIndexClassColorMap } from '@/pages/FileOperate/constants';
+import { initialIndexClassColorMap, jsonNameColorMap } from '@/pages/FileOperate/constants';
 import type { ImageAnnotationData, UndoOperation as MaskUndoOperation } from '@/pages/MaskOperate/constants';
 import { defaultCategoryColors } from '@/pages/MaskOperate/constants';
 import { useState } from 'react';
@@ -17,12 +17,22 @@ const rgbaToHex = (rgba: string): string => {
 };
 
 const initialMaskCategoryHexColors = Object.entries(defaultCategoryColors).reduce(
-  (acc, [key, value]) => {
-    acc[key] = rgbaToHex(value);
-    return acc;
-  },
-  {} as { [key: string]: string }
+    (acc, [key, value]) => {
+      acc[key] = rgbaToHex(value);
+      return acc;
+    },
+    {} as { [key: string]: string }
 );
+
+/** Bedrock: 从常量初始化动态的组件颜色映射 */
+const initialKgComponentMap: { [key: string]: { color: string } } = Object.entries(jsonNameColorMap).reduce(
+    (acc, [key, value]) => {
+      acc[key] = { color: value };
+      return acc;
+    },
+    {} as { [key: string]: { color: string } }
+);
+
 
 /**
  * @description
@@ -56,6 +66,11 @@ export default function useAnnotationStore() {
   const [file_dirtyJson, setFile_dirtyJson] = useState<{ [imageKey: string]: string }>({});
   const [file_operationHistory, setFile_operationHistory] = useState<Record<number, Operation[]>>({});
   const [file_redoHistory, setFile_redoHistory] = useState<Record<number, Operation[]>>({});
+  /** Bedrock: 新增知识图谱组件状态，使其可动态编辑 */
+  const [file_kgComponentMap, setFile_kgComponentMap] = useState<{ [key: string]: { color: string } }>(initialKgComponentMap);
+  /** Bedrock: 新增知识图谱类型状态，使其可动态编辑 */
+  const [file_kgTypeMap, setFile_kgTypeMap] = useState<string[]>(['buildingBlocks', 'constants']);
+
 
   // ===================================================================
   // MaskOperate 页面状态
@@ -76,6 +91,8 @@ export default function useAnnotationStore() {
     setFile_redoHistory({});
     setMask_operationHistory({});
     setMask_redoHistory({});
+    setFile_kgComponentMap(initialKgComponentMap); // 重置组件映射
+    setFile_kgTypeMap(['buildingBlocks', 'constants']); // 重置类型映射
   };
 
 
@@ -92,6 +109,8 @@ export default function useAnnotationStore() {
     file_dirtyJson, setFile_dirtyJson,
     file_operationHistory, setFile_operationHistory,
     file_redoHistory, setFile_redoHistory,
+    file_kgComponentMap, setFile_kgComponentMap,
+    file_kgTypeMap, setFile_kgTypeMap,
 
     // MaskOperate Exports
     mask_currentIndex, setMask_currentIndex,
@@ -103,5 +122,4 @@ export default function useAnnotationStore() {
     mask_redoHistory, setMask_redoHistory,
   };
 }
-
-// FILE: src/pages/FileOperate/constants.ts
+// END OF FILE: src/models/annotationStore.tsx

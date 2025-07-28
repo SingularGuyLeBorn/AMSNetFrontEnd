@@ -59,6 +59,7 @@
     "graphology": "^0.26.0",
     "graphology-types": "^0.24.8",
     "highlight.js": "^11.11.1",
+    "idb": "^8.0.3",
     "jszip": "^3.10.1",
     "katex": "^0.16.22",
     "lodash": "^4.17.21",
