@@ -14,6 +14,7 @@
   --text-color-placeholder: #bfbfbf;
   --danger-color: #ff4d4f;
   --success-color: #52c41a;
+  --warning-color: #faad14;
 }
 
 /* --- Base Layout --- */
@@ -385,5 +386,27 @@
   background-color: var(--primary-color-light) !important;
 }
 
+/* Bedrock Change: KG Property Editor Styles */
+.kg-property-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
+.kg-property-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.kg-property-row .ant-form-item {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.kg-feedback-panel {
+  margin-top: auto; /* Push to the bottom */
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
 /* END OF FILE: src/pages/FileOperate/index.css */

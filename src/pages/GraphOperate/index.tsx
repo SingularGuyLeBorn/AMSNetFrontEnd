@@ -23,6 +23,7 @@ import {
   EditOutlined,
   LinkOutlined,
   ApartmentOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { Button, Form, Input, Layout, message, Space, Typography, Tabs, Flex, Empty } from 'antd';
 import Neo4jVisualization from './Neo4jVisualization';
@@ -84,7 +85,7 @@ const mockGraphData = {
         output: 'fixer_voltage',
         LNR: 'moderate',
         loop_gain: 'high',
-        annotatedImage: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAYAAACLz2ctAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAARTSURBVHhe7d3NblRVFedx/57brJsUQoJkI8kejAORk8AkyeToQpwcwcEHcHKCbwC5gBNkckLREl0K8ShISEhCSkBCpbvvta577bU/P79aLalttVZnrer99N8lLa1aVTq13+/3SgghxBCSEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCHk3t/s/O5+fn/+S3e73a6aXgRBCCCGEEEIIIYQQQgghhBBCiLwVb/e/drvdLoQQQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHl3lJa2r4m53W6/9FII9w1vN78hhBBCCCGEEEIIIYQQQoi8I25vPz/t9/unfwh5A7fb3xBCiLweNzf3EEL+I7e39xBCyFvwtpdeCCHkTeTe3kMIeYe43d8ihBBCCCGEEEIIIYQQQggh5I05ubl/3t7efu/vf/97MplMfua/S3/vX29v72Qy+bm5uZnJZPK9vb293d/8pBCi9+R29+f/4v8F/A/gD9D4L38fAAAAAElFTkSuQmCC",
+        annotatedImage: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAYAAACLz2ctAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAARTSURBVHhe7d3NblRVFedx/57brJsUQoJkI8kejAORk8AkyeToQpwcwcEHcHKCbwC5gBNkckLREl0K8ShISEhCSkBCpbvvta577bU/P79aLalttVZnrer99N8lLa1aVTq13+/3SgghxBCSEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCHk3t/s/O5+fn/+S3e73a6aXgRBCCCGEEEIIIYQQQgghhBBCiLwVb/e/drvdLoQQQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHkPt/s/a/b7/dNJQyGEEEIIIYQQQgj5KtzufyyEEKrS7Xb7JaGEEEIIIYQQQgghhBBCCHkRt/s/a7fb7ZfEEkIIIYQQQgghhBBCCCGEEEKIvAVv978mPz//JReCEEIIIYQQQgghhBBCCCGEEEKIvBVv978m+v3+6T+CEEIIIYQQQgghhBBCCCGEEEKIvBVv978mQgghhBBCCHl3lJa2r4m53W6/9FII9w1vN78hhBBCCCGEEEIIIYQQQoi8I25vPz/t9/unfwh5A7fb3xBCiLweNzf3EEL+I7e39xBCyFvwtpdeCCHkTeTe3kMIeYe43d8ihBBCCCGEEEIIIYQQQggh5I05ubl/3t7efu/vf/97MplMfua/S3/vX29v72Qy+bm5uZnJZPK9vb293d/8pBCi9+R29+f/4v8F/A/gD9D4L38fAAAAAElFTkSuQmCC",
         ImgName: 'AMSnet_BGR20.png',
         temperature_coefficient: 'moderate',
         PSR: 'moderate',
@@ -169,6 +170,35 @@ const GraphOperate = () => {
       message.destroy('loading');
     }
   };
+
+  // --- 新增：下载JSON文件的处理函数 ---
+  const handleDownloadJson = () => {
+    if (allNodes.length === 0 && allRelationships.length === 0) {
+      message.warning('没有可供下载的数据。请先加载图谱。');
+      return;
+    }
+
+    const graphData = {
+      nodes: allNodes,
+      relationships: allRelationships,
+    };
+
+    const jsonString = JSON.stringify(graphData, null, 2); // 'null, 2' 用于美化输出
+    const blob = new Blob([jsonString], { type: 'application/json' }); // 创建一个Blob对象. [1, 2]
+    const url = URL.createObjectURL(blob); // 创建一个URL指向该Blob. [1]
+
+    const link = document.createElement('a'); // 创建一个隐藏的<a>元素. [1]
+    link.href = url;
+    // 使用时间戳确保文件名唯一
+    link.download = `graph-data-${new Date().toISOString()}.json`;
+    document.body.appendChild(link);
+    link.click(); // 编程方式点击链接以触发下载. [1]
+
+    // 清理：移除<a>元素并释放URL对象
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url); // [1]
+  };
+
 
   // --- 节点操作 (Node Operations) ---
   const handleNodeAction = async (action: 'create' | 'update' | 'delete' | 'find') => {
@@ -337,6 +367,13 @@ const GraphOperate = () => {
                 loading={loading}
               >
                 刷新全图
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={handleDownloadJson}
+                disabled={allNodes.length === 0}
+              >
+                下载JSON
               </Button>
             </Space>
           </Header>

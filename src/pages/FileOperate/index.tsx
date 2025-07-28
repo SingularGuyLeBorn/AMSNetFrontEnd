@@ -1,14 +1,10 @@
-// FILE: src / pages / FileOperate / index.tsx
+// FILE: src/pages/FileOperate/index.tsx
 import { workspaceService } from "@/models/workspaceService";
 import {
     createNode,
     deleteNode,
     findNode,
-    updateNode,
-    createRelationship,
-    updateRelationship,
-    deleteRelationship,
-    findRelationship
+    updateNode
 } from "@/pages/GraphOperate/apiFunctions";
 import {
     faArrowLeft, faArrowRight,
@@ -18,23 +14,22 @@ import {
     faCubes,
     faDatabase, faEraser,
     faFileExport,
-    faFileImport, faFolderTree, faHistory, faLink, faList, faMinusCircle, faMousePointer,
+    faFileImport, faFolderTree, faHistory, faList, faMinusCircle, faMousePointer,
     faPaintBrush,
     faPen,
     faPlus,
     faProjectDiagram,
     faRedo,
     faRobot,
-    faSearch,
     faSearchPlus,
     faTags,
     faTrash,
-    faUndo,
-    faEdit
+    faUndo
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useModel } from "@umijs/max";
 import {
+    Alert,
     Button,
     Collapse,
     Descriptions,
@@ -66,14 +61,13 @@ const { Option } = Select;
 const { Title, Text } = Typography;
 const { Sider, Content, Header } = Layout;
 const { TabPane } = Tabs;
-const { Panel } = Collapse;
 
 type ActiveTool = 'draw' | 'stain' | 'delete' | 'select' | 'region-delete';
 type Point = { x: number; y: number };
 type ResizeHandle = 'topLeft' | 'top' | 'topRight' | 'left' | 'right' | 'bottomLeft' | 'bottom' | 'bottomRight';
 type RegionSelectBox = { start: Point; end: Point; } | null;
 type RegionDeleteMode = 'contain' | 'intersect';
-type Property = { key: string; value: string };
+type Property = { key: string; value: any };
 
 type DraggingState = {
     type: 'move' | 'resize' | 'region-select' | 'magnifier-drag';
@@ -106,6 +100,13 @@ type ImageDetails = {
     height: number;
     originalFile: File;
 };
+
+type KGFeedback = {
+    type: 'success' | 'error' | 'info' | 'warning';
+    message: string;
+    data?: any;
+    timestamp: string;
+} | null;
 
 
 const RESIZE_HANDLE_SIZE = 8;
@@ -212,6 +213,16 @@ const convertCpntsToYolo = (cpnts: ApiComponent[], imageWidth: number, imageHeig
     return yoloLines.join('\n');
 };
 
+const getBaseName = (fileName: string): string => fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+
+const TruncatedText: React.FC<{ text: any; maxWidth?: number }> = ({ text, maxWidth = 200 }) => {
+    const stringText = String(text);
+    return (
+        <span title={stringText} style={{ display: 'inline-block', maxWidth: maxWidth, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', verticalAlign: 'bottom', }} >
+            {stringText}
+        </span>
+    );
+};
 
 const FileOperate: React.FC = () => {
     const { initialState } = useModel('@@initialState');
@@ -277,12 +288,17 @@ const FileOperate: React.FC = () => {
     const [newComponentName, setNewComponentName] = useState('');
     const [newComponentType, setNewComponentType] = useState('');
 
-    const [nodeForm] = Form.useForm();
-    const [relationshipForm] = Form.useForm();
+    const [kgNodeProps, setKgNodeProps] = useState<Property[]>([]);
+    const [kgFeedback, setKgFeedback] = useState<KGFeedback>(null);
+    const [isKgSyncing, setIsKgSyncing] = useState(false);
+    const [isNodeKnownToExist, setIsNodeKnownToExist] = useState<boolean>(false);
+    const [isKgDirty, setIsKgDirty] = useState<boolean>(false);
+    const [kgForm] = Form.useForm();
 
 
     const hasWorkspace = imageKeys.length > 0;
     const currentImageKey = hasWorkspace ? imageKeys[file_currentIndex] : null;
+    const currentNodeName = currentImageKey ? getBaseName(currentImageKey) : null;
     const disabledUI = isAppBusy;
 
     useEffect(() => {
@@ -461,6 +477,30 @@ const FileOperate: React.FC = () => {
         return internalYoloLines.join('\n');
     }, []);
 
+    const flushKgChanges = useCallback(async () => {
+        if (!isKgDirty || !currentNodeName) return;
+
+        setIsKgSyncing(true);
+        setFeedback('info', t.kgSaving);
+        try {
+            const properties = propertiesToObject(kgNodeProps);
+            if (isNodeKnownToExist) {
+                await updateNode({ name: currentNodeName, properties });
+            } else if (kgNodeProps.length > 0) { // Only create if there are properties
+                const success = await createNode({ name: currentNodeName, properties });
+                if (success) {
+                    setIsNodeKnownToExist(true);
+                }
+            }
+            setIsKgDirty(false); // Reset dirty flag after successful save
+            setFeedback('success', t.kgSyncSuccess);
+        } catch (e: any) {
+            setFeedback('error', `${t.kgSyncFail}: ${e.message}`);
+        } finally {
+            setIsKgSyncing(false);
+        }
+    }, [isKgDirty, currentNodeName, kgNodeProps, isNodeKnownToExist, t]);
+
     const loadDataForIndex = useCallback(async (index: number, signal: AbortSignal) => {
         setIsTransitioning(true);
         try {
@@ -518,6 +558,7 @@ const FileOperate: React.FC = () => {
         if (isAppBusy) return;
         const newIndex = file_currentIndex + offset;
         if (newIndex >= 0 && newIndex < imageKeys.length) {
+            await flushKgChanges();
             if (currentImageKey) {
                 setFile_dirtyYolo(prev => ({ ...prev, [currentImageKey]: currentYoloContent || '' }));
                 setFile_dirtyJson(prev => ({ ...prev, [currentImageKey]: currentJsonContent || '{}' }));
@@ -525,11 +566,12 @@ const FileOperate: React.FC = () => {
             await workspaceService.saveLastIndices({ fileOperateIndex: newIndex });
             setFile_currentIndex(newIndex);
         }
-    }, [isAppBusy, file_currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setFile_currentIndex]);
+    }, [isAppBusy, file_currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setFile_currentIndex, flushKgChanges]);
 
     const handleNavigateToIndex = useCallback(async (index: number) => {
         if (isAppBusy || file_currentIndex === index) return;
         if (index >= 0 && index < imageKeys.length) {
+            await flushKgChanges();
             if (currentImageKey) {
                 setFile_dirtyYolo(prev => ({ ...prev, [currentImageKey]: currentYoloContent || '' }));
                 setFile_dirtyJson(prev => ({ ...prev, [currentImageKey]: currentJsonContent || '{}' }));
@@ -537,7 +579,7 @@ const FileOperate: React.FC = () => {
             await workspaceService.saveLastIndices({ fileOperateIndex: index });
             setFile_currentIndex(index);
         }
-    }, [isAppBusy, file_currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setFile_currentIndex]);
+    }, [isAppBusy, file_currentIndex, imageKeys.length, currentImageKey, currentYoloContent, currentJsonContent, setFile_dirtyYolo, setFile_dirtyJson, setFile_currentIndex, flushKgChanges]);
 
     useEffect(() => {
         if (!hasWorkspace || file_currentIndex < 0) {
@@ -1267,79 +1309,44 @@ const FileOperate: React.FC = () => {
         }, {} as { [key: string]: any });
     };
 
-    const handleNodeAction = async (action: 'create' | 'update' | 'delete' | 'find') => {
-        setAppBusy(true);
-        try {
-            await nodeForm.validateFields(['name']);
-            const values = nodeForm.getFieldsValue();
-            const { name } = values;
-            const properties = propertiesToObject(values.properties);
+    const objectToProperties = (obj: { [key: string]: any } | undefined): Property[] => {
+        if (!obj) return [];
+        return Object.entries(obj).map(([key, value]) => ({ key, value }));
+    }
 
-            switch (action) {
-                case 'create':
-                    await createNode({ name, properties });
-                    break;
-                case 'update':
-                    await updateNode({ name, properties });
-                    break;
-                case 'delete':
-                    await deleteNode({ name });
-                    break;
-                case 'find':
-                    const result = await findNode({ name });
-                    const foundNode = result?.data;
-                    if (foundNode?.name) {
-                        message.success(`节点 "${name}" 已找到`);
-                    } else {
-                        message.warning(result?.message || `节点 "${name}" 不存在`);
-                    }
-                    break;
+    const setFeedback = (type: NonNullable<KGFeedback>['type'], message: string, data?: any) => {
+        setKgFeedback({ type, message, data, timestamp: new Date().toLocaleTimeString() });
+    }
+
+    useEffect(() => {
+        const fetchNodeData = async () => {
+            if (!currentNodeName) return;
+            setIsKgSyncing(true);
+            setFeedback('info', t.kgSyncing);
+            try {
+                const res = await findNode({ name: currentNodeName });
+                if (res && res.data) {
+                    const props = objectToProperties(res.data.properties);
+                    setKgNodeProps(props);
+                    kgForm.setFieldsValue({ properties: props });
+                    setFeedback('success', t.kgNodeFound, res.data);
+                    setIsNodeKnownToExist(true);
+                } else {
+                    setKgNodeProps([]);
+                    kgForm.setFieldsValue({ properties: [] });
+                    setFeedback('warning', t.kgNodeNotFound);
+                    setIsNodeKnownToExist(false);
+                }
+            } catch (e: any) {
+                setFeedback('error', `${t.kgSyncFail}: ${e.message}`);
+                setIsNodeKnownToExist(false);
+            } finally {
+                setIsKgSyncing(false);
+                setIsKgDirty(false); // Reset dirty flag after loading
             }
-        } catch (errorInfo) {
-            console.log('表单验证失败:', errorInfo);
-        } finally {
-            setAppBusy(false);
-        }
-    };
-
-    const handleRelationshipAction = async (action: 'create' | 'update' | 'delete' | 'find') => {
-        setAppBusy(true);
-        try {
-            await relationshipForm.validateFields(['name']);
-            const values = relationshipForm.getFieldsValue();
-            const { name } = values;
-            const properties = propertiesToObject(values.properties);
-
-            switch (action) {
-                case 'create':
-                    if (!properties.fromNode || !properties.toNode) {
-                        message.warning('创建关系必须在属性中指定 fromNode 和 toNode');
-                        setAppBusy(false);
-                        return;
-                    }
-                    await createRelationship({ name, properties });
-                    break;
-                case 'update':
-                    await updateRelationship({ name, properties });
-                    break;
-                case 'delete':
-                    await deleteRelationship({ name });
-                    break;
-                case 'find':
-                    const result = await findRelationship({ name });
-                    if (result?.data?.name) {
-                        message.success(`关系 "${name}" 已找到`);
-                    } else {
-                        message.warning(result?.message || `关系 "${name}" 不存在`);
-                    }
-                    break;
-            }
-        } catch (errorInfo) {
-            console.log('表单验证失败:', errorInfo);
-        } finally {
-            setAppBusy(false);
-        }
-    };
+        };
+        fetchNodeData();
+    }, [currentNodeName, t, kgForm]);
 
     const handleAddComponent = () => {
         if (newComponentName && !file_kgComponentMap[newComponentName]) {
@@ -1347,10 +1354,29 @@ const FileOperate: React.FC = () => {
                 ...prev,
                 [newComponentName]: { color: generateRandomColor() }
             }));
-            message.success(`组件 '${newComponentName}' 已添加`);
+            message.success(t.componentAdded.replace('%s', newComponentName));
             setNewComponentName('');
         } else if (file_kgComponentMap[newComponentName]) {
             message.warning(`组件 '${newComponentName}' 已存在`);
+        }
+    };
+
+    const handleComponentChange = (value: string) => {
+        setSelectedJsonName(value);
+        if (value && !file_kgComponentMap[value]) {
+            setFile_kgComponentMap(prev => ({
+                ...prev,
+                [value]: { color: generateRandomColor() }
+            }));
+            message.success(t.componentAdded.replace('%s', value));
+        }
+    };
+
+    const handleTypeChange = (value: string) => {
+        setSelectedJsonType(value);
+        if (value && !file_kgTypeMap.includes(value)) {
+            setFile_kgTypeMap(prev => [...prev, value]);
+            message.success(t.typeAdded.replace('%s', value));
         }
     };
 
@@ -1441,7 +1467,7 @@ const FileOperate: React.FC = () => {
     const handleAddComponentType = () => {
         if (newComponentType && !file_kgTypeMap.includes(newComponentType)) {
             setFile_kgTypeMap(prev => [...prev, newComponentType]);
-            message.success(`类型 '${newComponentType}' 已添加`);
+            message.success(t.typeAdded.replace('%s', newComponentType));
             setNewComponentType('');
         } else if (file_kgTypeMap.includes(newComponentType)) {
             message.warning(`类型 '${newComponentType}' 已存在`);
@@ -1519,28 +1545,54 @@ const FileOperate: React.FC = () => {
     };
 
 
-    const renderPropertiesEditor = () => (
+    const renderKgPropertiesEditor = () => (
         <Form.List name="properties">
             {(fields, { add, remove }) => (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="kg-property-editor">
                     {fields.map(({ key, name, ...restField }) => (
-                        <Space key={key} style={{ display: 'flex' }} align="baseline">
-                            <Form.Item {...restField} name={[name, 'key']} style={{ flex: 1, marginBottom: 0 }}>
+                        <Space key={key} className="kg-property-row" align="baseline">
+                            <Form.Item {...restField} name={[name, 'key']} rules={[{ required: true, message: 'Key is required' }]}>
                                 <Input placeholder={t.propKey} />
                             </Form.Item>
-                            <Form.Item {...restField} name={[name, 'value']} style={{ flex: 1, marginBottom: 0 }}>
+                            <Form.Item {...restField} name={[name, 'value']}>
                                 <Input placeholder={t.propValue} />
                             </Form.Item>
                             <Button type="text" danger icon={<FontAwesomeIcon icon={faMinusCircle} />} onClick={() => remove(name)} />
                         </Space>
                     ))}
-                    <Button type="dashed" onClick={() => add()} block icon={<FontAwesomeIcon icon={faPlus} />}>
+                    <Button type="dashed" onClick={() => add({ key: '', value: '' })} block icon={<FontAwesomeIcon icon={faPlus} />}>
                         {t.addProperty}
                     </Button>
                 </div>
             )}
         </Form.List>
     );
+
+    const annotationItems = useMemo(() => parsedYoloData.map((item) => ({
+        key: item.name,
+        className: "annotation-panel-item",
+        label: (
+            <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+                <Space>
+                    <div className="color-indicator" style={{ backgroundColor: file_classMap[item.classIdx]?.color || '#808080' }} />
+                    <Text className="category-name-text" title={item.name} ellipsis>{item.name}</Text>
+                </Space>
+                <Tooltip title={t.deleteAnnotationTooltip}>
+                    <Button icon={<FontAwesomeIcon icon={faTrash} />} type="text" danger size="small" onClick={(e) => { e.stopPropagation(); handleDeleteAnnotationByName(item.name); }} />
+                </Tooltip>
+            </Flex>
+        ),
+        children: (
+            <Descriptions bordered size="small" column={1} className="annotation-details">
+                <Descriptions.Item label={t.category}>{file_classMap[item.classIdx]?.label || 'N/A'}</Descriptions.Item>
+                <Descriptions.Item label="Center X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.x} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 2, v)} /> : item.x.toFixed(4)}</Descriptions.Item>
+                <Descriptions.Item label="Center Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.y} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 3, v)} /> : item.y.toFixed(4)}</Descriptions.Item>
+                <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.w} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 4, v)} /> : item.w.toFixed(4)}</Descriptions.Item>
+                <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.h} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 5, v)} /> : item.h.toFixed(4)}</Descriptions.Item>
+            </Descriptions>
+        )
+    })), [parsedYoloData, file_classMap, t, selectedBoxName, isCurrentlyEditingId, handleEditFocus, handleAnnotationPropertyUpdate, handleDeleteAnnotationByName]);
+
 
     return (
         <Layout className="unified-layout">
@@ -1681,14 +1733,30 @@ const FileOperate: React.FC = () => {
                                             <Select value={currentClassIndex} onChange={setCurrentClassIndex} style={{ width: '100%' }}>{Object.entries(file_classMap).map(([idx, { color, label }]) => (<Option key={idx} value={parseInt(idx)}> <Space><div style={{ width: '16px', height: '16px', backgroundColor: color, borderRadius: '3px', border: '1px solid #ccc' }} />{`[${idx}] ${label}`}</Space> </Option>))}</Select>
                                         </Form.Item>
                                         <Form.Item label={t.chooseJsonName} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}>
-                                            <Select placeholder={t.chooseJsonName} value={selectedJsonName} onChange={setSelectedJsonName} style={{ width: '100%' }}>
-                                                {Object.keys(file_kgComponentMap).map(name => <Option key={name} value={name}>{name}</Option>)}
-                                            </Select>
+                                            <Select
+                                                showSearch
+                                                placeholder={t.chooseJsonName}
+                                                value={selectedJsonName}
+                                                onChange={handleComponentChange}
+                                                style={{ width: '100%' }}
+                                                filterOption={(input, option) =>
+                                                    (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                                                }
+                                                options={Object.keys(file_kgComponentMap).map(name => ({ value: name, label: name }))}
+                                            />
                                         </Form.Item>
                                         <Form.Item label={t.chooseJsonType} style={{ display: activeTool === 'stain' ? 'block' : 'none' }}>
-                                            <Select placeholder={t.chooseJsonType} value={selectedJsonType} onChange={setSelectedJsonType} style={{ width: '100%' }}>
-                                                {file_kgTypeMap.map(type => <Option key={type} value={type}>{type}</Option>)}
-                                            </Select>
+                                            <Select
+                                                showSearch
+                                                placeholder={t.chooseJsonType}
+                                                value={selectedJsonType}
+                                                onChange={handleTypeChange}
+                                                style={{ width: '100%' }}
+                                                filterOption={(input, option) =>
+                                                    (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                                                }
+                                                options={file_kgTypeMap.map(type => ({ value: type, label: type }))}
+                                            />
                                         </Form.Item>
                                         <Form.Item label={t.regionDeleteMode} style={{ marginBottom: 8, display: activeTool === 'region-delete' ? 'block' : 'none' }}>
                                             <Radio.Group onChange={(e: RadioChangeEvent) => setRegionDeleteMode(e.target.value)} value={regionDeleteMode}>
@@ -1702,33 +1770,13 @@ const FileOperate: React.FC = () => {
                                 </div>
                                 {parsedYoloData.length > 0 ? (
                                     <div className="annotation-collapse-container">
-                                        <Collapse accordion activeKey={selectedBoxName || undefined} onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }} ghost>
-                                            {parsedYoloData.map((item) => (
-                                                <Panel
-                                                    key={item.name}
-                                                    header={
-                                                        <Flex justify="space-between" align="center" style={{ width: '100%' }}>
-                                                            <Space>
-                                                                <div className="color-indicator" style={{ backgroundColor: file_classMap[item.classIdx]?.color || '#808080' }} />
-                                                                <Text className="category-name-text" title={item.name} ellipsis>{item.name}</Text>
-                                                            </Space>
-                                                            <Tooltip title={t.deleteAnnotationTooltip}>
-                                                                <Button icon={<FontAwesomeIcon icon={faTrash} />} type="text" danger size="small" onClick={(e) => { e.stopPropagation(); handleDeleteAnnotationByName(item.name); }} />
-                                                            </Tooltip>
-                                                        </Flex>
-                                                    }
-                                                    className="annotation-panel-item"
-                                                >
-                                                    <Descriptions bordered size="small" column={1} className="annotation-details">
-                                                        <Descriptions.Item label={t.category}>{file_classMap[item.classIdx]?.label || 'N/A'}</Descriptions.Item>
-                                                        <Descriptions.Item label="Center X">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.x} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 2, v)} /> : item.x.toFixed(4)}</Descriptions.Item>
-                                                        <Descriptions.Item label="Center Y">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.y} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 3, v)} /> : item.y.toFixed(4)}</Descriptions.Item>
-                                                        <Descriptions.Item label="Width">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.w} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 4, v)} /> : item.w.toFixed(4)}</Descriptions.Item>
-                                                        <Descriptions.Item label="Height">{isSelectedForEdit(item) ? <InputNumber className="annotation-details-input" min={0} max={1} step={0.001} controls={false} value={item.h} onFocus={() => handleEditFocus(item.name)} onChange={(v) => handleAnnotationPropertyUpdate(item.name, 5, v)} /> : item.h.toFixed(4)}</Descriptions.Item>
-                                                    </Descriptions>
-                                                </Panel>
-                                            ))}
-                                        </Collapse>
+                                        <Collapse
+                                            accordion
+                                            activeKey={selectedBoxName || undefined}
+                                            onChange={(key) => { const newKey = Array.isArray(key) ? key[0] : (typeof key === 'string' ? key : null); setSelectedBoxName(newKey); setIsCurrentlyEditingId(null); }}
+                                            ghost
+                                            items={annotationItems}
+                                        />
                                     </div>
                                 ) : <Text type="secondary" style={{ textAlign: 'center', display: 'block', paddingTop: '20px' }}>{t.noAnnotations}</Text>}
                             </div>
@@ -1779,42 +1827,51 @@ const FileOperate: React.FC = () => {
                                 </Tabs>
                             </div>
                         </TabPane>
-                        <TabPane tab={<Tooltip title={t.knowledgeGraph} placement="bottom"><FontAwesomeIcon icon={faProjectDiagram} /></Tooltip>} key="kg" disabled={disabledUI}>
+                        <TabPane tab={<Tooltip title={t.knowledgeGraph} placement="bottom"><FontAwesomeIcon icon={faProjectDiagram} /></Tooltip>} key="kg" disabled={!hasWorkspace || disabledUI}>
                             <div className="tab-pane-content">
-                                <Tabs defaultActiveKey="node" type="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                    <TabPane tab={<span><FontAwesomeIcon icon={faFolderTree} style={{ marginRight: 8 }} />{t.nodeOperations}</span>} key="node" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                        <Form form={nodeForm} layout="vertical" name="node_form" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                                            <Form.Item name="name" label={t.nodeName} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                                                <Input placeholder="e.g., ylb_voltage-mode_bandgap_reference_01" />
-                                            </Form.Item>
-                                            <Form.Item label={t.nodeProperties} style={{ marginBottom: 0 }}>
-                                                {renderPropertiesEditor()}
-                                            </Form.Item>
-                                            <Space direction="vertical" style={{ width: '100%', marginTop: 'auto' }}>
-                                                <Button type="primary" icon={<FontAwesomeIcon icon={faPlus} />} onClick={() => handleNodeAction('create')} block>{t.createNode}</Button>
-                                                <Button icon={<FontAwesomeIcon icon={faEdit} />} onClick={() => handleNodeAction('update')} block>{t.updateNode}</Button>
-                                                <Button icon={<FontAwesomeIcon icon={faSearch} />} onClick={() => handleNodeAction('find')} block>{t.findNode}</Button>
-                                                <Button danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={() => handleNodeAction('delete')} block>{t.deleteNode}</Button>
-                                            </Space>
-                                        </Form>
-                                    </TabPane>
-                                    <TabPane tab={<span><FontAwesomeIcon icon={faLink} style={{ marginRight: 8 }} />{t.relationshipOperations}</span>} key="relationship" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                        <Form form={relationshipForm} layout="vertical" name="relationship_form" style={{ display: 'flex', flexDirection: 'column', gap: 16 }} initialValues={{ properties: [{ key: 'fromNode', value: '' }, { key: 'toNode', value: '' }] }}>
-                                            <Form.Item name="name" label={t.relationshipName} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                                                <Input placeholder="e.g., PSR" />
-                                            </Form.Item>
-                                            <Form.Item label={t.relationshipProperties} help={t.fromNodeHelp} style={{ marginBottom: 0 }}>
-                                                {renderPropertiesEditor()}
-                                            </Form.Item>
-                                            <Space direction="vertical" style={{ width: '100%', marginTop: 'auto' }}>
-                                                <Button type="primary" icon={<FontAwesomeIcon icon={faPlus} />} onClick={() => handleRelationshipAction('create')} block>{t.createRelationship}</Button>
-                                                <Button icon={<FontAwesomeIcon icon={faEdit} />} onClick={() => handleRelationshipAction('update')} block>{t.updateRelationship}</Button>
-                                                <Button icon={<FontAwesomeIcon icon={faSearch} />} onClick={() => handleRelationshipAction('find')} block>{t.findRelationship}</Button>
-                                                <Button danger icon={<FontAwesomeIcon icon={faTrash} />} onClick={() => handleRelationshipAction('delete')} block>{t.deleteRelationship}</Button>
-                                            </Space>
-                                        </Form>
-                                    </TabPane>
-                                </Tabs>
+                                <Title level={5} style={{ margin: 0 }}>{t.kgAutoSync}</Title>
+                                <Form
+                                    form={kgForm}
+                                    layout="vertical"
+                                    onValuesChange={(_, allValues) => {
+                                        setKgNodeProps(allValues.properties || []);
+                                        setIsKgDirty(true);
+                                    }}
+                                    disabled={isKgSyncing}
+                                >
+                                    <Form.Item label={t.kgCircuitName}>
+                                        <Input value={currentNodeName || 'N/A'} readOnly />
+                                    </Form.Item>
+                                    <Form.Item label={t.nodeProperties}>
+                                        {renderKgPropertiesEditor()}
+                                    </Form.Item>
+                                </Form>
+                                <div className="kg-feedback-panel">
+                                    <Title level={5} style={{ marginBottom: 8 }}>{t.kgStatus}</Title>
+                                    {kgFeedback ? (
+                                        <Alert
+                                            message={`${kgFeedback.type.toUpperCase()} - ${kgFeedback.timestamp}`}
+                                            description={kgFeedback.message}
+                                            type={kgFeedback.type}
+                                            showIcon
+                                        />
+                                    ) : <Text type="secondary">{t.noDetails}</Text>}
+
+                                    {kgFeedback?.data && (
+                                        <>
+                                            <Divider style={{ margin: '12px 0' }} />
+                                            <Title level={5} style={{ marginBottom: 8 }}>{t.kgDetails}</Title>
+                                            <Descriptions bordered size="small" column={1}>
+                                                <Descriptions.Item label="name"><TruncatedText text={kgFeedback.data.name} /></Descriptions.Item>
+                                                {objectToProperties(kgFeedback.data.properties).map(prop => (
+                                                    <Descriptions.Item key={prop.key} label={prop.key}>
+                                                        <TruncatedText text={prop.value} />
+                                                    </Descriptions.Item>
+                                                ))}
+                                            </Descriptions>
+                                        </>
+                                    )}
+                                </div>
                             </div>
                         </TabPane>
                         <TabPane tab={<Tooltip title={t.annotationHistory} placement="bottom"><FontAwesomeIcon icon={faHistory} /></Tooltip>} key="history" disabled={disabledUI}>
